@@ -1,5 +1,5 @@
 {
-  "versao": "1.0.0",
-  "novidades": "Versão inicial com suporte multi-usuário, acesso web e notificação de atualizações.",
-  "url_download": ""
+  "versao": "1.0.1",
+  "novidades": "Melhorias na validacao de licenca e fluxo de atualizacao.",
+  "url_download": "COLE_AQUI_O_LINK_DIRETO_DO_SETUP_EXE"
 }
