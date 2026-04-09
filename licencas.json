@@ -1,0 +1,14 @@
+{
+  "licencas": {
+    "hash_da_chave_do_pedro_aqui": {
+      "status": "ativo",
+      "tipo": "PERMANENTE",
+      "cliente": "PEDRO"
+    },
+    "hash_da_chave_do_joao_aqui": {
+      "status": "ativo",
+      "tipo": "MENSAL",
+      "cliente": "JOAO"
+    }
+  }
+}
