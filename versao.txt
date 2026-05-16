@@ -1,3 +1,3 @@
-versao=1.0.6
-novidades=v1.0.6: Atualização de versão automática.
-url_download=https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.6/Setup_OficinaPesca.exe
+versao=1.0.7
+novidades=v1.0.7: Atualização de versão automática.
+url_download=https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.7/Setup_OficinaPesca.exe
