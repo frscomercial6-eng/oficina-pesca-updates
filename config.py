@@ -821,7 +821,7 @@ def obter_info_nova_versao() -> dict:
     try:
         import urllib.request
         req = urllib.request.Request(
-            URL_CHECK_VERSAO, # Keep existing timeout for version check
+            url_limpa,
             headers={"User-Agent": f"OficinaPesca/{APP_VERSION}"}
         )
         with urllib.request.urlopen(req, timeout=1) as resp:
