@@ -155,11 +155,13 @@ import glob
 import shutil
 import platform
 import uuid
+import traceback
 from datetime import date, datetime
 from typing import Optional
 from contextlib import contextmanager
 import urllib.request
 import urllib.error
+from email.mime.text import MIMEText
 
 try:
     import google.auth  # type: ignore  # noqa: F401
@@ -223,6 +225,11 @@ def _obter_diretorio_dados() -> str:
     return _obter_diretorio_execucao()
 
 
+def _obter_diretorio_logs() -> str:
+    # Prioriza logs ao lado do executavel para evitar bloqueios de permissao em Program Files.
+    return os.path.join(_obter_diretorio_execucao(), 'logs')
+
+
 if getattr(sys, 'frozen', False):
     DIRETORIO_ATUAL = _obter_diretorio_execucao()
     DIRETORIO_RECURSOS = sys._MEIPASS
@@ -234,7 +241,7 @@ DIRETORIO_DADOS = _obter_diretorio_dados()
 CAMINHO_BANCO_LOCAL = os.path.join(DIRETORIO_DADOS, 'oficina.db')
 CAMINHO_BANCO_INSTALACAO = os.path.join(DIRETORIO_ATUAL, 'oficina.db')
 CAMINHO_BANCO = CAMINHO_BANCO_INSTALACAO if os.path.exists(CAMINHO_BANCO_INSTALACAO) else CAMINHO_BANCO_LOCAL
-CAMINHO_LOG = os.path.join((os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA') or DIRETORIO_ATUAL), 'OficinaPesca', 'logs', 'oficina_debug.txt')
+CAMINHO_LOG = os.path.join(_obter_diretorio_logs(), 'oficina_debug.txt')
 
 # â”€â”€â”€ config.cfg â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _ler_cfg() -> configparser.ConfigParser:
@@ -339,6 +346,7 @@ _DISCOVERY_CACHE = {"url": "", "ts": 0.0}
 GOOGLE_DRIVE_USER_SCOPES = [
     # Escopo explicitamente definido para permitir acesso a arquivos criados pelo App
     "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/userinfo.email",
     "openid",
 ]
@@ -633,6 +641,22 @@ def get_logger(nome: Optional[str] = None) -> logging.Logger:
     return base_logger.getChild(nome)
 
 
+def _caminho_update_debug_log() -> str:
+    pasta_logs = os.path.join(DIRETORIO_ATUAL, "logs")
+    os.makedirs(pasta_logs, exist_ok=True)
+    return os.path.join(pasta_logs, "update_debug.log")
+
+
+def _append_update_debug_log(mensagem: str) -> None:
+    try:
+        agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        linha = f"[{agora}] {str(mensagem or '').strip()}\n"
+        with open(_caminho_update_debug_log(), "a", encoding="utf-8") as f:
+            f.write(linha)
+    except Exception:
+        pass
+
+
 def _caminho_meta_envio_logs() -> str:
     return os.path.join(DIRETORIO_ATUAL, "logs", "log_envio_meta.json")
 
@@ -742,6 +766,7 @@ def get_db_connection():
     # WAL mode: permite leituras simultÃ¢neas sem bloquear escritas
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=15000")
     try:
         yield conn
     except sqlite3.Error as e:
@@ -752,7 +777,140 @@ def get_db_connection():
 
 
 def obter_info_nova_versao() -> dict:
-    """ObtÃ©m dados da versÃ£o remota (JSON ou TXT). Retorna dict vazio em caso de falha."""
+    """Obtém dados da versão via pasta sincronizada do Google Drive local."""
+    def _partes_versao(v: str) -> tuple[int, ...]:
+        partes = []
+        for item in str(v or "").strip().split("."):
+            try:
+                partes.append(int(item))
+            except Exception:
+                partes.append(0)
+        return tuple(partes)
+
+    def _versao_do_nome_setup(nome_arquivo: str) -> str:
+        nome = os.path.basename(str(nome_arquivo or "").strip())
+        match = re.search(r"Setup_OficinaPesca_v(\d+\.\d+\.\d+)(?:_FINAL)?\.exe$", nome, flags=re.IGNORECASE)
+        return str(match.group(1) if match else "").strip()
+
+    def _caminhos_drive_base() -> list[str]:
+        candidatos: list[str] = []
+        envs = [
+            "OFP_GOOGLE_DRIVE_UPDATES_DIR",
+            "GOOGLE_DRIVE_UPDATES_DIR",
+            "OFP_GOOGLE_DRIVE_ROOT",
+            "GOOGLE_DRIVE_ROOT",
+            "GOOGLEDRIVE",
+            "GOOGLE_DRIVE",
+        ]
+        for env in envs:
+            valor = str(os.environ.get(env, "") or "").strip()
+            if valor:
+                candidatos.append(valor)
+
+        userprofile = str(os.environ.get("USERPROFILE", "") or "").strip()
+        if userprofile:
+            candidatos.extend(
+                [
+                    os.path.join(userprofile, "Meu Drive"),
+                    os.path.join(userprofile, "My Drive"),
+                    os.path.join(userprofile, "Google Drive"),
+                ]
+            )
+
+        candidatos.extend(
+            [
+                r"G:\Meu Drive",
+                r"G:\My Drive",
+                r"G:\Google Drive",
+            ]
+        )
+
+        caminho_banco_abs = os.path.abspath(str(CAMINHO_BANCO or "").strip())
+        marcador = "OficinaDePesca"
+        if marcador.lower() in caminho_banco_abs.lower():
+            prefixo = caminho_banco_abs[: caminho_banco_abs.lower().find(marcador.lower()) + len(marcador)]
+            candidatos.append(prefixo)
+
+        saida: list[str] = []
+        vistos = set()
+        for item in candidatos:
+            normalizado = os.path.normpath(str(item or "").strip())
+            if normalizado and normalizado.lower() not in vistos:
+                vistos.add(normalizado.lower())
+                saida.append(normalizado)
+        return saida
+
+    def _resolver_pasta_updates_google_drive() -> tuple[str, str]:
+        tentativas: list[str] = []
+        for base in _caminhos_drive_base():
+            nome_base = os.path.basename(base).lower()
+            if nome_base == "updates":
+                candidatos = [base]
+            elif nome_base == "oficinadepesca":
+                candidatos = [os.path.join(base, "Updates")]
+            else:
+                candidatos = [
+                    os.path.join(base, "OficinaDePesca", "Updates"),
+                    os.path.join(base, "Updates"),
+                ]
+
+            for candidato in candidatos:
+                norm = os.path.normpath(candidato)
+                tentativas.append(norm)
+                if os.path.isdir(norm):
+                    return norm, "OK"
+
+        msg = (
+            "Google Drive não encontrado. Conecte o Drive para buscar atualizações."
+        )
+        return "", msg
+
+    pasta_updates, msg_drive = _resolver_pasta_updates_google_drive()
+    if not pasta_updates:
+        return {"erro": msg_drive, "origem": "google_drive"}
+
+    try:
+        instaladores = []
+        for nome in os.listdir(pasta_updates):
+            caminho = os.path.join(pasta_updates, nome)
+            if not os.path.isfile(caminho):
+                continue
+            versao = _versao_do_nome_setup(nome)
+            if not versao:
+                continue
+            instaladores.append(
+                {
+                    "versao": versao,
+                    "caminho": caminho,
+                    "mtime": float(os.path.getmtime(caminho) or 0.0),
+                }
+            )
+
+        if not instaladores:
+            return {
+                "versao": APP_VERSION,
+                "novidades": "Nenhum instalador mais novo encontrado na pasta de Updates do Google Drive.",
+                "url_download": "",
+                "origem": "google_drive",
+                "pasta_updates": pasta_updates,
+            }
+
+        instaladores.sort(key=lambda item: (_partes_versao(str(item.get("versao") or "0")), float(item.get("mtime") or 0.0)), reverse=True)
+        melhor = instaladores[0]
+        return {
+            "versao": str(melhor.get("versao") or "").strip(),
+            "novidades": "Atualização encontrada na pasta sincronizada do Google Drive.",
+            "url_download": str(melhor.get("caminho") or "").strip(),
+            "origem": "google_drive",
+            "pasta_updates": pasta_updates,
+        }
+    except Exception as e:
+        return {
+            "erro": f"Falha ao ler atualizações no Google Drive: {e}",
+            "origem": "google_drive",
+        }
+
+    # Fallback legado abaixo mantido apenas como referência defensiva.
     # Limpeza agressiva da URL para evitar caracteres de controle e prefixos indesejados
     url_raw = str(URL_CHECK_VERSAO or "").strip()
     # Usa Regex para garantir que pegamos apenas o link válido, removendo lixos como "url_check ="
@@ -826,7 +984,11 @@ def obter_info_nova_versao() -> dict:
         )
         with urllib.request.urlopen(req, timeout=1) as resp:
             payload = resp.read().decode("utf-8", errors="ignore")
-        return _parse_manifesto(payload)
+        dados = _parse_manifesto(payload)
+        versao_detectada = str(dados.get("versao", "")).strip()
+        if versao_detectada and eh_versao_mais_nova(versao_detectada, APP_VERSION):
+            _append_update_debug_log(f"Versão {versao_detectada} detectada")
+        return dados
     except Exception as e:
         print(f"❌ ERRO CRÍTICO NA BUSCA DE ATUALIZAÇÃO: {e}")
         return {}
@@ -1003,6 +1165,7 @@ def _token_google_drive_usuario_paths() -> list[str]:
         os.path.join(pasta_oauth, "google_drive_user_token.json"),
         os.path.join(DIRETORIO_ATUAL, "token.json"),
         os.path.join(os.getcwd(), "token.json"),
+        os.path.join(DIRETORIO_ATUAL, "RELOJUARIA", "data", "token.json"),
     ]
     vistos = set()
     ordenados = []
@@ -1013,6 +1176,24 @@ def _token_google_drive_usuario_paths() -> list[str]:
         vistos.add(chave)
         ordenados.append(caminho)
     return ordenados
+
+
+def _escopo_google_atendido(escopo: str, concedidos: set[str]) -> bool:
+    if escopo in concedidos:
+        return True
+    # drive cobre drive.file para operações do app.
+    if escopo == "https://www.googleapis.com/auth/drive.file" and "https://www.googleapis.com/auth/drive" in concedidos:
+        return True
+    return False
+
+
+def _credenciais_google_tem_escopos_minimos(creds) -> bool:
+    concedidos = set(getattr(creds, "scopes", None) or [])
+    obrigatorios = {
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/drive.file",
+    }
+    return all(_escopo_google_atendido(escopo, concedidos) for escopo in obrigatorios)
 
 
 def _salvar_token_google_drive_usuario(creds) -> None:
@@ -1076,14 +1257,21 @@ def _obter_credenciais_google_drive_usuario(interativo: bool = False, login_hint
 
     creds = None
 
-    try:
-        for candidato_token in _token_google_drive_usuario_paths():
-            if not os.path.exists(candidato_token):
-                continue
-            creds = GoogleCredentials.from_authorized_user_file(candidato_token, GOOGLE_DRIVE_USER_SCOPES)
+    for candidato_token in _token_google_drive_usuario_paths():
+        if not os.path.exists(candidato_token):
+            continue
+        try:
+            # Prioriza leitura sem forçar escopos para evitar invalid_scope em tokens legados.
+            creds = GoogleCredentials.from_authorized_user_file(candidato_token)
             break
-    except Exception:
-        creds = None
+        except Exception:
+            # Fallback para leitura com escopos esperados do app.
+            try:
+                creds = GoogleCredentials.from_authorized_user_file(candidato_token, GOOGLE_DRIVE_USER_SCOPES)
+                break
+            except Exception:
+                creds = None
+                continue
 
     try:
         if creds and creds.expired and creds.refresh_token and GoogleAuthRequest is not None:
@@ -1092,8 +1280,11 @@ def _obter_credenciais_google_drive_usuario(interativo: bool = False, login_hint
     except Exception:
         creds = None
 
-    if creds and getattr(creds, "valid", False):
+    if creds and getattr(creds, "valid", False) and _credenciais_google_tem_escopos_minimos(creds):
         return creds, "OK"
+
+    if creds and getattr(creds, "valid", False) and not _credenciais_google_tem_escopos_minimos(creds):
+        return None, "Token OAuth2 encontrado, mas sem escopos mínimos (gmail.send + drive/drive.file). Refaça 'Conectar Google Drive'."
 
     if not interativo:
         existe_client_secret, detalhe = _verificar_arquivo_credenciais_google_drive()
@@ -1197,6 +1388,20 @@ def garantir_banco_no_drive_usuario() -> tuple[bool, str]:
 
         if arquivos:
             file_id = str(arquivos[0]["id"])
+            local_stats = _coletar_estatisticas_banco_local()
+            try:
+                meta = service.files().get(fileId=file_id, fields="id,size").execute()
+                remote_size = int(str((meta or {}).get("size") or "0") or 0)
+            except Exception:
+                remote_size = 0
+
+            if bool(local_stats.get("empty", True)) and remote_size > int(local_stats.get("size") or 0):
+                return (
+                    False,
+                    "Proteção de dados: upload bloqueado porque o banco local aparenta vazio e o remoto está maior. "
+                    "Faça primeiro o download/sincronização do Drive para o local.",
+                )
+
             service.files().update(fileId=file_id, media_body=media).execute()
             return True, "Banco local atualizado no Google Drive do usuário."
 
@@ -1697,6 +1902,253 @@ def _verificar_versao_banco_drive(service, folder_id: str) -> tuple[float, bool]
     return 0.0, False
 
 
+def _coletar_estatisticas_banco_local() -> dict:
+    """Coleta indicadores objetivos do banco local para decisões de sincronização."""
+    stats = {
+        "exists": False,
+        "size": 0,
+        "mtime": 0.0,
+        "empty": True,
+        "total_registros": 0,
+    }
+    try:
+        if not os.path.exists(CAMINHO_BANCO):
+            return stats
+
+        stats["exists"] = True
+        stats["size"] = int(os.path.getsize(CAMINHO_BANCO) or 0)
+        stats["mtime"] = float(os.path.getmtime(CAMINHO_BANCO) or 0.0)
+        if stats["size"] <= 0:
+            return stats
+
+        with sqlite3.connect(CAMINHO_BANCO, timeout=3) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tabelas = {str(r[0] or "").strip().lower() for r in (cur.fetchall() or [])}
+
+            total = 0
+            for tabela in ("usuarios", "clientes", "ordens_servico", "produtos"):
+                if tabela in tabelas:
+                    cur.execute(f"SELECT COUNT(*) FROM {tabela}")
+                    total += int((cur.fetchone() or [0])[0] or 0)
+
+        stats["total_registros"] = total
+        stats["empty"] = total <= 0
+        return stats
+    except Exception:
+        # Em caso de erro/corrupção, trata como vazio para priorizar segurança.
+        return stats
+
+
+def _listar_ids_pastas_drive(service, nomes_pasta: list[str]) -> list[str]:
+    ids: list[str] = []
+    for nome in nomes_pasta:
+        nome_limpo = str(nome or "").strip()
+        if not nome_limpo:
+            continue
+        try:
+            nome_esc = nome_limpo.replace("'", "\\'")
+            q = (
+                "mimeType='application/vnd.google-apps.folder' and "
+                f"name='{nome_esc}' and trashed=false"
+            )
+            pastas = service.files().list(q=q, fields="files(id,name)", pageSize=5).execute().get("files", [])
+            for pasta in pastas:
+                pid = str((pasta or {}).get("id") or "").strip()
+                if pid and pid not in ids:
+                    ids.append(pid)
+        except Exception:
+            continue
+    return ids
+
+
+def _parse_drive_modified_time(ts: str) -> float:
+    texto = str(ts or "").strip()
+    if not texto:
+        return 0.0
+    try:
+        return datetime.fromisoformat(texto.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _buscar_banco_remoto_mais_recente(service) -> dict:
+    """Localiza o arquivo de banco remoto mais recente nas pastas conhecidas."""
+    melhor: dict = {}
+    melhor_ts = 0.0
+
+    pastas_alvo = ["Oficina_Backup", GOOGLE_DRIVE_PASTA_APP, "Oficina de Pesca - Dados"]
+    folder_ids = _listar_ids_pastas_drive(service, pastas_alvo)
+
+    for folder_id in folder_ids:
+        try:
+            q = (
+                "(name='oficina.db' or name contains '.db') and "
+                "trashed=false and "
+                f"'{folder_id}' in parents"
+            )
+            arquivos = (
+                service.files()
+                .list(
+                    q=q,
+                    fields="files(id,name,modifiedTime,size,parents)",
+                    orderBy="modifiedTime desc",
+                    pageSize=3,
+                )
+                .execute()
+                .get("files", [])
+            )
+            for arq in arquivos:
+                ts = _parse_drive_modified_time((arq or {}).get("modifiedTime", ""))
+                if ts > melhor_ts:
+                    melhor_ts = ts
+                    melhor = {
+                        "id": str((arq or {}).get("id") or "").strip(),
+                        "name": str((arq or {}).get("name") or "oficina.db").strip(),
+                        "size": int(str((arq or {}).get("size") or "0") or 0),
+                        "modified_ts": ts,
+                        "folder_id": folder_id,
+                    }
+        except Exception:
+            continue
+
+    if melhor:
+        return melhor
+
+    try:
+        fallback = (
+            service.files()
+            .list(
+                q="name='oficina.db' and trashed=false",
+                fields="files(id,name,modifiedTime,size,parents)",
+                orderBy="modifiedTime desc",
+                pageSize=1,
+            )
+            .execute()
+            .get("files", [])
+        )
+        if fallback:
+            arq = fallback[0]
+            return {
+                "id": str((arq or {}).get("id") or "").strip(),
+                "name": str((arq or {}).get("name") or "oficina.db").strip(),
+                "size": int(str((arq or {}).get("size") or "0") or 0),
+                "modified_ts": _parse_drive_modified_time((arq or {}).get("modifiedTime", "")),
+                "folder_id": "",
+            }
+    except Exception:
+        pass
+
+    return {}
+
+
+def _baixar_banco_remoto_para_local(service, file_id: str, file_name: str = "oficina.db") -> tuple[bool, str]:
+    import io
+    import shutil as _shutil
+
+    try:
+        if MediaIoBaseDownload is None:
+            return False, "Dependência de download Google Drive indisponível."
+
+        req = service.files().get_media(fileId=file_id)
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, req)
+        done = False
+        while not done:
+            _status, done = downloader.next_chunk()
+
+        conteudo = buffer.getvalue()
+        if not conteudo:
+            return False, "Arquivo remoto retornou vazio durante a sincronização."
+
+        os.makedirs(os.path.dirname(CAMINHO_BANCO), exist_ok=True)
+        carimbo = datetime.now().strftime("%Y%m%d_%H%M%S")
+        pasta_backup = os.path.join(os.path.dirname(CAMINHO_BANCO), "backup_db")
+        os.makedirs(pasta_backup, exist_ok=True)
+        backup_local_pre = os.path.join(pasta_backup, f"pre_sync_startup_{carimbo}.db")
+        if os.path.exists(CAMINHO_BANCO):
+            _shutil.copy2(CAMINHO_BANCO, backup_local_pre)
+
+        with open(CAMINHO_BANCO, "wb") as f:
+            f.write(conteudo)
+
+        return True, (
+            f"Banco remoto '{file_name}' baixado com sucesso. "
+            f"Backup anterior salvo em backup_db/{os.path.basename(backup_local_pre)}"
+        )
+    except Exception as e:
+        return False, f"Falha ao baixar banco remoto: {e}"
+
+
+def preparar_banco_local_priorizando_drive() -> tuple[bool, str]:
+    """Antes do login: garante prioridade Remoto -> Local quando o remoto estiver mais recente."""
+    try:
+        local = _coletar_estatisticas_banco_local()
+        creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
+        if not creds:
+            return True, f"Sincronização automática com Drive indisponível neste início: {msg}"
+
+        if google_build is None or MediaIoBaseDownload is None:
+            return True, "Dependências Google Drive indisponíveis no runtime; mantendo banco local."
+
+        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        remoto = _buscar_banco_remoto_mais_recente(service)
+        if not remoto:
+            return True, "Nenhum banco remoto encontrado no Google Drive; mantendo banco local."
+
+        remote_ts = float(remoto.get("modified_ts") or 0.0)
+        local_ts = float(local.get("mtime") or 0.0)
+        local_empty = bool(local.get("empty", True))
+
+        # Regras: local vazio OU remoto mais recente => baixar remoto antes do login.
+        precisa_fetch = local_empty or (remote_ts > (local_ts + 5.0))
+        if not precisa_fetch:
+            return True, "Banco local já está consistente para iniciar login."
+
+        file_id = str(remoto.get("id") or "").strip()
+        if not file_id:
+            return False, "Banco remoto detectado, mas sem identificador válido para download."
+
+        return _baixar_banco_remoto_para_local(
+            service,
+            file_id,
+            str(remoto.get("name") or "oficina.db"),
+        )
+    except Exception as e:
+        return False, f"Falha na preparação do banco antes do login: {e}"
+
+
+def avaliar_risco_banco_antes_atualizacao() -> tuple[bool, str]:
+    """Retorna (risco_detectado, mensagem). Risco: banco local menor que remoto."""
+    try:
+        local = _coletar_estatisticas_banco_local()
+        if not bool(local.get("exists")):
+            return False, ""
+
+        creds, _msg = _obter_credenciais_google_drive_usuario(interativo=False)
+        if not creds or google_build is None:
+            return False, ""
+
+        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        remoto = _buscar_banco_remoto_mais_recente(service)
+        if not remoto:
+            return False, ""
+
+        tamanho_local = int(local.get("size") or 0)
+        tamanho_remoto = int(remoto.get("size") or 0)
+        if tamanho_local > 0 and tamanho_remoto > tamanho_local:
+            msg = (
+                "Atenção: o banco local está menor que o banco remoto no Google Drive.\n\n"
+                f"Local: {tamanho_local} bytes\n"
+                f"Remoto: {tamanho_remoto} bytes\n\n"
+                "Confirme apenas se já sincronizou os dados do Drive para evitar perda de dados."
+            )
+            return True, msg
+        return False, ""
+    except Exception:
+        return False, ""
+
+
 def sincronizar_hibrido_banco_drive() -> tuple[bool, str]:
     """
     Sincronizacao híbrida com verificação de versão:
@@ -1748,6 +2200,21 @@ def sincronizar_hibrido_banco_drive() -> tuple[bool, str]:
         # Verifica versoes
         timestamp_nuvem, existe_na_nuvem = _verificar_versao_banco_drive(service, folder_id)
         timestamp_local = os.path.getmtime(CAMINHO_BANCO)
+
+        local_stats = _coletar_estatisticas_banco_local()
+        remote_size = 0
+        try:
+            file_meta = service.files().get(fileId=file_id, fields="id,size,modifiedTime").execute()
+            remote_size = int(str((file_meta or {}).get("size") or "0") or 0)
+        except Exception:
+            remote_size = 0
+
+        if bool(local_stats.get("empty", True)) and remote_size > int(local_stats.get("size") or 0):
+            # Proteção: nunca subir banco local vazio sobre remoto mais robusto.
+            request = service.files().get_media(fileId=file_id)
+            with open(CAMINHO_BANCO, "wb") as f:
+                f.write(request.execute())
+            return True, "Proteção de dados aplicada: banco remoto restaurado para o local antes do upload."
 
         if timestamp_local > timestamp_nuvem:
             # Local é mais recente: upload
@@ -1819,18 +2286,271 @@ def executar_atualizacao(
     app_executavel: str = "",
     processo_pid: Optional[int] = None,
     silenciosa: bool = True,
+    progresso_cb=None,
 ) -> tuple[bool, str]:
-    """Fluxo de autoatualização desativado para evitar instalação em diretórios temporários."""
+    """Executa atualização profissional com download local e setup direto.
+
+    Fluxo:
+    1) Baixa/copia o instalador para C:\\OficinaDePesca\\temp_update.
+    2) Executa o setup diretamente (sem .bat/.cmd intermediário).
+    3) Caller encerra a instância atual para o instalador prosseguir.
+    """
+
+    def _emitir(stage: str, message: str, percent: float = 0.0, downloaded: int = 0, total: int = 0):
+        if not callable(progresso_cb):
+            return
+        try:
+            progresso_cb(
+                {
+                    "stage": str(stage or ""),
+                    "message": str(message or ""),
+                    "percent": float(max(0.0, min(100.0, percent))),
+                    "downloaded": int(max(0, downloaded)),
+                    "total": int(max(0, total)),
+                }
+            )
+        except Exception:
+            pass
+
+    def _caminho_update_error_log() -> str:
+        pasta_logs = os.path.join(DIRETORIO_ATUAL, "logs")
+        os.makedirs(pasta_logs, exist_ok=True)
+        return os.path.join(pasta_logs, "update_error.log")
+
+    def _enviar_alerta_falha_update_async(assunto: str, corpo: str) -> None:
+        def _worker():
+            try:
+                if google_build is None:
+                    return
+                creds, _msg = _obter_credenciais_google_drive_usuario(interativo=False)
+                if not creds:
+                    return
+                msg = MIMEText(str(corpo or ""), "plain", "utf-8")
+                msg["To"] = CENTRAL_SUPORTE_EMAIL
+                msg["Subject"] = str(assunto or "Falha de atualização Oficina de Pesca")
+                raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+                gmail = google_build("gmail", "v1", credentials=creds, cache_discovery=False)
+                gmail.users().messages().send(userId="me", body={"raw": raw}).execute()
+            except Exception as exc:
+                get_logger("update").warning("Falha ao enviar alerta Gmail de update: %s", exc)
+
+        threading.Thread(target=_worker, daemon=True, name="ofp-update-email").start()
+
+    def _registrar_falha_update(etapa: str, motivo: str, detalhe: str = "") -> None:
+        agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        linha = (
+            f"[{agora}] etapa={etapa} | motivo={motivo} | url={url_download} "
+            f"| exe={app_executavel or sys.executable} | pid={processo_pid or os.getpid()}"
+        )
+        if detalhe:
+            linha = f"{linha}\n{detalhe.strip()}"
+        linha = f"{linha}\n{'-' * 90}\n"
+
+        try:
+            with open(_caminho_update_error_log(), "a", encoding="utf-8") as f:
+                f.write(linha)
+        except Exception:
+            pass
+
+        _enviar_alerta_falha_update_async(
+            "[Oficina de Pesca] Falha no Auto-Update",
+            (
+                "Falha detectada no fluxo de atualização automática.\n\n"
+                f"Etapa: {etapa}\n"
+                f"Motivo: {motivo}\n"
+                f"Versão local: {APP_VERSION}\n"
+                f"URL: {url_download}\n"
+                f"Executável: {app_executavel or sys.executable}\n"
+                f"PID: {processo_pid or os.getpid()}\n\n"
+                f"Detalhes:\n{detalhe or 'sem detalhes'}"
+            ),
+        )
+
+    def _pasta_temp_update_local() -> str:
+        return os.path.join(r"C:\OficinaDePesca", "temp_update")
+
+    def _limpar_residuos_temp_update_local() -> None:
+        pasta = _pasta_temp_update_local()
+        if not os.path.isdir(pasta):
+            return
+        for nome in os.listdir(pasta):
+            caminho = os.path.join(pasta, nome)
+            try:
+                if os.path.isfile(caminho):
+                    os.remove(caminho)
+            except Exception:
+                continue
+
+    def _validar_permissao_escrita_pasta_app(pasta_app: str) -> tuple[bool, str]:
+        """Valida escrita na pasta de instalação para evitar WinError 5 durante swap."""
+        try:
+            os.makedirs(pasta_app, exist_ok=True)
+        except Exception as exc:
+            return False, f"Não foi possível preparar a pasta de instalação ({pasta_app}): {exc}"
+
+        teste_path = os.path.join(pasta_app, f".ofp_write_test_{os.getpid()}.tmp")
+        try:
+            with open(teste_path, "w", encoding="utf-8") as f:
+                f.write("ok")
+            try:
+                os.remove(teste_path)
+            except Exception:
+                pass
+            return True, ""
+        except PermissionError:
+            return False, (
+                "Sem permissão de escrita na pasta de instalação. "
+                "Feche o sistema e execute como Administrador para concluir a atualização."
+            )
+        except OSError as exc:
+            return False, (
+                "Não foi possível validar permissão de escrita na pasta de instalação "
+                f"({pasta_app}): {exc}"
+            )
+
+        for padrao in padroes_dirs:
+            for caminho in glob.glob(padrao):
+                try:
+                    if os.path.isdir(caminho):
+                        shutil.rmtree(caminho, ignore_errors=True)
+                except Exception:
+                    continue
+
     url = str(url_download or "").strip()
     if not url:
-        return False, "URL de download nÃ£o configurada."
+        _registrar_falha_update("validacao", "URL de download não configurada")
+        return False, "URL de download não configurada."
 
-    if not url.lower().startswith(("http://", "https://")):
-        return False, "URL de download invÃ¡lida."
-    return (
-        False,
-        "Autoatualização desativada nesta versão. Use apenas o instalador oficial Instalador_Oficina_Pesca.exe.",
-    )
+    origem_local = os.path.exists(url)
+    if not origem_local and not url.lower().startswith(("http://", "https://")):
+        _registrar_falha_update("validacao", "Origem de atualização inválida")
+        return False, "Google Drive não encontrado. Conecte o Drive para buscar atualizações."
+
+    try:
+        exe_atual = os.path.abspath(str(app_executavel or sys.executable or "").strip())
+        if not exe_atual:
+            _registrar_falha_update("validacao", "Executável atual não identificado")
+            return False, "Executável atual não identificado."
+
+        pasta_app = os.path.dirname(exe_atual) or DIRETORIO_ATUAL
+        tem_permissao, msg_permissao = _validar_permissao_escrita_pasta_app(pasta_app)
+        if not tem_permissao:
+            _registrar_falha_update("permissao", msg_permissao)
+            return False, msg_permissao
+
+        _emitir("prepare", "Preparando pasta local de atualização...", 5.0)
+        _limpar_residuos_temp_update_local()
+        pasta_temp_update = _pasta_temp_update_local()
+        os.makedirs(pasta_temp_update, exist_ok=True)
+
+        nome_arquivo = os.path.basename(url.split("?")[0]).strip() or "Setup_OficinaPesca_update.exe"
+        if not nome_arquivo.lower().endswith(".exe"):
+            nome_arquivo = "Setup_OficinaPesca_update.exe"
+        caminho_setup = os.path.join(pasta_temp_update, nome_arquivo)
+
+        if os.path.exists(caminho_setup):
+            try:
+                os.remove(caminho_setup)
+            except Exception:
+                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                base_nome, ext_nome = os.path.splitext(nome_arquivo)
+                caminho_setup = os.path.join(
+                    pasta_temp_update,
+                    f"{base_nome}_{stamp}{ext_nome or '.exe'}",
+                )
+
+        _emitir("download", "Iniciando download do instalador...", 10.0, 0, 0)
+        _append_update_debug_log("Iniciando download do setup para temp_update")
+
+        if origem_local:
+            total = int(os.path.getsize(url) or 0)
+            lidos = 0
+            with open(url, "rb") as origem, open(caminho_setup, "wb") as out:
+                while True:
+                    chunk = origem.read(1024 * 256)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    lidos += len(chunk)
+                    pct = 10.0 + ((lidos / total) * 75.0 if total > 0 else 60.0)
+                    _emitir("download", "Copiando instalador para pasta local...", pct, lidos, total)
+        else:
+            req = urllib.request.Request(url, headers={"User-Agent": f"OficinaPesca/{APP_VERSION}"})
+            with urllib.request.urlopen(req, timeout=25) as resp, open(caminho_setup, "wb") as out:
+                total = int(getattr(resp, "length", 0) or resp.headers.get("Content-Length") or 0)
+                lidos = 0
+                while True:
+                    chunk = resp.read(1024 * 256)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    lidos += len(chunk)
+                    pct = 10.0 + ((lidos / total) * 75.0 if total > 0 else 60.0)
+                    _emitir("download", "Baixando instalador...", pct, lidos, total)
+
+        if not os.path.exists(caminho_setup) or os.path.getsize(caminho_setup) <= 0:
+            _append_update_debug_log("Falha ao obter setup")
+            _registrar_falha_update("download", "Arquivo de setup vazio ou ausente")
+            return False, "Falha no download: setup inválido."
+
+        _emitir("prepare", "Executando instalador local...", 92.0)
+        cmd = [
+            caminho_setup,
+            "/SP-",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/CLOSEAPPLICATIONS",
+            "/FORCECLOSEAPPLICATIONS",
+            "/RESTARTAPPLICATIONS",
+            "/DIR=C:\\OficinaDePesca",
+        ]
+        if silenciosa:
+            cmd.insert(1, "/VERYSILENT")
+
+        subprocess.Popen(
+            cmd,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            close_fds=True,
+        )
+
+        _emitir("done", "Instalador iniciado. Encerrando aplicação para concluir a atualização...", 100.0)
+        return True, (
+            "Atualização iniciada com sucesso. O instalador foi executado de "
+            f"{caminho_setup}. O sistema será fechado para concluir."
+        )
+    except Exception as e:
+        _append_update_debug_log("Falha no fluxo de atualização local")
+        detalhe = traceback.format_exc()
+        _registrar_falha_update("execucao", str(e), detalhe)
+        return False, f"Falha ao iniciar atualização: {e}"
+
+
+def limpar_residuos_temp_update() -> tuple[bool, str]:
+    """Remove resíduos antigos de C:\\OficinaDePesca\\temp_update no startup."""
+    pasta = os.path.join(r"C:\OficinaDePesca", "temp_update")
+    if not os.path.isdir(pasta):
+        return True, "Sem resíduos de atualização local."
+
+    falhas = 0
+    for nome in os.listdir(pasta):
+        caminho = os.path.join(pasta, nome)
+        try:
+            if os.path.isfile(caminho):
+                os.remove(caminho)
+            elif os.path.isdir(caminho):
+                shutil.rmtree(caminho, ignore_errors=True)
+        except Exception:
+            falhas += 1
+
+    try:
+        if not os.listdir(pasta):
+            os.rmdir(pasta)
+    except Exception:
+        pass
+
+    if falhas > 0:
+        return False, "Limpeza parcial de temp_update. Alguns arquivos estavam em uso."
+    return True, "Pasta temp_update limpa com sucesso."
 
 
 def hash_password(password: str, salt: Optional[bytes] = None) -> str:
@@ -1983,8 +2703,10 @@ def inicializar_banco():
         CREATE TABLE IF NOT EXISTS orcamentos_aguardo (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             cliente TEXT,
+            telefone_cliente_whatsapp TEXT,
             equipamento TEXT,
             defeito TEXT,
+            resumo_equipamento_defeito TEXT,
             valor_total REAL,
             sinal REAL,
             saldo REAL,
@@ -2003,6 +2725,10 @@ def inicializar_banco():
     colunas = [row[1] for row in cursor.fetchall()]
     if 'dados_adicionais' not in colunas:
         cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN dados_adicionais TEXT")
+    if 'telefone_cliente_whatsapp' not in colunas:
+        cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN telefone_cliente_whatsapp TEXT")
+    if 'resumo_equipamento_defeito' not in colunas:
+        cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN resumo_equipamento_defeito TEXT")
     if 'status_entrega' not in colunas:
         cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN status_entrega TEXT")
     if 'data_finalizacao' not in colunas:
@@ -2019,6 +2745,21 @@ def inicializar_banco():
         WHERE status_entrega IS NULL OR status_entrega = ''
            OR data_finalizacao IS NULL OR data_finalizacao = ''
            OR data_entrega IS NULL OR data_entrega = ''
+        """
+    )
+    cursor.execute(
+        """
+        UPDATE orcamentos_aguardo
+        SET resumo_equipamento_defeito = TRIM(
+                COALESCE(NULLIF(equipamento, ''), '') ||
+                CASE
+                    WHEN COALESCE(NULLIF(equipamento, ''), '') <> ''
+                     AND COALESCE(NULLIF(defeito, ''), '') <> '' THEN ' - '
+                    ELSE ''
+                END ||
+                COALESCE(NULLIF(defeito, ''), '')
+            )
+        WHERE COALESCE(NULLIF(resumo_equipamento_defeito, ''), '') = ''
         """
     )
 

@@ -8,7 +8,7 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.12"
+#define AppVersion "1.0.19"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
@@ -20,14 +20,14 @@ AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={commonpf32}\Oficina de Pesca
+DefaultDirName=C:\OficinaDePesca
 DefaultGroupName={#AppName}
 UsePreviousAppDir=no
 DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.12
+OutputBaseFilename=Setup_OficinaPesca_v1.0.19
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -37,6 +37,10 @@ PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=commandline
 ChangesEnvironment=yes
 SetupIconFile=icone_oficina.ico
+
+[Dirs]
+Name: "{app}"; Permissions: users-modify
+Name: "{app}\logs"; Permissions: users-modify
 
 [Languages]
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
@@ -84,6 +88,30 @@ Name: "{commondesktop}\Oficina de Pesca";   Filename: "{app}\{#AppExeName}"; Ico
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: string; ValueName: "OFP_LICENCA_SECRET"; ValueData: "{#LicenseSecret}"; Flags: uninsdeletevalue
 
 [Code]
+function _ExisteInstalacaoAntigaProgramFiles(): Boolean;
+begin
+	Result :=
+		DirExists(ExpandConstant('{commonpf32}\Oficina de Pesca')) or
+		DirExists(ExpandConstant('{commonpf32}\OficinaPesca')) or
+		DirExists(ExpandConstant('{commonpf}\Oficina de Pesca')) or
+		DirExists(ExpandConstant('{commonpf}\OficinaPesca'));
+end;
+
+function InitializeSetup(): Boolean;
+begin
+	Result := True;
+	if _ExisteInstalacaoAntigaProgramFiles() then
+	begin
+		MsgBox(
+			'Foi detectada uma instalação antiga em Program Files.'#13#10#13#10 +
+			'Recomendação: desinstale a versão antiga antes de instalar a v{#AppVersion} em C:\OficinaDePesca.'#13#10 +
+			'Isso evita conflitos de permissão e garante gravação normal em logs e dados locais.',
+			mbInformation,
+			MB_OK
+		);
+	end;
+end;
+
 procedure LimparRegistroLegado();
 begin
 	RegDeleteKeyIncludingSubkeys(HKCU, 'Software\\OficinaPesca');

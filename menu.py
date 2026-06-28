@@ -30,8 +30,10 @@ import webbrowser
 import socket
 import json
 import threading
+import time
 import configparser
 import traceback
+from maintenance_ai import MaintenanceAI
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
@@ -83,10 +85,12 @@ from config import (
     URL_APP_CELULAR_PUBLICA,
     WHATSAPP_ADMIN_DESTINO,
     obter_info_nova_versao,
+    executar_atualizacao,
     sincronizar_dados_da_nuvem,
     conectar_google_drive_usuario,
     garantir_banco_no_drive_usuario,
     iniciar_sincronizacao_hibrida_nuvem,
+    avaliar_risco_banco_antes_atualizacao,
 )
 from core.modulos import obter_modulos_habilitados
 from shutdown_utils import fechar_sistema
@@ -1860,6 +1864,10 @@ class FrmMenu(ctk.CTk):
         self._primeira_instalacao_checada = False
         self._janela_gestao_os = None
         self._janela_os_atual = None
+        self._janela_clientes = None
+        self._janela_pdv = None
+        self._janela_produtos = None
+        self._janela_caixa = None
         self._ultima_os_contexto = None
         self._encerrando_aplicacao = False
         self.title(f"Sistema Oficina de Pesca v{VERSION}")
@@ -1874,14 +1882,34 @@ class FrmMenu(ctk.CTk):
         
         self._dash_mode = "COMPLETO"
         self._dashboard_auto_after_id = None
+        self._dashboard_render_token = 0
+        self._dashboard_render_em_andamento = False
+        self._dashboard_container = None
         self._dados_pendencias_dashboard = ([], [], []) #
+        self._maintenance_ai = MaintenanceAI(project_dir=os.path.dirname(os.path.abspath(__file__)))
+        self._maintenance_after_id = None
+        self._drive_status_after_id = None
+        self._drive_status_check_running = False
 
         # Adia a criação da UI para garantir root estável
         self.after(250, self.setup_ui)
 
         # Agendamentos de serviços em background (Isolados e seguros)
         self.after(2000, self._executar_check_versao_seguro) # Atrasado para estabilizar
+        self.after(5000, self._agendar_monitoramento_manutencao)
         self.after(80, self._mostrar_menu_pronto) # Mantido cedo para exibir a janela
+
+    def _agendar_monitoramento_manutencao(self):
+        if self._encerrando_aplicacao:
+            return
+        if not getattr(self, "_maintenance_ai", None):
+            return
+        if self._maintenance_ai.enabled:
+            self._maintenance_ai.run_check_async(trigger="periodic")
+            self._maintenance_after_id = self.after(
+                self._maintenance_ai.interval_ms,
+                self._agendar_monitoramento_manutencao,
+            )
 
     def _executar_check_versao_seguro(self):
         """Busca atualizações no GitHub de forma isolada após a carga inicial."""
@@ -1893,13 +1921,138 @@ class FrmMenu(ctk.CTk):
                     info = self.verificar_atualizacao()
                     if info and self._eh_versao_mais_nova(info.get("versao", ""), APP_VERSION):
                         logger.info("Nova versao detectada via check automatico.")
+                        versao = str(info.get("versao", "")).strip()
+                        if versao and not self._ja_perguntou_update(versao):
+                            self._marcar_update_perguntado(versao)
+                            self.after(0, lambda: self._perguntar_atualizacao_unica(info))
                 except Exception as e:
                     logger.warning(f"Falha silenciosa na checagem de versao: {e}")
             threading.Thread(target=worker, daemon=True).start()
 
+    def _ja_perguntou_update(self, versao: str) -> bool:
+        chave = f"update_prompted_{str(versao or '').strip()}"
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
+                row = cursor.fetchone()
+            return bool(row and str(row[0]).strip() == "1")
+        except Exception:
+            return False
+
+    def _marcar_update_perguntado(self, versao: str) -> None:
+        chave = f"update_prompted_{str(versao or '').strip()}"
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)",
+                    (chave, "1"),
+                )
+                conn.commit()
+        except Exception as exc:
+            logger.warning("Falha ao marcar versão já perguntada (%s): %s", versao, exc)
+
+    def _perguntar_atualizacao_unica(self, info_update: dict) -> None:
+        if self._encerrando_aplicacao or not self.winfo_exists():
+            return
+        versao = str((info_update or {}).get("versao", "")).strip()
+        if not versao:
+            return
+        deseja = messagebox.askyesno(
+            "Atualização disponível",
+            f"Deseja atualizar para a versão mais estável agora?\n\nNova versão: {versao}\nVersão atual: {APP_VERSION}",
+            parent=self,
+        )
+        if deseja:
+            self._iniciar_fluxo_update_assincrono(info_update)
+
+    def _iniciar_fluxo_update_assincrono(self, info_update: dict) -> None:
+        url = str((info_update or {}).get("url_download", "")).strip()
+        if not url:
+            messagebox.showwarning(
+                "Atualizações",
+                "Versão detectada, mas o link de download não foi informado no manifesto.",
+                parent=self,
+            )
+            return
+
+        risco_banco, msg_risco = avaliar_risco_banco_antes_atualizacao()
+        if risco_banco:
+            confirmado = messagebox.askyesno(
+                "Confirmação de segurança do banco",
+                msg_risco,
+                parent=self,
+            )
+            if not confirmado:
+                return
+
+        pop = ctk.CTkToplevel(self)
+        pop.title("Atualização do Sistema")
+        pop.geometry("460x180")
+        pop.resizable(False, False)
+        pop.transient(self)
+
+        lbl = ctk.CTkLabel(pop, text="Preparando atualização...", anchor="w")
+        lbl.pack(fill="x", padx=18, pady=(16, 8))
+
+        bar = ctk.CTkProgressBar(pop, width=420)
+        bar.set(0)
+        bar.pack(padx=18, pady=(0, 8))
+
+        lbl_pct = ctk.CTkLabel(pop, text="0%", text_color="#9fb3c8")
+        lbl_pct.pack(pady=(0, 8))
+
+        def _on_progress(payload: dict):
+            def _ui():
+                try:
+                    pct = float(payload.get("percent", 0.0) or 0.0)
+                    msg = str(payload.get("message", "Atualizando...") or "Atualizando...")
+                    bar.set(max(0.0, min(1.0, pct / 100.0)))
+                    lbl.configure(text=msg)
+                    lbl_pct.configure(text=f"{int(pct)}%")
+                except Exception:
+                    pass
+            self.after(0, _ui)
+
+        def _worker_update():
+            ok, msg = executar_atualizacao(
+                url,
+                app_executavel=sys.executable,
+                processo_pid=os.getpid(),
+                silenciosa=True,
+                progresso_cb=_on_progress,
+            )
+
+            def _finalizar():
+                try:
+                    pop.destroy()
+                except Exception:
+                    pass
+
+                if ok:
+                    messagebox.showinfo(
+                        "Atualização",
+                        "Instalador iniciado com sucesso. O sistema será fechado para concluir a atualização.",
+                        parent=self,
+                    )
+                    self.after(200, self.confirmar_saida)
+                else:
+                    messagebox.showerror("Atualização", msg, parent=self)
+
+            self.after(0, _finalizar)
+
+        threading.Thread(target=_worker_update, daemon=True, name="ofp-update-menu").start()
+
     def destroy(self):
         try:
             try:
+                if getattr(self, "_maintenance_after_id", None) is not None:
+                    try:
+                        self.after_cancel(self._maintenance_after_id)
+                    except Exception:
+                        pass
+                    self._maintenance_after_id = None
                 for after_id in self.tk.call("after", "info"):
                     self.after_cancel(after_id)
             except Exception:
@@ -2000,7 +2153,7 @@ class FrmMenu(ctk.CTk):
 
         # Inicializa Dashboard Modular
         self.modulos_usuario = self._obter_modulos_usuario()
-        self._criar_dashboard_modular()
+        self._solicitar_render_dashboard("Carregando dashboard...")
         self._iniciar_auto_refresh_dashboard()
 
     def _iniciar_auto_refresh_dashboard(self):
@@ -2019,20 +2172,47 @@ class FrmMenu(ctk.CTk):
         self._dashboard_auto_after_id = self.after(15000, self._auto_refresh_dashboard_tick)
 
     def _adicionar_status_nuvem(self):
-        self.lbl_status_nuvem = ctk.CTkLabel(self.sidebar, text="Verificando nuvem...", text_color="#f1c40f", font=("Arial", 10, "bold"), fg_color="#0d1b2a")
+        self.lbl_status_nuvem = ctk.CTkLabel(self.sidebar, text="Drive Updates: verificando...", text_color="#f1c40f", font=("Arial", 10, "bold"), fg_color="#0d1b2a")
         self.lbl_status_nuvem.pack(padx=8, pady=(0, 5))
         self._atualizar_status_nuvem()
 
     def _atualizar_status_nuvem(self):
-        try:
-            online = checar_status_firebase()
-            status = "Drive: online" if online else "Drive: offline"
-            cor = "#2ecc71" if online else "#e74c3c"
-            if self.winfo_exists(): #
-                self.lbl_status_nuvem.configure(text=status, text_color=cor)
-        except Exception:
-            self.lbl_status_nuvem.configure(text="Drive: offline", text_color="#e74c3c")
-        # Polling automático de rede removido.
+        if self._encerrando_aplicacao or not self.winfo_exists():
+            return
+        if self._drive_status_check_running:
+            return
+
+        self._drive_status_check_running = True
+
+        def worker():
+            status_txt = "Drive Updates: monitorando"
+            cor = "#2ecc71"
+            try:
+                info = obter_info_nova_versao() or {}
+                erro = str(info.get("erro", "") or "").strip()
+                origem = str(info.get("origem", "") or "").strip().lower()
+                if erro and origem == "google_drive":
+                    status_txt = "Drive Updates: desconectado"
+                    cor = "#e74c3c"
+            except Exception:
+                status_txt = "Drive Updates: desconectado"
+                cor = "#e74c3c"
+
+            def aplicar_status():
+                try:
+                    if self.winfo_exists():
+                        self.lbl_status_nuvem.configure(text=status_txt, text_color=cor)
+                except Exception:
+                    pass
+                finally:
+                    self._drive_status_check_running = False
+                    if self.winfo_exists() and not self._encerrando_aplicacao:
+                        self._drive_status_after_id = self.after(45000, self._atualizar_status_nuvem)
+
+            self.after(0, aplicar_status)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _verificar_e_exibir_painel_pendencias(self):
         try:
             orcamentos, bancada, status_finalizados = self._consultar_pendencias_login()
@@ -2042,7 +2222,7 @@ class FrmMenu(ctk.CTk):
         # Painel integrado ao dashboard principal (sem popup).
         self._dados_pendencias_dashboard = (orcamentos, bancada, status_finalizados)
         if hasattr(self, "dashboard_frame") and self.dashboard_frame.winfo_exists():
-            self._criar_dashboard_modular()
+            self._solicitar_render_dashboard("Atualizando pendências do dashboard...")
 
 
     def _obter_logo_oficina(self):
@@ -2082,81 +2262,226 @@ class FrmMenu(ctk.CTk):
     def _formatar_moeda(self, valor):
         return f"R$ {float(valor or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-    def _obter_indicadores_oficina(self):
-        hoje = datetime.now().strftime("%d/%m/%Y")
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT COUNT(*)
-                FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) IN ('EM ANDAMENTO', 'APROVADO')
-                """
-            )
-            total_bancada = int((cursor.fetchone() or [0])[0] or 0)
+    def _limpar_dashboard_widgets(self):
+        if not hasattr(self, "dashboard_frame") or not self.dashboard_frame.winfo_exists():
+            return
+        for widget in self.dashboard_frame.winfo_children():
+            try:
+                widget.destroy()
+            except Exception:
+                pass
+        self._dashboard_container = None
 
-            cursor.execute(
-                """
-                SELECT COALESCE(SUM(saldo), 0)
-                FROM orcamentos_aguardo
-                WHERE data = ?
-                  AND UPPER(COALESCE(status,'')) IN ('APROVADO', 'EM ANDAMENTO')
-                """,
-                (hoje,),
-            )
-            total_receber_dia = float((cursor.fetchone() or [0])[0] or 0)
+    def _mostrar_dashboard_loading(self, mensagem="Carregando dashboard..."):
+        if not hasattr(self, "dashboard_frame") or not self.dashboard_frame.winfo_exists():
+            return
+        self._limpar_dashboard_widgets()
+        loading = ctk.CTkFrame(self.dashboard_frame, fg_color="#0f1720")
+        loading.pack(fill="both", expand=True, padx=24, pady=24)
+        ctk.CTkLabel(
+            loading,
+            text="Dashboard",
+            font=("Arial", 28, "bold"),
+            text_color="orange",
+        ).pack(anchor="w", pady=(0, 12))
+        ctk.CTkLabel(
+            loading,
+            text=str(mensagem or "Carregando dashboard..."),
+            font=("Arial", 13, "bold"),
+            text_color="#ecf0f1",
+        ).pack(anchor="w", pady=(14, 6))
+        ctk.CTkLabel(
+            loading,
+            text="Aguarde a leitura completa do banco local e da sincronização disponível.",
+            font=("Arial", 11),
+            text_color="#9fb3c8",
+        ).pack(anchor="w")
+        self._dashboard_container = loading
+        self.update_idletasks()
 
-            cursor.execute(
-                """
-                SELECT COUNT(*)
-                FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) = 'AGUARDANDO'
-                """
-            )
-            os_pendentes = int((cursor.fetchone() or [0])[0] or 0)
+    def _solicitar_render_dashboard(self, mensagem="Atualizando dashboard..."):
+        if self._encerrando_aplicacao or not hasattr(self, "dashboard_frame") or not self.dashboard_frame.winfo_exists():
+            return
+
+        self._dashboard_render_token += 1
+        token_atual = self._dashboard_render_token
+        self._dashboard_render_em_andamento = True
+        self._mostrar_dashboard_loading(mensagem)
+
+        def _worker_dashboard():
+            snapshot = self._coletar_snapshot_dashboard()
+
+            def _aplicar_snapshot():
+                if self._encerrando_aplicacao or not self.winfo_exists():
+                    return
+                if token_atual != self._dashboard_render_token:
+                    return
+                self._dashboard_render_em_andamento = False
+                self._renderizar_dashboard_snapshot(snapshot)
+
+            self.after(0, _aplicar_snapshot)
+
+        threading.Thread(target=_worker_dashboard, daemon=True, name=f"ofp-dashboard-{token_atual}").start()
+
+    def _coletar_snapshot_dashboard(self):
+        modulos_usuario = self._obter_modulos_usuario()
+        tem_oficina = modulos_usuario.get("oficina", True)
+        tem_pdv = modulos_usuario.get("pdv", False)
+
+        if self.role == "VENDEDOR":
+            tem_oficina = False
+            tem_pdv = True
+            mode = "PDV"
+        elif self.role == "OFICINA":
+            tem_oficina = True
+            tem_pdv = False
+            mode = "OFICINA"
+        else:
+            mode = "COMPLETO"
+
+        oficina = self._obter_indicadores_oficina() if tem_oficina else {
+            "bancada": 0,
+            "receber": 0.0,
+            "pendentes": 0,
+            "servicos_realizados": 0.0,
+        }
+        pdv = self._obter_indicadores_pdv() if tem_pdv else {
+            "volume_vendas": 0.0,
+            "vendas_dia": 0.0,
+            "estoque_es": "0/0",
+        }
+
+        orcamentos, bancada, status_finalizados = ([], [], [])
+        if self.role in ("ADMIN", "OFICINA"):
+            try:
+                orcamentos, bancada, status_finalizados = self._consultar_pendencias_login()
+            except Exception as exc:
+                logger.info("Falha ao montar painel fixo de pendencias: %s", exc)
 
         return {
-            "bancada": total_bancada,
-            "receber": total_receber_dia,
-            "pendentes": os_pendentes,
+            "mode": mode,
+            "tem_oficina": tem_oficina,
+            "tem_pdv": tem_pdv,
+            "oficina": oficina,
+            "pdv": pdv,
+            "fluxo_caixa_total": float(oficina.get("servicos_realizados", 0.0) or 0.0) + float(pdv.get("volume_vendas", 0.0) or 0.0),
+            "pendencias": (orcamentos, bancada, status_finalizados),
         }
+
+    def _obter_indicadores_oficina(self):
+        for tentativa in range(2):
+            try:
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM orcamentos_aguardo
+                        WHERE UPPER(COALESCE(status,'')) IN ('EM ANDAMENTO', 'APROVADO')
+                        """
+                    )
+                    total_bancada = int((cursor.fetchone() or [0])[0] or 0)
+
+                    cursor.execute(
+                        """
+                        SELECT COALESCE(SUM(saldo), 0)
+                        FROM orcamentos_aguardo
+                        WHERE COALESCE(saldo, 0) > 0
+                          AND UPPER(COALESCE(status,'')) NOT IN ('REPROVADO', 'CANCELADO', 'CANCELADA', 'ENTREGUE')
+                        """
+                    )
+                    total_receber_aberto = float((cursor.fetchone() or [0])[0] or 0)
+
+                    cursor.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM orcamentos_aguardo
+                        WHERE COALESCE(saldo, 0) > 0
+                          AND UPPER(COALESCE(status,'')) NOT IN ('REPROVADO', 'CANCELADO', 'CANCELADA', 'ENTREGUE')
+                        """
+                    )
+                    os_pendentes = int((cursor.fetchone() or [0])[0] or 0)
+
+                    cursor.execute(
+                        """
+                        SELECT COALESCE(SUM(valor), 0)
+                        FROM fluxo_caixa
+                        WHERE UPPER(COALESCE(tipo,'')) = 'ENTRADA'
+                          AND (
+                                UPPER(COALESCE(categoria,'')) LIKE '%ORDEM DE SERV%'
+                             OR UPPER(COALESCE(descricao,'')) LIKE '%O.S.%'
+                          )
+                        """
+                    )
+                    servicos_realizados = float((cursor.fetchone() or [0])[0] or 0)
+
+                return {
+                    "bancada": total_bancada,
+                    "receber": total_receber_aberto,
+                    "pendentes": os_pendentes,
+                    "servicos_realizados": servicos_realizados,
+                }
+            except sqlite3.OperationalError as exc:
+                if "locked" in str(exc).lower() and tentativa == 0:
+                    time.sleep(0.2)
+                    continue
+                logger.exception("Dashboard Oficina falhou ao consultar indicadores: %s", exc)
+                break
+            except Exception as exc:
+                logger.exception("Dashboard Oficina falhou ao consultar indicadores: %s", exc)
+                break
+
+        return {"bancada": 0, "receber": 0.0, "pendentes": 0, "servicos_realizados": 0.0}
 
     def _obter_indicadores_pdv(self):
         hoje = datetime.now().strftime("%d/%m/%Y")
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
+        for tentativa in range(2):
+            try:
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
 
-            cursor.execute(
-                """
-                SELECT COALESCE(SUM(valor), 0)
-                FROM fluxo_caixa
-                WHERE UPPER(COALESCE(tipo,'')) = 'ENTRADA'
-                  AND UPPER(COALESCE(categoria,'')) NOT LIKE '%ORDEM DE SERV%'
-                  AND UPPER(COALESCE(descricao,'')) NOT LIKE '%O.S.%'
-                """
-            )
-            volume_vendas = float((cursor.fetchone() or [0])[0] or 0)
+                    cursor.execute(
+                        """
+                        SELECT COALESCE(SUM(valor), 0)
+                        FROM fluxo_caixa
+                        WHERE UPPER(COALESCE(tipo,'')) = 'ENTRADA'
+                          AND UPPER(COALESCE(categoria,'')) NOT LIKE '%ORDEM DE SERV%'
+                          AND UPPER(COALESCE(descricao,'')) NOT LIKE '%O.S.%'
+                        """
+                    )
+                    volume_vendas = float((cursor.fetchone() or [0])[0] or 0)
 
-            cursor.execute(
-                """
-                SELECT COALESCE(SUM(valor), 0)
-                FROM fluxo_caixa
-                WHERE UPPER(COALESCE(tipo,'')) = 'ENTRADA'
-                  AND data = ?
-                  AND UPPER(COALESCE(categoria,'')) NOT LIKE '%ORDEM DE SERV%'
-                  AND UPPER(COALESCE(descricao,'')) NOT LIKE '%O.S.%'
-                """,
-                (hoje,),
-            )
-            vendas_dia = float((cursor.fetchone() or [0])[0] or 0)
+                    cursor.execute(
+                        """
+                        SELECT COALESCE(SUM(valor), 0)
+                        FROM fluxo_caixa
+                        WHERE UPPER(COALESCE(tipo,'')) = 'ENTRADA'
+                          AND data = ?
+                          AND UPPER(COALESCE(categoria,'')) NOT LIKE '%ORDEM DE SERV%'
+                          AND UPPER(COALESCE(descricao,'')) NOT LIKE '%O.S.%'
+                        """,
+                        (hoje,),
+                    )
+                    vendas_dia = float((cursor.fetchone() or [0])[0] or 0)
 
-            entradas_estoque, saidas_estoque = self._obter_movimentacao_estoque_pdv(cursor)
+                    entradas_estoque, saidas_estoque = self._obter_movimentacao_estoque_pdv(cursor)
 
-        return {
-            "volume_vendas": volume_vendas,
-            "vendas_dia": vendas_dia,
-            "estoque_es": f"{entradas_estoque}/{saidas_estoque}",
-        }
+                return {
+                    "volume_vendas": volume_vendas,
+                    "vendas_dia": vendas_dia,
+                    "estoque_es": f"{entradas_estoque}/{saidas_estoque}",
+                }
+            except sqlite3.OperationalError as exc:
+                if "locked" in str(exc).lower() and tentativa == 0:
+                    time.sleep(0.2)
+                    continue
+                logger.exception("Dashboard PDV falhou ao consultar indicadores: %s", exc)
+                break
+            except Exception as exc:
+                logger.exception("Dashboard PDV falhou ao consultar indicadores: %s", exc)
+                break
+
+        return {"volume_vendas": 0.0, "vendas_dia": 0.0, "estoque_es": "0/0"}
 
     def _obter_movimentacao_estoque_pdv(self, cursor):
         """Lê movimentação de estoque da tabela do PDV; fallback para fluxo_caixa."""
@@ -2204,35 +2529,39 @@ class FrmMenu(ctk.CTk):
             except Exception as exc:
                 logger.info("Falha ao ler movimentação no PDV (%s): %s", tabela, exc)
 
-        # Fallback seguro: usa fluxo_caixa apenas com categorias explícitas de PDV/estoque.
-        cursor.execute(
-            """
-            SELECT COUNT(*)
-            FROM fluxo_caixa
-            WHERE UPPER(COALESCE(tipo,''))='ENTRADA'
-              AND (
-                    UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE PDV%'
-                 OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCAO%'
-                 OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCÃO%'
-              )
-            """
-        )
-        entradas = int((cursor.fetchone() or [0])[0] or 0)
+                # Fallback seguro: usa fluxo_caixa apenas com categorias explícitas de PDV/estoque.
+                try:
+                        cursor.execute(
+                                """
+                                SELECT COUNT(*)
+                                FROM fluxo_caixa
+                                WHERE UPPER(COALESCE(tipo,''))='ENTRADA'
+                                    AND (
+                                                UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE PDV%'
+                                         OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCAO%'
+                                         OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCÃO%'
+                                    )
+                                """
+                        )
+                        entradas = int((cursor.fetchone() or [0])[0] or 0)
 
-        cursor.execute(
-            """
-            SELECT COUNT(*)
-            FROM fluxo_caixa
-            WHERE UPPER(COALESCE(tipo,'')) IN ('SAIDA','SAÍDA')
-              AND (
-                    UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE PDV%'
-                 OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCAO%'
-                 OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCÃO%'
-              )
-            """
-        )
-        saidas = int((cursor.fetchone() or [0])[0] or 0)
-        return entradas, saidas
+                        cursor.execute(
+                                """
+                                SELECT COUNT(*)
+                                FROM fluxo_caixa
+                                WHERE UPPER(COALESCE(tipo,'')) IN ('SAIDA','SAÍDA')
+                                    AND (
+                                                UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE PDV%'
+                                         OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCAO%'
+                                         OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCÃO%'
+                                    )
+                                """
+                        )
+                        saidas = int((cursor.fetchone() or [0])[0] or 0)
+                        return entradas, saidas
+                except Exception as exc:
+                        logger.exception("Fallback de movimentação de estoque no dashboard falhou: %s", exc)
+                        return 0, 0
 
     def _criar_card_dashboard(self, parent, titulo, valor):
         box = ctk.CTkFrame(parent, fg_color="#1b2635", corner_radius=10)
@@ -2288,114 +2617,108 @@ class FrmMenu(ctk.CTk):
             txt.insert("1.0", _texto_linhas(dados))
             txt.configure(state="disabled")
 
-    def _criar_dashboard_modular(self):
-        for w in self.dashboard_frame.winfo_children():
-            w.destroy()
+    def _renderizar_dashboard_snapshot(self, snapshot):
+        if not hasattr(self, "dashboard_frame") or not self.dashboard_frame.winfo_exists():
+            return
 
-        self.modulos_usuario = self._obter_modulos_usuario()
-        tem_oficina = self.modulos_usuario.get("oficina", True)
-        tem_pdv = self.modulos_usuario.get("pdv", False)
-        
-        # Lógica de Perfil Restrito (Dashboard)
-        if self.role == "VENDEDOR":
-            tem_oficina = False
-            tem_pdv = True
-        elif self.role == "OFICINA":
-            tem_oficina = True
-            tem_pdv = False
+        self._limpar_dashboard_widgets()
+        self.update_idletasks()
+
+        container = ctk.CTkFrame(self.dashboard_frame, fg_color="#0f1720")
+        container.pack(fill="both", expand=True, padx=24, pady=24)
+        self._dashboard_container = container
+
+        oficina = dict((snapshot or {}).get("oficina") or {})
+        pdv = dict((snapshot or {}).get("pdv") or {})
+        mode = str((snapshot or {}).get("mode") or "COMPLETO").upper()
+        fluxo_caixa_total = float((snapshot or {}).get("fluxo_caixa_total") or 0.0)
+        orcamentos, bancada, status_finalizados = (snapshot or {}).get("pendencias") or ([], [], [])
+        self._dados_pendencias_dashboard = (orcamentos, bancada, status_finalizados)
 
         ctk.CTkLabel(
-            self.dashboard_frame,
+            container,
             text="Dashboard",
             font=("Arial", 28, "bold"),
             text_color="orange",
         ).pack(anchor="w", pady=(0, 10))
         ctk.CTkLabel(
-            self.dashboard_frame,
-            text="Painel automático em tempo real (sem ações manuais).",
+            container,
+            text="Painel automático com renderização limpa e valores exibidos somente após o carregamento completo.",
             font=("Arial", 11),
             text_color="#9fb3c8",
-        ).pack(anchor="w", pady=(0, 10))
-
-        # Sem seletor/manual: o dashboard abre pronto pelo perfil do usuário.
-        if self.role == "OFICINA":
-            mode = "OFICINA"
-        elif self.role == "VENDEDOR":
-            mode = "PDV"
-        else:
-            mode = "COMPLETO"
-
-        oficina = self._obter_indicadores_oficina() if tem_oficina else {"bancada": 0, "receber": 0.0, "pendentes": 0}
-        pdv = self._obter_indicadores_pdv() if tem_pdv else {"volume_vendas": 0.0, "vendas_dia": 0.0, "estoque_es": "0/0"}
+            wraplength=900,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 12))
 
         if mode == "OFICINA":
             self._criar_linha_cards(
-                self.dashboard_frame,
+                container,
                 [
-                    ("OS na Bancada", oficina["bancada"]),
-                    ("Total a Receber Oficina", self._formatar_moeda(oficina["receber"])),
-                    ("Pendentes", oficina["pendentes"]),
+                    ("Fluxo de Caixa - Serviços", self._formatar_moeda(oficina.get("servicos_realizados", 0.0))),
+                    ("Contas a Receber", self._formatar_moeda(oficina.get("receber", 0.0))),
+                    ("OS na Bancada", oficina.get("bancada", 0)),
+                ],
+            )
+            self._criar_linha_cards(
+                container,
+                [
+                    ("OS com Saldo Aberto", oficina.get("pendentes", 0)),
                 ],
             )
         elif mode == "PDV":
             self._criar_linha_cards(
-                self.dashboard_frame,
+                container,
                 [
-                    ("Volume de Vendas", self._formatar_moeda(pdv["volume_vendas"])),
-                    ("Entradas/Saídas de Estoque", pdv["estoque_es"]),
-                    ("Vendas do Dia", self._formatar_moeda(pdv["vendas_dia"])),
+                    ("Fluxo de Caixa - PDV", self._formatar_moeda(pdv.get("volume_vendas", 0.0))),
+                    ("Vendas do Dia", self._formatar_moeda(pdv.get("vendas_dia", 0.0))),
+                    ("Entradas/Saídas de Estoque", pdv.get("estoque_es", "0/0")),
                 ],
             )
-        else: # COMPLETO (ADMIN)
-            topo = ctk.CTkFrame(self.dashboard_frame, fg_color="#0f1720")
-            topo.pack(fill="x", pady=(0, 8))
-            self._criar_card_dashboard(
-                topo,
-                "Consolidado - Total a Receber + Vendas",
-                self._formatar_moeda(oficina["receber"] + pdv["volume_vendas"]),
-            )
-
-            split = ctk.CTkFrame(self.dashboard_frame, fg_color="#0f1720")
-            split.pack(fill="both", expand=True)
-
-            col_oficina = ctk.CTkFrame(split, fg_color="#0f1720")
-            col_oficina.pack(side="left", fill="both", expand=True, padx=(0, 6))
-            ctk.CTkLabel(col_oficina, text="Oficina", font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
+        else:
+            bloco_fluxo = ctk.CTkFrame(container, fg_color="#0f1720")
+            bloco_fluxo.pack(fill="x", pady=(0, 10))
+            ctk.CTkLabel(bloco_fluxo, text="Bloco 1 · Fluxo de Caixa", font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
             self._criar_linha_cards(
-                col_oficina,
+                bloco_fluxo,
                 [
-                    ("OS na Bancada", oficina["bancada"]),
-                    ("Total a Receber Oficina", self._formatar_moeda(oficina["receber"])),
-                    ("Pendentes", oficina["pendentes"]),
+                    ("Total Realizado (PDV + Serviços)", self._formatar_moeda(fluxo_caixa_total)),
+                    ("Vendas PDV", self._formatar_moeda(pdv.get("volume_vendas", 0.0))),
+                    ("Serviços Realizados", self._formatar_moeda(oficina.get("servicos_realizados", 0.0))),
                 ],
             )
 
-            col_pdv = ctk.CTkFrame(split, fg_color="#0f1720")
-            col_pdv.pack(side="left", fill="both", expand=True, padx=(6, 0))
-            ctk.CTkLabel(col_pdv, text="PDV", font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
+            bloco_receber = ctk.CTkFrame(container, fg_color="#0f1720")
+            bloco_receber.pack(fill="x", pady=(0, 10))
+            ctk.CTkLabel(bloco_receber, text="Bloco 2 · Contas a Receber", font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
             self._criar_linha_cards(
-                col_pdv,
+                bloco_receber,
                 [
-                    ("Volume de Vendas", self._formatar_moeda(pdv["volume_vendas"])),
-                    ("Entradas/Saídas de Estoque", pdv["estoque_es"]),
-                    ("Vendas do Dia", self._formatar_moeda(pdv["vendas_dia"])),
+                    ("Saldo Aberto de O.S.", self._formatar_moeda(oficina.get("receber", 0.0))),
+                    ("O.S. com Saldo Aberto", oficina.get("pendentes", 0)),
+                    ("O.S. na Bancada", oficina.get("bancada", 0)),
+                ],
+            )
+
+            bloco_pdv = ctk.CTkFrame(container, fg_color="#0f1720")
+            bloco_pdv.pack(fill="x", pady=(0, 10))
+            ctk.CTkLabel(bloco_pdv, text="Operação PDV", font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
+            self._criar_linha_cards(
+                bloco_pdv,
+                [
+                    ("Vendas do Dia", self._formatar_moeda(pdv.get("vendas_dia", 0.0))),
+                    ("Entradas/Saídas de Estoque", pdv.get("estoque_es", "0/0")),
                 ],
             )
 
         if self.role in ("ADMIN", "OFICINA"):
-            try:
-                orcamentos, bancada, status_finalizados = self._consultar_pendencias_login()
-                self._dados_pendencias_dashboard = (orcamentos, bancada, status_finalizados)
-            except Exception as exc:
-                logger.info("Falha ao montar painel fixo de pendencias: %s", exc)
-                orcamentos, bancada, status_finalizados = ([], [], [])
+            self._criar_painel_pendencias_fixo(container, orcamentos, bancada, status_finalizados)
 
-            self._criar_painel_pendencias_fixo(self.dashboard_frame, orcamentos, bancada, status_finalizados)
+        self.update_idletasks()
 
     def _atualizar_dashboard_modular(self):
         try:
             if self.winfo_exists():
-                self._criar_dashboard_modular()
+                self._solicitar_render_dashboard("Atualizando dashboard...")
         except Exception as exc:
             logger.info("Falha ao atualizar dashboard modular: %s", exc)
 
@@ -2411,6 +2734,28 @@ class FrmMenu(ctk.CTk):
             return janela is not None and bool(janela.winfo_exists())
         except Exception:
             return False
+
+    def _fechar_janelas_operacionais(self, manter=None):
+        candidatas = [
+            getattr(self, "_janela_gestao_os", None),
+            getattr(self, "_janela_os_atual", None),
+            getattr(self, "_janela_clientes", None),
+            getattr(self, "_janela_pdv", None),
+            getattr(self, "_janela_produtos", None),
+            getattr(self, "_janela_caixa", None),
+        ]
+        for janela in candidatas:
+            if janela is None or janela is manter:
+                continue
+            if not self._janela_viva(janela):
+                continue
+            try:
+                janela.destroy()
+            except Exception:
+                try:
+                    janela.withdraw()
+                except Exception:
+                    pass
 
     def _carregar_os_por_id(self, os_id):
         try:
@@ -2681,8 +3026,14 @@ class FrmMenu(ctk.CTk):
     def abrir_gestao_os(self):
         try:
             from gestao_os import FrmGestaoOrcamentos
+            self._fechar_janelas_operacionais()
             janela = FrmGestaoOrcamentos(self, on_os_update_callback=self._atualizar_dashboard_modular)
             self._janela_gestao_os = janela
+            self._janela_os_atual = None
+            self._janela_clientes = None
+            self._janela_pdv = None
+            self._janela_produtos = None
+            self._janela_caixa = None
             janela.focus_force()
         except Exception as e:
             messagebox.showerror("Erro", f"Não foi possível abrir a gestão: {e}", parent=self)
@@ -2690,24 +3041,46 @@ class FrmMenu(ctk.CTk):
     def abrir_clientes(self):
         try:
             from clientes import FrmClientes
-            FrmClientes(self)
+            self._fechar_janelas_operacionais()
+            janela = FrmClientes(self)
+            self._janela_clientes = janela
+            self._janela_gestao_os = None
+            self._janela_os_atual = None
+            self._janela_pdv = None
+            self._janela_produtos = None
+            self._janela_caixa = None
+            if self._janela_viva(janela):
+                janela.focus_force()
         except Exception as e: messagebox.showerror("Erro", f"Erro: {e}", parent=self)
 
     def abrir_os(self):
         try:
+            self._fechar_janelas_operacionais()
             janela = tela_os.FrmOS(self, on_save_callback=self._atualizar_dashboard_modular)
             janela.update()
             janela.attributes('-topmost', True)
             janela.focus_force()
             janela.after(300, lambda: janela.attributes('-topmost', False))
             self._janela_os_atual = janela
+            self._janela_gestao_os = None
+            self._janela_clientes = None
+            self._janela_pdv = None
+            self._janela_produtos = None
+            self._janela_caixa = None
         except Exception as e:
             messagebox.showerror("Erro", f"Erro: {e}", parent=self)
 
     def abrir_pdv(self):
         try:
             from pdv import FrmPDV
+            self._fechar_janelas_operacionais()
             janela = FrmPDV(self)
+            self._janela_pdv = janela
+            self._janela_gestao_os = None
+            self._janela_os_atual = None
+            self._janela_clientes = None
+            self._janela_produtos = None
+            self._janela_caixa = None
             janela.focus_force()
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao abrir PDV: {e}", parent=self)
@@ -2724,14 +3097,20 @@ class FrmMenu(ctk.CTk):
     def buscar_atualizacoes(self):
         try:
             info_versao = obter_info_nova_versao() or {}
+            erro = str(info_versao.get("erro", "")).strip()
+            if erro:
+                messagebox.showwarning("Atualizações", erro, parent=self)
+                return
             versao_remota = str(info_versao.get("versao", "")).strip()
 
             if versao_remota and self._eh_versao_mais_nova(versao_remota, APP_VERSION):
-                messagebox.showinfo(
+                deseja = messagebox.askyesno(
                     "Atualizações",
-                    f"Nova versão disponível: {versao_remota}\nVersão atual: {APP_VERSION}",
+                    f"Nova versão disponível: {versao_remota}\nVersão atual: {APP_VERSION}\n\nDeseja atualizar para a versão mais estável agora?",
                     parent=self,
                 )
+                if deseja:
+                    self._iniciar_fluxo_update_assincrono(info_versao)
                 return
 
             if versao_remota:
@@ -2751,12 +3130,28 @@ class FrmMenu(ctk.CTk):
             messagebox.showerror("Atualizações", f"Erro ao buscar atualizações: {e}", parent=self)
 
     def abrir_produtos(self):
-        FrmProdutos(self)
+        self._fechar_janelas_operacionais()
+        janela = FrmProdutos(self)
+        self._janela_produtos = janela
+        self._janela_gestao_os = None
+        self._janela_os_atual = None
+        self._janela_clientes = None
+        self._janela_pdv = None
+        self._janela_caixa = None
 
     def abrir_caixa(self):
         try:
             from tela_financeiro import FrmFinanceiro
-            FrmFinanceiro(self)
+            self._fechar_janelas_operacionais()
+            janela = FrmFinanceiro(self)
+            self._janela_caixa = janela
+            self._janela_gestao_os = None
+            self._janela_os_atual = None
+            self._janela_clientes = None
+            self._janela_pdv = None
+            self._janela_produtos = None
+            if self._janela_viva(janela):
+                janela.focus_force()
         except Exception as e: messagebox.showerror("Erro", f"Erro: {e}", parent=self)
 
     def gerar_recibo_menu_lateral(self):
@@ -3240,6 +3635,11 @@ class FrmMenu(ctk.CTk):
     def confirmar_saida(self):
         if messagebox.askokcancel('Sair', 'Deseja encerrar o programa?', parent=self):
             self._encerrando_aplicacao = True
+            try:
+                if getattr(self, "_maintenance_ai", None):
+                    self._maintenance_ai.run_check_async(trigger="shutdown")
+            except Exception:
+                logger.exception("Falha ao disparar IA de manutenção no fechamento.")
             try:
                 for after_id in self.tk.call('after', 'info'):
                     self.after_cancel(after_id)

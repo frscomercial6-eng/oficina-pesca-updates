@@ -10,7 +10,7 @@ import re
 import time
 
 DIV = "═" * 50
-VERSAO = "1.0.12"
+VERSAO = "1.0.19"
 
 
 RESOURCE_SPECS = [
