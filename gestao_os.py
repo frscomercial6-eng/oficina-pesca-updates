@@ -175,7 +175,7 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
 
         dialogo = ctk.CTkToplevel(self)
         dialogo.title("ALTERAR STATUS")
-        dialogo.geometry("320x200")
+        dialogo.geometry("340x220")
         dialogo.resizable(False, False)
         dialogo.configure(fg_color="#161b22")
         dialogo.grab_set()
@@ -223,11 +223,31 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
                 messagebox.showerror("Erro", f"Erro ao alterar status: {e}", parent=dialogo)
 
         f_btns = ctk.CTkFrame(dialogo, fg_color="#161b22")
-        f_btns.pack()
-        ctk.CTkButton(f_btns, text="🟡  EM ANDAMENTO", fg_color="#7d6400", hover_color="#a88700",
-                      width=200, command=lambda: aplicar("EM ANDAMENTO")).pack(pady=5)
-        ctk.CTkButton(f_btns, text="🟢  FINALIZADO", fg_color="#1a6b30", hover_color="#27ae60",
-                      width=200, command=lambda: aplicar("FINALIZADO")).pack(pady=5)
+        f_btns.pack(padx=14, fill="x")
+
+        opcoes_status = ["AGUARDANDO", "EM ANDAMENTO", "FINALIZADO"]
+        status_var = ctk.StringVar(value="AGUARDANDO")
+
+        seletor_status = ctk.CTkOptionMenu(
+            f_btns,
+            values=opcoes_status,
+            variable=status_var,
+            width=240,
+            fg_color="#7d4e00",
+            button_color="#a86500",
+            button_hover_color="#c07a00",
+            dropdown_fg_color="#1f2a38",
+        )
+        seletor_status.pack(pady=(4, 10))
+
+        ctk.CTkButton(
+            f_btns,
+            text="APLICAR STATUS",
+            width=240,
+            fg_color="#1a6b30",
+            hover_color="#27ae60",
+            command=lambda: aplicar(status_var.get()),
+        ).pack(pady=(0, 8))
 
     def buscar_os(self):
         termo_bruto = self.ent_busca.get().strip()
@@ -248,13 +268,13 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
                     cursor.execute(
                         """
                         SELECT oa.id, COALESCE(c.id, ''), oa.cliente, oa.equipamento, oa.defeito, oa.valor_total,
-                               oa.sinal, oa.saldo, oa.status, oa.data, COALESCE(oa.itens_detalhes, ''),
-                               COALESCE(c.telefone, ''), COALESCE(oa.dados_adicionais, '')
+                                         oa.sinal, oa.saldo, oa.status, oa.data, COALESCE(oa.itens_detalhes, ''),
+                                         COALESCE(oa.telefone_cliente_whatsapp, COALESCE(c.telefone, '')), COALESCE(oa.dados_adicionais, '')
                         FROM orcamentos_aguardo oa
                         LEFT JOIN clientes c ON UPPER(c.nome) = UPPER(oa.cliente)
                         WHERE CAST(oa.id AS TEXT) LIKE ?
                            OR UPPER(oa.cliente) LIKE ?
-                           OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(c.telefone, ''), '(', ''), ')', ''), '-', ''), ' ', '') LIKE ?
+                                    OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(oa.telefone_cliente_whatsapp, COALESCE(c.telefone, '')), '(', ''), ')', ''), '-', ''), ' ', '') LIKE ?
                                     OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(oa.dados_adicionais, ''), '(', ''), ')', ''), '-', ''), ' ', '') LIKE ?
                         ORDER BY oa.id DESC
                         """,
@@ -265,7 +285,7 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
                         """
                         SELECT oa.id, COALESCE(c.id, ''), oa.cliente, oa.equipamento, oa.defeito, oa.valor_total,
                                oa.sinal, oa.saldo, oa.status, oa.data, COALESCE(oa.itens_detalhes, ''),
-                               COALESCE(c.telefone, ''), COALESCE(oa.dados_adicionais, '')
+                               COALESCE(oa.telefone_cliente_whatsapp, COALESCE(c.telefone, '')), COALESCE(oa.dados_adicionais, '')
                         FROM orcamentos_aguardo oa
                         LEFT JOIN clientes c ON UPPER(c.nome) = UPPER(oa.cliente)
                         ORDER BY oa.id DESC
@@ -402,14 +422,21 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
             return
 
         try:
+            try:
+                self.grab_release()
+            except Exception:
+                pass
+            self.destroy()
             janela = tela_os.FrmOS(self.master, id_orc=self.dados_os[0], on_save_callback=self.on_os_update_callback)
             if hasattr(self.master, "_janela_os_atual"):
                 self.master._janela_os_atual = janela
+            if hasattr(self.master, "_janela_gestao_os"):
+                self.master._janela_gestao_os = None
             if hasattr(self.master, "_ultima_os_contexto"):
                 self.master._ultima_os_contexto = self.dados_os
             janela.focus_force()
         except Exception as e:
-            messagebox.showerror("Erro", f"Não foi possível abrir o orçamento: {e}", parent=self)
+            messagebox.showerror("Erro", f"Não foi possível abrir o orçamento: {e}", parent=self.master)
 
     def aprovar_os(self):
         if not self.dados_os:
