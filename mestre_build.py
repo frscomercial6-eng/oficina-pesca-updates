@@ -11,7 +11,13 @@ import time
 
 DIV = "═" * 50
 VERSAO = "1.0.12"
+APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "menu.py"
+INSTALLER_SCRIPT = "instalar.iss"
+INSTALLER_OUTPUT_DIR = "INSTALADOR_FINAL"
+DISTRIBUTION_DIR = "PACOTE_ENVIO"
+DISTRIBUTION_INSTALLER_NAME = "Oficina_Pesca_Instalador.exe"
+AUTO_MODE = "--auto" in sys.argv or os.environ.get("OFP_BUILD_AUTO") == "1"
 
 
 RESOURCE_SPECS = [
@@ -26,13 +32,25 @@ RESOURCE_SPECS = [
     ("Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf", "."),
 ]
 
+INSTALLER_REQUIRED_SPECS = [
+    ("config.json", "."),
+    ("iniciar_servidor.bat", "."),
+    ("servidor.py", "."),
+    ("static", "static"),
+    ("templates", "templates"),
+]
+
 LOCAL_HIDDEN_IMPORTS = [
+    ("clientes", "clientes.py"),
     ("config", "config.py"),
     ("gestao_os", "gestao_os.py"),
     ("menu", ENTRY_SCRIPT),
     ("migracao_fiscal_2027", "migracao_fiscal_2027.py"),
     ("pdv", "pdv.py"),
+    ("shutdown_utils", "shutdown_utils.py"),
+    ("tela_financeiro", "tela_financeiro.py"),
     ("tela_os", "tela_os.py"),
+    ("tela_planos", "tela_planos.py"),
     ("util_recibo", "util_recibo.py"),
 ]
 
@@ -65,11 +83,14 @@ PYINSTALLER_HIDDEN_IMPORTS = [
 ]
 
 PYINSTALLER_COLLECT_ALL = [
+    "customtkinter",
+    "fpdf",
     "googleapiclient",
     "google_auth_oauthlib",
     "google",
     "google_auth",
     "google_api_python_client",
+    "reportlab",
 ]
 
 def print_header():
@@ -81,7 +102,7 @@ def get_input():
     import sys
     default_projeto = "oficina de pesca"
     default_versao = VERSAO
-    args = sys.argv[1:]
+    args = [arg for arg in sys.argv[1:] if not str(arg).startswith("--")]
     if len(args) >= 2:
         return args[0], args[1]
     elif len(args) == 1:
@@ -286,6 +307,9 @@ def resumo(projeto, versao, alteracoes):
     else:
         print("   Nenhuma alteração marcada encontrada.")
     print(DIV)
+    if AUTO_MODE or not sys.stdin.isatty():
+        print("🤖 Modo automático ativo: seguindo sem confirmação interativa.")
+        return True
     resp = input("🚀 Deseja iniciar o Build e Release? (s/n): ").strip().lower()
     return resp == "s"
 
@@ -309,6 +333,10 @@ def _coletar_add_data_args() -> tuple[list[str], list[tuple[str, str, bool]]]:
     return add_data_args, resumo
 
 
+def _coletar_resumo_recursos(specs: list[tuple[str, str]]) -> list[tuple[str, str, bool]]:
+    return [(origem, destino, os.path.exists(origem)) for origem, destino in specs]
+
+
 def _hidden_import_args() -> list[str]:
     args: list[str] = []
     for modulo, caminho in LOCAL_HIDDEN_IMPORTS:
@@ -326,6 +354,33 @@ def _collect_all_args() -> list[str]:
     return args
 
 
+def _resolver_python_build() -> str:
+    candidatos = [
+        os.path.join(".venv", "Scripts", "python.exe"),
+        os.path.join("venv", "Scripts", "python.exe"),
+        sys.executable,
+    ]
+    for caminho in candidatos:
+        if caminho and os.path.exists(caminho):
+            return caminho
+    raise FileNotFoundError("Nenhum interpretador Python válido foi encontrado para o build.")
+
+
+def executar_smoke_test() -> bool:
+    print(DIV)
+    print(f"🧪 Smoke test de imports: {ENTRY_SCRIPT}")
+    try:
+        subprocess.run(
+            [sys.executable, "-c", "import menu; print('SMOKE_IMPORT_OK')"],
+            check=True,
+        )
+        print("✅ Smoke test aprovado.")
+        return True
+    except subprocess.CalledProcessError as exc:
+        print(f"❌ Smoke test falhou com código {exc.returncode}.")
+        return False
+
+
 def validar_pre_build() -> bool:
     faltando: list[str] = []
     if not os.path.exists(ENTRY_SCRIPT):
@@ -336,10 +391,20 @@ def validar_pre_build() -> bool:
         if not existe:
             faltando.append(origem)
 
+    resumo_instalador = _coletar_resumo_recursos(INSTALLER_REQUIRED_SPECS)
+    for origem, _destino, existe in resumo_instalador:
+        if not existe:
+            faltando.append(origem)
+
     print(DIV)
     print("🔎 Verificação de pré-build")
     print(f"   Entry script: {ENTRY_SCRIPT} -> {'OK' if os.path.exists(ENTRY_SCRIPT) else 'FALTANDO'}")
     _imprimir_resumo_recursos(resumo)
+    print("📦 Recursos adicionais do instalador:")
+    for origem, destino, existe in resumo_instalador:
+        status = "OK" if existe else "FALTANDO"
+        print(f"   [{status}] {origem} -> {destino}")
+    print(DIV)
 
     if faltando:
         print("❌ Pré-build reprovado. Itens ausentes:")
@@ -415,6 +480,56 @@ def _resolver_icone_build() -> str | None:
     return None
 
 
+def _localizar_iscc() -> str:
+    candidatos = [
+        r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+        r"C:\Program Files\Inno Setup 6\ISCC.exe",
+    ]
+    for caminho in candidatos:
+        if os.path.exists(caminho):
+            return caminho
+    raise FileNotFoundError("Inno Setup 6 (ISCC.exe) não encontrado.")
+
+
+def _nome_instalador_final(versao: str) -> str:
+    return f"Setup_OficinaPesca_v{versao}.exe"
+
+
+def _compilar_instalador_final(versao: str) -> str:
+    iscc = _localizar_iscc()
+    output_name = os.path.splitext(_nome_instalador_final(versao))[0]
+    cmd_installer = [
+        iscc,
+        f"/DAppVersion={versao}",
+        f"/DInstallerOutputName={output_name}",
+        INSTALLER_SCRIPT,
+    ]
+    subprocess.run(cmd_installer, check=True)
+    instalador = os.path.join(INSTALLER_OUTPUT_DIR, f"{output_name}.exe")
+    if not os.path.exists(instalador):
+        candidatos = sorted(
+            [
+                os.path.join(INSTALLER_OUTPUT_DIR, nome)
+                for nome in os.listdir(INSTALLER_OUTPUT_DIR)
+                if nome.lower().startswith(f"setup_oficinapesca_v{versao}".lower()) and nome.lower().endswith(".exe")
+            ],
+            key=os.path.getmtime,
+            reverse=True,
+        )
+        if candidatos:
+            instalador = candidatos[0]
+        else:
+            raise FileNotFoundError(f"Instalador final não encontrado em {instalador}.")
+    return instalador
+
+
+def _copiar_instalador_para_distribuicao(instalador: str) -> str:
+    os.makedirs(DISTRIBUTION_DIR, exist_ok=True)
+    destino = os.path.join(DISTRIBUTION_DIR, DISTRIBUTION_INSTALLER_NAME)
+    shutil.copy2(instalador, destino)
+    return destino
+
+
 def _copiar_executavel_com_retry(origem: str, destino: str, tentativas: int = 8, espera_s: float = 1.25) -> str:
     ultimo_erro: Exception | None = None
     for tentativa in range(1, tentativas + 1):
@@ -450,9 +565,9 @@ def _copiar_executavel_com_retry(origem: str, destino: str, tentativas: int = 8,
 
 def build(projeto, versao):
     versao = str(versao or VERSAO).strip() or VERSAO
-    nome = f"Oficina_Pesca_v{versao}"
+    nome = APP_NAME
     print(f"⚙️  Executando PyInstaller para {nome}...")
-    venv_py = os.path.join(".venv", "Scripts", "python.exe")
+    venv_py = _resolver_python_build()
 
     # 1. Limpa as pastas build e dist antigas antes de iniciar a geração de novos arquivos
     for pasta in ["build", "dist"]:
@@ -474,21 +589,10 @@ def build(projeto, versao):
     if not validar_pre_build():
         raise RuntimeError("Pré-build falhou; ajuste os recursos antes de gerar o executável.")
 
-    # Executa o PyInstaller apenas para gerar um novo .spec limpo
-    cmd_spec = [
-        venv_py, '-m', 'PyInstaller',
-        '--clean',
-        '--paths=.',
-        *hidden_import_args,
-        ENTRY_SCRIPT,
-    ]
-    subprocess.run(cmd_spec, check=True)
-    print("✅ Novo arquivo .spec gerado com sucesso!")
-
-    # Agora executa o build final usando o entrypoint atual da estrutura limpa.
+    # Executa diretamente o build final; gerar .spec antes disso só duplica a análise.
     cmd_build = [
-        ".venv\\Scripts\\python.exe", "-m", "PyInstaller",
-        "--onefile",
+        venv_py, "-m", "PyInstaller",
+        "--onedir",
         "--windowed",
         "--clean",
         "--noconfirm",
@@ -508,31 +612,17 @@ def build(projeto, versao):
     subprocess.run(cmd_build, check=True)
     print("✅ Build finalizado com sucesso!")
 
-    # 3. Localizar o executável na pasta dist, copiar para INSTALADOR_FINAL e renomear
-    origem = os.path.join("dist", f"{nome}.exe")
-    pasta_final = "INSTALADOR_FINAL"
-    novo_nome = f"Setup_OficinaPesca_v{versao}.exe"
-    destino = os.path.join(pasta_final, novo_nome)
+    dist_dir = os.path.join("dist", nome)
+    if not os.path.exists(dist_dir):
+        raise FileNotFoundError(f"Diretório do bundle não encontrado em {dist_dir}.")
 
-    print(f"📂 Organizando executável para o deploy...")
-    if not os.path.exists(pasta_final):
-        os.makedirs(pasta_final)
-        print(f"📁 Pasta '{pasta_final}' criada.")
+    print("🛠️  Compilando instalador final com Inno Setup...")
+    instalador = _compilar_instalador_final(versao)
+    print(f"✅ Instalador final gerado: {instalador}")
 
-    if os.path.exists(origem):
-        destino_real = _copiar_executavel_com_retry(origem, destino)
-        print(f"✔️  Executável copiado e renomeado para: {destino_real}")
-    else:
-        print(f"❌ ERRO: Executável não encontrado em {origem}. Verifique o log do PyInstaller.")
-        sys.exit(1)
-
-def executar_distribuicao_github():
-    print("🚀 Iniciando Upload para o GitHub (deploy_release.py)...")
-    venv_py = os.path.join(".venv", "Scripts", "python.exe")
-    if os.path.exists("deploy_release.py"):
-        subprocess.run([venv_py, "deploy_release.py"], check=True)
-    else:
-        print("⚠️  Arquivo deploy_release.py não encontrado.")
+    destino_distribuicao = _copiar_instalador_para_distribuicao(instalador)
+    print(f"📤 Instalador copiado para distribuição: {destino_distribuicao}")
+    return instalador, destino_distribuicao
 
 def main():
     print_header()
@@ -545,20 +635,15 @@ def main():
     if not resumo(projeto, versao, alteracoes):
         print("❌ Build cancelado pelo usuário.")
         return
+    if not executar_smoke_test():
+        print("❌ Abortando build por falha no smoke test.")
+        sys.exit(1)
     limpar_pastas()
-    build(projeto, versao)
-    print("\n📦 Iniciando o empacotamento e validações com gerar_release.bat...")
-    subprocess.run(['gerar_release.bat'], shell=True, check=True)
-
-    print("\n" + DIV)
-    confirmar_deploy = input("🚀 Deseja realizar o Deploy automático para o GitHub agora? (s/n): ").strip().lower()
-    if confirmar_deploy == 's':
-        executar_distribuicao_github()
-    else:
-        print("⏭️  Deploy para o GitHub cancelado pelo usuário.")
+    instalador, destino_distribuicao = build(projeto, versao)
 
     print(DIV)
-    print("🎉 Fluxo de Build e Deploy concluído com sucesso!")
+    print(f"🎉 Fluxo concluído com sucesso. Instalador: {instalador}")
+    print(f"📦 Distribuição atualizada em: {destino_distribuicao}")
     print(DIV)
 
 if __name__ == "__main__":
