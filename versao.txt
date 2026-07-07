@@ -1,3 +1,3 @@
 versao=1.0.27
 novidades=v1.0.27: Dashboard atualizado e instalador oficial com integração ACBr em modo de espera.
-url_download=https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.27/Setup_OficinaPesca_v1.0.27.exe
+url_download=https://raw.githubusercontent.com/frscomercial6-eng/oficina-pesca-updates/main/downloads/Setup_OficinaPesca_v1.0.27.exe
