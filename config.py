@@ -317,7 +317,8 @@ DIRETORIO_DADOS = _obter_diretorio_dados()
 CAMINHO_BANCO_LOCAL = os.path.join(DIRETORIO_DADOS, 'oficina.db')
 CAMINHO_BANCO_INSTALACAO = os.path.join(DIRETORIO_ATUAL, 'oficina.db')
 CAMINHO_BANCO = CAMINHO_BANCO_INSTALACAO
-CAMINHO_LOG = os.path.join(DIRETORIO_ATUAL, 'OficinaPesca', 'logs', 'oficina_debug.txt')
+_DIRETORIO_LOG_BASE = os.environ.get('APPDATA') or os.environ.get('LOCALAPPDATA') or os.environ.get('TEMP') or DIRETORIO_ATUAL
+CAMINHO_LOG = os.path.join(_DIRETORIO_LOG_BASE, 'OficinaDePesca', 'logs', 'oficina_debug.txt')
 
 # â”€â”€â”€ config.cfg â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _ler_cfg() -> configparser.ConfigParser:
