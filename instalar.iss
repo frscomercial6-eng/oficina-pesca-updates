@@ -8,7 +8,7 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.28.0"
+#define AppVersion "1.0.28.1"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
@@ -27,7 +27,7 @@ DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.28.0
+OutputBaseFilename=Setup_OficinaPesca_v1.0.28.1
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -35,7 +35,6 @@ LicenseFile=Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf
 ShowLanguageDialog=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=commandline
-ChangesEnvironment=yes
 SetupIconFile=icone_oficina.ico
 
 [Languages]
@@ -76,27 +75,7 @@ Source: "instala\ACBrMonitorPLUS-DEMO-1.4.0.467-x86-I.exe"; DestDir: "{app}\inst
 Name: "{group}\{#AppName}";           Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\icone_oficina.ico"
 Name: "{group}\Iniciar Servidor Web"; Filename: "{app}\iniciar_servidor.bat"; Comment: "Inicia o servidor para acesso via rede e celular"
 Name: "{group}\Desinstalar";          Filename: "{uninstallexe}"
-Name: "{commondesktop}\Oficina de Pesca";   Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\icone_oficina.ico"; Tasks: desktopicon
-
-[Registry]
-Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: string; ValueName: "OFP_LICENCA_SECRET"; ValueData: "{#LicenseSecret}"; Flags: uninsdeletevalue
-
-[Code]
-procedure LimparRegistroLegado();
-begin
-	RegDeleteKeyIncludingSubkeys(HKCU, 'Software\\OficinaPesca');
-	RegDeleteKeyIncludingSubkeys(HKLM, 'Software\\OficinaPesca');
-	RegDeleteKeyIncludingSubkeys(HKLM, 'SOFTWARE\\WOW6432Node\\OficinaPesca');
-	RegDeleteKeyIncludingSubkeys(HKLM, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Oficina de Pesca_is1');
-	RegDeleteKeyIncludingSubkeys(HKLM, 'SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Oficina de Pesca_is1');
-	RegDeleteKeyIncludingSubkeys(HKLM, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Oficina de Pesca versão 1.0.9 - Instalador_is1');
-end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-	if CurStep = ssInstall then
-		LimparRegistroLegado();
-end;
+Name: "{userdesktop}\Oficina de Pesca";   Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\icone_oficina.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExeName}";        Description: "Abrir {#AppName} agora"; Flags: nowait postinstall skipifsilent

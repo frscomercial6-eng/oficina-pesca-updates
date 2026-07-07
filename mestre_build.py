@@ -10,7 +10,7 @@ import re
 import time
 
 DIV = "═" * 50
-VERSAO = "1.0.28.0"
+VERSAO = "1.0.28.1"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "menu.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -18,6 +18,34 @@ INSTALLER_OUTPUT_DIR = "INSTALADOR_FINAL"
 DISTRIBUTION_DIR = "PACOTE_ENVIO"
 DISTRIBUTION_INSTALLER_NAME = "Oficina_Pesca_Instalador.exe"
 AUTO_MODE = "--auto" in sys.argv or os.environ.get("OFP_BUILD_AUTO") == "1"
+REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _resolver_diretorio_build() -> str:
+    candidatos = []
+    env_build = os.environ.get("OFP_BUILD_SOURCE_DIR", "").strip()
+    if env_build:
+        candidatos.append(env_build)
+    base = os.path.dirname(REPO_ROOT)
+    candidatos.extend(
+        [
+            os.path.join(base, "ORIGINAL", "OFICINA_PESCA_ORIGINAL"),
+            os.path.join(base, "OFICINA_PESCA_PRODUCAO"),
+            REPO_ROOT,
+        ]
+    )
+    for candidato in candidatos:
+        caminho = os.path.abspath(candidato)
+        if not os.path.isdir(caminho):
+            continue
+        if "LIMPA" in os.path.basename(caminho).upper() and caminho != REPO_ROOT:
+            continue
+        if os.path.exists(os.path.join(caminho, ENTRY_SCRIPT)) and os.path.exists(os.path.join(caminho, "config.py")):
+            return caminho
+    return REPO_ROOT
+
+
+BUILD_ROOT = _resolver_diretorio_build()
 
 
 RESOURCE_SPECS = [
@@ -103,6 +131,8 @@ def get_input():
     import sys
     default_projeto = "oficina de pesca"
     default_versao = VERSAO
+    if AUTO_MODE:
+        return default_projeto, default_versao
     args = [arg for arg in sys.argv[1:] if not str(arg).startswith("--")]
     if len(args) >= 2:
         return args[0], args[1]
@@ -355,6 +385,49 @@ def _collect_all_args() -> list[str]:
     return args
 
 
+def _sincronizar_fonte_para_build() -> None:
+    if os.path.abspath(BUILD_ROOT) == os.path.abspath(REPO_ROOT):
+        return
+
+    itens = [
+        ENTRY_SCRIPT,
+        "config.py",
+        "config.json",
+        "config.cfg",
+        "versao.json",
+        "version.txt",
+        "version_info.py",
+        "Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf",
+        INSTALLER_SCRIPT,
+        "instalar_oficial_completo.iss",
+        "fundomenu.png",
+        "LOGO.bmp",
+        "icone_oficina.ico",
+        "Atualizador.exe",
+        "instala",
+        "iniciar_servidor.bat",
+        "servidor.py",
+        "menu.py",
+        "core",
+        "assets",
+        "Documentos",
+        "templates",
+        "static",
+        "apk_celular_distribuicao",
+    ]
+
+    for rel_path in itens:
+        origem = os.path.join(REPO_ROOT, rel_path)
+        destino = os.path.join(BUILD_ROOT, rel_path)
+        if not os.path.exists(origem):
+            continue
+        if os.path.isdir(origem):
+            shutil.copytree(origem, destino, dirs_exist_ok=True)
+        else:
+            os.makedirs(os.path.dirname(destino), exist_ok=True)
+            shutil.copy2(origem, destino)
+
+
 def _resolver_python_build() -> str:
     candidatos = [
         os.path.join(".venv", "Scripts", "python.exe"),
@@ -585,61 +658,68 @@ def build(projeto, versao):
     nome = APP_NAME
     print(f"⚙️  Executando PyInstaller para {nome}...")
     venv_py = _resolver_python_build()
+    _sincronizar_fonte_para_build()
+    old_cwd = os.getcwd()
+    if os.path.abspath(BUILD_ROOT) != os.path.abspath(old_cwd):
+        os.chdir(BUILD_ROOT)
 
-    # 1. Limpa as pastas build e dist antigas antes de iniciar a geração de novos arquivos
-    for pasta in ["build", "dist"]:
-        if os.path.exists(pasta):
-            print(f"🧹 Limpando pasta: {pasta}/")
-            if os.name == "nt":
-                subprocess.run(f'rmdir /s /q {pasta}', shell=True)
-            else:
-                subprocess.run(f'rm -rf {pasta}', shell=True)
+    try:
+        # 1. Limpa as pastas build e dist antigas antes de iniciar a geração de novos arquivos
+        for pasta in ["build", "dist"]:
+            if os.path.exists(pasta):
+                print(f"🧹 Limpando pasta: {pasta}/")
+                if os.name == "nt":
+                    subprocess.run(f'rmdir /s /q {pasta}', shell=True)
+                else:
+                    subprocess.run(f'rm -rf {pasta}', shell=True)
 
-    # 2. Agora gera os arquivos necessários para o build (incluindo o version_file.txt dentro da pasta build recriada)
-    add_data_args, resumo_recursos = _coletar_add_data_args()
-    _imprimir_resumo_recursos(resumo_recursos)
-    version_file_path = _gerar_arquivo_versao_pyinstaller(versao)
-    icone_build = _resolver_icone_build()
-    hidden_import_args = _hidden_import_args()
-    collect_all_args = _collect_all_args()
+        # 2. Agora gera os arquivos necessários para o build (incluindo o version_file.txt dentro da pasta build recriada)
+        add_data_args, resumo_recursos = _coletar_add_data_args()
+        _imprimir_resumo_recursos(resumo_recursos)
+        version_file_path = _gerar_arquivo_versao_pyinstaller(versao)
+        icone_build = _resolver_icone_build()
+        hidden_import_args = _hidden_import_args()
+        collect_all_args = _collect_all_args()
 
-    if not validar_pre_build():
-        raise RuntimeError("Pré-build falhou; ajuste os recursos antes de gerar o executável.")
+        if not validar_pre_build():
+            raise RuntimeError("Pré-build falhou; ajuste os recursos antes de gerar o executável.")
 
-    # Executa diretamente o build final; gerar .spec antes disso só duplica a análise.
-    cmd_build = [
-        venv_py, "-m", "PyInstaller",
-        "--onedir",
-        "--windowed",
-        "--clean",
-        "--noconfirm",
-        "--paths=.",
-        "--name", nome,
-        "--version-file", version_file_path,
-        *hidden_import_args,
-        *collect_all_args,
-        *add_data_args,
-        ENTRY_SCRIPT
-    ]
-    if icone_build:
-        cmd_build[cmd_build.index(ENTRY_SCRIPT):cmd_build.index(ENTRY_SCRIPT)] = ["--icon", icone_build]
-        print(f"🎨 Ícone do executável configurado: {icone_build}")
-    else:
-        print("⚠️  Nenhum arquivo .ico encontrado; executável pode sair com ícone padrão.")
-    subprocess.run(cmd_build, check=True)
-    print("✅ Build finalizado com sucesso!")
+        # Executa diretamente o build final; gerar .spec antes disso só duplica a análise.
+        cmd_build = [
+            venv_py, "-m", "PyInstaller",
+            "--onedir",
+            "--windowed",
+            "--clean",
+            "--noconfirm",
+            "--paths=.",
+            "--name", nome,
+            "--version-file", version_file_path,
+            *hidden_import_args,
+            *collect_all_args,
+            *add_data_args,
+            ENTRY_SCRIPT
+        ]
+        if icone_build:
+            cmd_build[cmd_build.index(ENTRY_SCRIPT):cmd_build.index(ENTRY_SCRIPT)] = ["--icon", icone_build]
+            print(f"🎨 Ícone do executável configurado: {icone_build}")
+        else:
+            print("⚠️  Nenhum arquivo .ico encontrado; executável pode sair com ícone padrão.")
+        subprocess.run(cmd_build, check=True)
+        print("✅ Build finalizado com sucesso!")
 
-    dist_dir = os.path.join("dist", nome)
-    if not os.path.exists(dist_dir):
-        raise FileNotFoundError(f"Diretório do bundle não encontrado em {dist_dir}.")
+        dist_dir = os.path.join("dist", nome)
+        if not os.path.exists(dist_dir):
+            raise FileNotFoundError(f"Diretório do bundle não encontrado em {dist_dir}.")
 
-    print("🛠️  Compilando instalador final com Inno Setup...")
-    instalador = _compilar_instalador_final(versao)
-    print(f"✅ Instalador final gerado: {instalador}")
+        print("🛠️  Compilando instalador final com Inno Setup...")
+        instalador = _compilar_instalador_final(versao)
+        print(f"✅ Instalador final gerado: {instalador}")
 
-    destino_distribuicao = _copiar_instalador_para_distribuicao(instalador)
-    print(f"📤 Instalador copiado para distribuição: {destino_distribuicao}")
-    return instalador, destino_distribuicao
+        destino_distribuicao = _copiar_instalador_para_distribuicao(instalador)
+        print(f"📤 Instalador copiado para distribuição: {destino_distribuicao}")
+        return instalador, destino_distribuicao
+    finally:
+        os.chdir(old_cwd)
 
 def main():
     print_header()

@@ -1,5 +1,5 @@
 {
-  "versao": "1.0.28.0",
-  "novidades": "v1.0.28.0: Correção definitiva de leitura da raiz do executável e logs em APPDATA.",
-  "url_download": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.28.0/Oficina_Pesca_Instalador.exe"
+  "versao": "1.0.28.1",
+  "novidades": "v1.0.28.1: Build a partir da pasta de producao e instalacao sem HKLM/CommonDesktop.",
+  "url_download": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.28.1/Oficina_Pesca_Instalador.exe"
 }
