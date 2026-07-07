@@ -223,6 +223,92 @@ def _obter_diretorio_dados() -> str:
     return _obter_diretorio_execucao()
 
 
+def _caminhos_banco_legado() -> list[str]:
+    caminhos: list[str] = []
+    pf = os.environ.get('ProgramFiles', '')
+    pf86 = os.environ.get('ProgramFiles(x86)', '')
+    for base in (pf, pf86):
+        if not base:
+            continue
+        caminhos.append(os.path.join(base, 'OficinaPesca', 'oficina.db'))
+        caminhos.append(os.path.join(base, 'Oficina de Pesca', 'oficina.db'))
+    return caminhos
+
+
+def _score_db(path: str) -> tuple[int, float]:
+    """Pontua um banco para escolher automaticamente o mais completo e com perfil ADM."""
+    try:
+        if not os.path.exists(path):
+            return (-1, 0.0)
+        mtime = os.path.getmtime(path)
+        size = os.path.getsize(path)
+        score = min(int(size / 1024), 10000)
+
+        conn = sqlite3.connect(path, timeout=1)
+        cur = conn.cursor()
+
+        def _q(sql: str) -> int:
+            try:
+                cur.execute(sql)
+                row = cur.fetchone()
+                return int((row[0] if row else 0) or 0)
+            except Exception:
+                return 0
+
+        tem_usuarios = _q("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='usuarios'") > 0
+        tem_clientes = _q("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='clientes'") > 0
+        tem_os = _q("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='orcamentos_aguardo'") > 0
+
+        if tem_usuarios:
+            score += 500
+        if tem_clientes:
+            score += 200
+        if tem_os:
+            score += 200
+
+        admins = _q("SELECT COUNT(*) FROM usuarios WHERE UPPER(COALESCE(role,''))='ADMIN'") if tem_usuarios else 0
+        clientes = _q("SELECT COUNT(*) FROM clientes") if tem_clientes else 0
+        ordens = _q("SELECT COUNT(*) FROM orcamentos_aguardo") if tem_os else 0
+
+        if admins > 0:
+            score += 4000
+        score += min(clientes, 5000)
+        score += min(ordens, 5000)
+
+        conn.close()
+        return (score, mtime)
+    except Exception:
+        return (-1, 0.0)
+
+
+def _resolver_caminho_banco(caminho_instalacao: str, caminho_local: str) -> str:
+    candidatos = [caminho_instalacao, caminho_local, *_caminhos_banco_legado()]
+    unicos: list[str] = []
+    vistos = set()
+    for p in candidatos:
+        if not p:
+            continue
+        ap = os.path.abspath(p)
+        k = os.path.normcase(ap)
+        if k in vistos:
+            continue
+        vistos.add(k)
+        if os.path.exists(ap):
+            unicos.append(ap)
+
+    if not unicos:
+        return caminho_local
+
+    melhor = max(unicos, key=lambda p: _score_db(p))
+    melhor_score, _ = _score_db(melhor)
+
+    # Se nenhum candidato tiver score válido, mantém a regra tradicional.
+    if melhor_score < 0:
+        return caminho_instalacao if os.path.exists(caminho_instalacao) else caminho_local
+
+    return melhor
+
+
 if getattr(sys, 'frozen', False):
     DIRETORIO_ATUAL = _obter_diretorio_execucao()
     DIRETORIO_RECURSOS = sys._MEIPASS
@@ -233,7 +319,7 @@ else:
 DIRETORIO_DADOS = _obter_diretorio_dados()
 CAMINHO_BANCO_LOCAL = os.path.join(DIRETORIO_DADOS, 'oficina.db')
 CAMINHO_BANCO_INSTALACAO = os.path.join(DIRETORIO_ATUAL, 'oficina.db')
-CAMINHO_BANCO = CAMINHO_BANCO_INSTALACAO if os.path.exists(CAMINHO_BANCO_INSTALACAO) else CAMINHO_BANCO_LOCAL
+CAMINHO_BANCO = _resolver_caminho_banco(CAMINHO_BANCO_INSTALACAO, CAMINHO_BANCO_LOCAL)
 CAMINHO_LOG = os.path.join((os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA') or DIRETORIO_ATUAL), 'OficinaPesca', 'logs', 'oficina_debug.txt')
 
 # â”€â”€â”€ config.cfg â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -22,7 +22,7 @@ AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 DefaultDirName={commonpf32}\Oficina de Pesca
 DefaultGroupName={#AppName}
-UsePreviousAppDir=no
+UsePreviousAppDir=yes
 DisableDirPage=yes
 AllowNoIcons=yes
 
@@ -45,11 +45,7 @@ Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortugue
 Name: "desktopicon"; Description: "Criar ícone na Área de Trabalho"; GroupDescription: "Ícones adicionais:"; Flags: checkedonce
 
 [InstallDelete]
-; Limpeza de instalações legadas antes de copiar a nova versão.
-Type: filesandordirs; Name: "{commonpf32}\OficinaPesca"
-Type: filesandordirs; Name: "{autopf}\OficinaPesca"
-Type: filesandordirs; Name: "{commonpf}\OficinaPesca"
-Type: filesandordirs; Name: "{app}"
+; Mantido intencionalmente sem remoções destrutivas para preservar banco e perfil do cliente.
 
 [Files]
 ; Todos os arquivos gerados pelo PyInstaller (excluindo .env para nao expor credenciais)
