@@ -1,6 +1,6 @@
 {
   "versao": "1.0.27",
   "novidades": "v1.0.27: fusão inicial do ACBr com chamada real da lib no fluxo fiscal do PDV e persistência do retorno fiscal na venda, mantendo atualização manual por binários na raiz.",
-  "url_download": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.27/Oficina_Pesca_Instalador.exe",
-  "download_url": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.27/Oficina_Pesca_Instalador.exe"
+  "url_download": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.27.1/Oficina_Pesca_Instalador.exe",
+  "download_url": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.27.1/Oficina_Pesca_Instalador.exe"
 }
