@@ -11,22 +11,65 @@ import time
 
 DIV = "═" * 50
 VERSAO = "1.0.12"
+ENTRY_SCRIPT = "menu.py"
 
 
 RESOURCE_SPECS = [
     ("assets", "assets"),
     ("fundomenu.png", "."),
+    ("LOGO.bmp", "."),
     ("icone_oficina.ico", "."),
     ("config.cfg", "."),
     ("versao.json", "."),
     ("version.txt", "."),
-    ("google-services.json", "."),
-    ("client_secret_desktop.json", "."),
-    ("credentials.json", "."),
-    ("credentials.txt", "."),
-    ("chave_firebase.json", "."),
     ("Documentos/termos_de_uso.txt", "Documentos"),
     ("Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf", "."),
+]
+
+LOCAL_HIDDEN_IMPORTS = [
+    ("config", "config.py"),
+    ("gestao_os", "gestao_os.py"),
+    ("menu", ENTRY_SCRIPT),
+    ("migracao_fiscal_2027", "migracao_fiscal_2027.py"),
+    ("pdv", "pdv.py"),
+    ("tela_os", "tela_os.py"),
+    ("util_recibo", "util_recibo.py"),
+]
+
+PYINSTALLER_HIDDEN_IMPORTS = [
+    "firebase_admin",
+    "googleapiclient",
+    "googleapiclient.discovery",
+    "googleapiclient.errors",
+    "googleapiclient.http",
+    "googleapiclient._auth",
+    "google_auth_oauthlib",
+    "google_auth_oauthlib.flow",
+    "google.oauth2",
+    "google.oauth2.credentials",
+    "google.oauth2.service_account",
+    "google.auth",
+    "google.auth.transport",
+    "google.auth.transport.requests",
+    "google.auth.exceptions",
+    "oauth2client",
+    "oauth2client.client",
+    "oauth2client.file",
+    "oauth2client.tools",
+    "httplib2",
+    "urllib",
+    "urllib.request",
+    "urllib.error",
+    "ssl",
+    "certifi",
+]
+
+PYINSTALLER_COLLECT_ALL = [
+    "googleapiclient",
+    "google_auth_oauthlib",
+    "google",
+    "google_auth",
+    "google_api_python_client",
 ]
 
 def print_header():
@@ -222,11 +265,11 @@ def _sincronizar_versao_global(nova_versao: str) -> None:
 
 
 def analisar_todos():
-    if not os.path.exists("main.py"):
-        print("❌ Arquivo main.py não encontrado!")
+    if not os.path.exists(ENTRY_SCRIPT):
+        print(f"❌ Arquivo de entrada {ENTRY_SCRIPT} não encontrado!")
         sys.exit(1)
     alteracoes = []
-    with open("main.py", encoding="utf-8") as f:
+    with open(ENTRY_SCRIPT, encoding="utf-8") as f:
         for linha in f:
             if "# TODO:" in linha or "# FIX:" in linha or "# MOD:" in linha:
                 alteracoes.append(linha.strip())
@@ -264,6 +307,48 @@ def _coletar_add_data_args() -> tuple[list[str], list[tuple[str, str, bool]]]:
         if existe:
             add_data_args.extend(["--add-data", f"{origem};{destino}"])
     return add_data_args, resumo
+
+
+def _hidden_import_args() -> list[str]:
+    args: list[str] = []
+    for modulo, caminho in LOCAL_HIDDEN_IMPORTS:
+        if os.path.exists(caminho):
+            args.extend(["--hidden-import", modulo])
+    for modulo in PYINSTALLER_HIDDEN_IMPORTS:
+        args.extend(["--hidden-import", modulo])
+    return args
+
+
+def _collect_all_args() -> list[str]:
+    args: list[str] = []
+    for pacote in PYINSTALLER_COLLECT_ALL:
+        args.append(f"--collect-all={pacote}")
+    return args
+
+
+def validar_pre_build() -> bool:
+    faltando: list[str] = []
+    if not os.path.exists(ENTRY_SCRIPT):
+        faltando.append(ENTRY_SCRIPT)
+
+    _add_data_args, resumo = _coletar_add_data_args()
+    for origem, _destino, existe in resumo:
+        if not existe:
+            faltando.append(origem)
+
+    print(DIV)
+    print("🔎 Verificação de pré-build")
+    print(f"   Entry script: {ENTRY_SCRIPT} -> {'OK' if os.path.exists(ENTRY_SCRIPT) else 'FALTANDO'}")
+    _imprimir_resumo_recursos(resumo)
+
+    if faltando:
+        print("❌ Pré-build reprovado. Itens ausentes:")
+        for item in faltando:
+            print(f"   - {item}")
+        return False
+
+    print("✅ Pré-build aprovado. Recursos e entrypoint localizados.")
+    return True
 
 
 def _imprimir_resumo_recursos(resumo: list[tuple[str, str, bool]]) -> None:
@@ -383,36 +468,24 @@ def build(projeto, versao):
     _imprimir_resumo_recursos(resumo_recursos)
     version_file_path = _gerar_arquivo_versao_pyinstaller(versao)
     icone_build = _resolver_icone_build()
+    hidden_import_args = _hidden_import_args()
+    collect_all_args = _collect_all_args()
 
-    # Mapeamento de todos os módulos locais para evitar ModuleNotFoundError no executável
-    modulos_locais = [
-        'menu', 'config', 'tela_planos', 'tela_os',
-        'tela_financeiro', 'clientes', 'gestao_os', 'util_recibo',
-        'core', 'core.modulos', 'core.financeiro', 'core.financeiro.calculos'
-    ]
+    if not validar_pre_build():
+        raise RuntimeError("Pré-build falhou; ajuste os recursos antes de gerar o executável.")
+
     # Executa o PyInstaller apenas para gerar um novo .spec limpo
     cmd_spec = [
         venv_py, '-m', 'PyInstaller',
         '--clean',
         '--paths=.',
-        '--hidden-import=menu',
-        '--hidden-import=config',
-        '--hidden-import=tela_planos',
-        '--hidden-import=tela_os',
-        '--hidden-import=tela_financeiro',
-        '--hidden-import=clientes',
-        '--hidden-import=gestao_os',
-        '--hidden-import=util_recibo',
-        '--hidden-import=core',
-        '--hidden-import=core.modulos',
-        '--hidden-import=core.financeiro',
-        '--hidden-import=core.financeiro.calculos',
-        'login.py',
+        *hidden_import_args,
+        ENTRY_SCRIPT,
     ]
     subprocess.run(cmd_spec, check=True)
     print("✅ Novo arquivo .spec gerado com sucesso!")
 
-    # Agora executa o build final usando o script login.py como alvo
+    # Agora executa o build final usando o entrypoint atual da estrutura limpa.
     cmd_build = [
         ".venv\\Scripts\\python.exe", "-m", "PyInstaller",
         "--onefile",
@@ -422,56 +495,13 @@ def build(projeto, versao):
         "--paths=.",
         "--name", nome,
         "--version-file", version_file_path,
-        "--hidden-import=menu",
-        "--hidden-import=config",
-        "--hidden-import=tela_planos",
-        "--hidden-import=tela_os",
-        "--hidden-import=tela_financeiro",
-        "--hidden-import=clientes",
-        "--hidden-import=gestao_os",
-        "--hidden-import=util_recibo",
-        "--hidden-import=core",
-        "--hidden-import=core.modulos",
-        "--hidden-import=core.financeiro",
-        "--hidden-import=core.financeiro.calculos",
-        "--hidden-import=firebase_admin",
-        # Google API e OAuth2
-        "--hidden-import=googleapiclient",
-        "--hidden-import=googleapiclient.discovery",
-        "--hidden-import=googleapiclient.errors",
-        "--hidden-import=googleapiclient.http",
-        "--hidden-import=googleapiclient._auth",
-        "--hidden-import=google_auth_oauthlib",
-        "--hidden-import=google_auth_oauthlib.flow",
-        "--hidden-import=google.oauth2",
-        "--hidden-import=google.oauth2.credentials",
-        "--hidden-import=google.oauth2.service_account",
-        "--hidden-import=google.auth",
-        "--hidden-import=google.auth.transport",
-        "--hidden-import=google.auth.transport.requests",
-        "--hidden-import=google.auth.exceptions",
-        "--hidden-import=oauth2client",
-        "--hidden-import=oauth2client.client",
-        "--hidden-import=oauth2client.file",
-        "--hidden-import=oauth2client.tools",
-        "--hidden-import=httplib2",
-        # Garantir dependências de atualização automática
-        "--hidden-import=urllib",
-        "--hidden-import=urllib.request",
-        "--hidden-import=urllib.error",
-        "--hidden-import=ssl",
-        "--hidden-import=certifi",
-        # Coleta completa de dados/metadados dos pacotes Google
-        "--collect-all=googleapiclient",
-        "--collect-all=google_auth_oauthlib",
-        "--collect-all=google",
-        "--collect-all=google_auth",
-        "--collect-all=google_api_python_client",
+        *hidden_import_args,
+        *collect_all_args,
         *add_data_args,
-        "login.py"
+        ENTRY_SCRIPT
     ]
     if icone_build:
-        cmd_build[cmd_build.index("login.py"):cmd_build.index("login.py")] = ["--icon", icone_build]
+        cmd_build[cmd_build.index(ENTRY_SCRIPT):cmd_build.index(ENTRY_SCRIPT)] = ["--icon", icone_build]
         print(f"🎨 Ícone do executável configurado: {icone_build}")
     else:
         print("⚠️  Nenhum arquivo .ico encontrado; executável pode sair com ícone padrão.")
