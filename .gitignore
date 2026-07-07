@@ -1,0 +1,26 @@
+# Build outputs
+INSTALADOR_FINAL/
+PACOTE_ENVIO/
+build/
+dist/
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local database and runtime artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# PyInstaller specs generated locally
+*.spec
