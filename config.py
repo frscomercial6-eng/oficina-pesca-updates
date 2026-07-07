@@ -217,9 +217,6 @@ def _obter_diretorio_execucao() -> str:
 
 
 def _obter_diretorio_dados() -> str:
-    if getattr(sys, 'frozen', False):
-        base = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA') or _obter_diretorio_execucao()
-        return os.path.join(base, 'OficinaPesca', 'dados')
     return _obter_diretorio_execucao()
 
 
@@ -319,8 +316,8 @@ else:
 DIRETORIO_DADOS = _obter_diretorio_dados()
 CAMINHO_BANCO_LOCAL = os.path.join(DIRETORIO_DADOS, 'oficina.db')
 CAMINHO_BANCO_INSTALACAO = os.path.join(DIRETORIO_ATUAL, 'oficina.db')
-CAMINHO_BANCO = _resolver_caminho_banco(CAMINHO_BANCO_INSTALACAO, CAMINHO_BANCO_LOCAL)
-CAMINHO_LOG = os.path.join((os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA') or DIRETORIO_ATUAL), 'OficinaPesca', 'logs', 'oficina_debug.txt')
+CAMINHO_BANCO = CAMINHO_BANCO_INSTALACAO
+CAMINHO_LOG = os.path.join(DIRETORIO_ATUAL, 'OficinaPesca', 'logs', 'oficina_debug.txt')
 
 # â”€â”€â”€ config.cfg â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _ler_cfg() -> configparser.ConfigParser:

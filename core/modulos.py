@@ -10,6 +10,8 @@ atual: módulo Oficina habilitado e módulo PDV desabilitado.
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +20,11 @@ class FeatureFlagManager:
     """Consulta módulos habilitados a partir do config.json."""
 
     def __init__(self, config_path: str | Path | None = None) -> None:
-        base_dir = Path(__file__).resolve().parent.parent
-        self.config_path = Path(config_path) if config_path else base_dir / "config.json"
+        if config_path:
+            self.config_path = Path(config_path)
+        else:
+            base_dir = Path(os.path.dirname(os.path.abspath(sys.executable))) if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+            self.config_path = base_dir / "config.json"
 
     def _default_flags(self) -> dict[str, bool]:
         return {

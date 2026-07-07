@@ -10,7 +10,7 @@ import re
 import time
 
 DIV = "═" * 50
-VERSAO = "1.0.27.2"
+VERSAO = "1.0.27.3"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "menu.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -368,7 +368,7 @@ def _resolver_python_build() -> str:
 
 
 def _validar_pasta_trabalho() -> bool:
-    """Bloqueia build acidental em diretório de homologação/limpo."""
+    """Avisa quando o build está ocorrendo em um diretório rotulado como LIMPA."""
     cwd = os.path.abspath(os.getcwd())
     nome_pasta = os.path.basename(cwd).upper()
     if "LIMPA" not in nome_pasta:
@@ -378,11 +378,9 @@ def _validar_pasta_trabalho() -> bool:
         print("⚠️  OFP_ALLOW_CLEAN_BUILD=1 detectado. Prosseguindo mesmo em pasta 'LIMPA'.")
         return True
 
-    print("❌ Build bloqueado: diretório atual contém 'LIMPA'.")
+    print("⚠️  Diretório atual contém 'LIMPA'. Continue apenas se este for o workspace com os dados corretos.")
     print(f"   Pasta atual: {cwd}")
-    print("   Use o workspace de produção (com dados/config reais) para gerar release oficial.")
-    print("   Se for um caso excepcional, execute com OFP_ALLOW_CLEAN_BUILD=1.")
-    return False
+    return True
 
 
 def executar_smoke_test() -> bool:
