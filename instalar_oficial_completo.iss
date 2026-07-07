@@ -4,7 +4,7 @@
 ; ==============================================================
 
 #define AppName "Oficina de Pesca versão {#AppVersion} - Instalador"
-#define AppVersion "1.0.27.5"
+#define AppVersion "1.0.28.0"
 #define AppPublisher "FRS Solutions"
 #define AppExeName "Oficina_Pesca.exe"
 
@@ -16,7 +16,7 @@ AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\OficinaPesca
 DefaultGroupName={#AppName}
 OutputDir=Output
-OutputBaseFilename=Instalador_Oficina_Pesca_Oficial_v1.0.27.5
+OutputBaseFilename=Instalador_Oficina_Pesca_Oficial_v1.0.28.0
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
