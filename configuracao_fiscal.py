@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import ctypes
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -53,6 +55,167 @@ class EmissorFiscalStandalone(InterfaceEmissorFiscal):
             "status": "ignorado",
             "motivo": "configuracao_fiscal_incompleta_ou_sem_adaptador",
             "sale_id": venda.get("sale_id"),
+        }
+
+    def cancelar_nota(self, referencia: str) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "modo": "standalone",
+            "status": "ignorado",
+            "motivo": "adaptador_fiscal_nao_configurado",
+            "referencia": referencia,
+        }
+
+    def consultar_status(self, referencia: str) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "modo": "standalone",
+            "status": "indisponivel",
+            "motivo": "adaptador_fiscal_nao_configurado",
+            "referencia": referencia,
+        }
+
+
+class EmissorFiscalACBr(InterfaceEmissorFiscal):
+    _DLL_PRIORIDADE = (
+        "ACBrLibNFe64.dll",
+        "ACBrLibNFe32.dll",
+        "ACBrNFe64.dll",
+        "ACBrNFe32.dll",
+    )
+
+    def __init__(self, configuracao: ConfiguracaoFiscal):
+        self.configuracao = configuracao
+
+    def _resolver_pasta_acbr(self) -> str:
+        parametros = self.configuracao.parametros_gerais if isinstance(self.configuracao.parametros_gerais, dict) else {}
+        pasta = str(parametros.get("acbr_path") or "").strip()
+        if pasta:
+            return pasta
+        return os.path.join(os.path.dirname(CAMINHO_BANCO), "acbr")
+
+    def _bibliotecas_disponiveis(self) -> list[str]:
+        pasta = self._resolver_pasta_acbr()
+        if not os.path.isdir(pasta):
+            return []
+        try:
+            return sorted(nome for nome in os.listdir(pasta) if nome.lower().endswith(".dll"))
+        except Exception:
+            return []
+
+    def _resolver_dll(self, dlls: list[str]) -> str:
+        pasta = self._resolver_pasta_acbr()
+        mapa = {nome.lower(): nome for nome in dlls}
+        for preferida in self._DLL_PRIORIDADE:
+            nome = mapa.get(preferida.lower())
+            if nome:
+                return os.path.join(pasta, nome)
+        if dlls:
+            return os.path.join(pasta, dlls[0])
+        return ""
+
+    def _chamada_real_acbr(self, dll_path: str) -> dict[str, Any]:
+        if os.name != "nt":
+            return {
+                "ok": False,
+                "motivo": "acbr_suportado_apenas_windows",
+                "dll_path": dll_path,
+            }
+
+        try:
+            lib = ctypes.WinDLL(dll_path)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "motivo": "falha_carregar_dll",
+                "dll_path": dll_path,
+                "erro": str(exc),
+            }
+
+        retorno: dict[str, Any] = {
+            "ok": True,
+            "dll_path": dll_path,
+            "funcao_inicializar_encontrada": hasattr(lib, "NFE_Inicializar"),
+            "funcao_finalizar_encontrada": hasattr(lib, "NFE_Finalizar"),
+        }
+
+        if not hasattr(lib, "NFE_Inicializar"):
+            retorno["ok"] = False
+            retorno["motivo"] = "funcao_nfe_inicializar_nao_encontrada"
+            return retorno
+
+        parametros = self.configuracao.parametros_gerais if isinstance(self.configuracao.parametros_gerais, dict) else {}
+        ini_path = str(parametros.get("acbr_ini") or "").strip()
+        crypt_key = str(parametros.get("acbr_crypt_key") or "").strip()
+
+        inicializar = lib.NFE_Inicializar
+        inicializar.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+        inicializar.restype = ctypes.c_int
+
+        ret_init = int(
+            inicializar(
+                ini_path.encode("utf-8") if ini_path else b"",
+                crypt_key.encode("utf-8") if crypt_key else b"",
+            )
+        )
+        retorno["ret_inicializar"] = ret_init
+
+        if hasattr(lib, "NFE_Finalizar"):
+            finalizar = lib.NFE_Finalizar
+            finalizar.argtypes = []
+            finalizar.restype = ctypes.c_int
+            retorno["ret_finalizar"] = int(finalizar())
+
+        retorno["ok"] = ret_init == 0
+        if ret_init != 0:
+            retorno["motivo"] = "nfe_inicializar_retorno_nao_zero"
+        return retorno
+
+    def enviar_venda(self, venda: dict[str, Any]) -> dict[str, Any]:
+        payload = montar_payload_nota_fiscal(venda)
+        dlls = self._bibliotecas_disponiveis()
+        if not dlls:
+            return {
+                "ok": False,
+                "modo": "acbr",
+                "status": "erro",
+                "motivo": "bibliotecas_acbr_ausentes",
+                "sale_id": payload.get("sale_id"),
+                "acbr_path": self._resolver_pasta_acbr(),
+            }
+
+        dll_path = self._resolver_dll(dlls)
+        chamada = self._chamada_real_acbr(dll_path)
+        ok = bool(chamada.get("ok"))
+
+        return {
+            "ok": ok,
+            "modo": "acbr",
+            "status": "chamada_real_ok" if ok else "erro",
+            "sale_id": payload.get("sale_id"),
+            "acbr_path": self._resolver_pasta_acbr(),
+            "acbr_dll": dll_path,
+            "acbr_dlls": dlls,
+            "acbr_call": chamada,
+            "payload": payload,
+        }
+
+    def cancelar_nota(self, referencia: str) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "modo": "acbr",
+            "status": "pendente_cancelamento",
+            "referencia": referencia,
+            "acbr_path": self._resolver_pasta_acbr(),
+        }
+
+    def consultar_status(self, referencia: str) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "modo": "acbr",
+            "status": "pendente_consulta",
+            "referencia": referencia,
+            "acbr_path": self._resolver_pasta_acbr(),
         }
 
 
@@ -110,23 +273,11 @@ def montar_payload_nota_fiscal(venda: dict[str, Any]) -> dict[str, Any]:
         "items": itens_payload,
     }
 
-    def cancelar_nota(self, referencia: str) -> dict[str, Any]:
-        return {
-            "ok": True,
-            "modo": "standalone",
-            "status": "ignorado",
-            "motivo": "adaptador_fiscal_nao_configurado",
-            "referencia": referencia,
-        }
 
-    def consultar_status(self, referencia: str) -> dict[str, Any]:
-        return {
-            "ok": True,
-            "modo": "standalone",
-            "status": "indisponivel",
-            "motivo": "adaptador_fiscal_nao_configurado",
-            "referencia": referencia,
-        }
+def _provedor_fiscal(configuracao: ConfiguracaoFiscal) -> str:
+    parametros = configuracao.parametros_gerais if isinstance(configuracao.parametros_gerais, dict) else {}
+    provedor = str(parametros.get("provedor") or "").strip().lower()
+    return provedor
 
 
 def _tabela_configuracao_fiscal_existe() -> bool:
@@ -200,6 +351,9 @@ def configuracao_fiscal_esta_pronta(configuracao: ConfiguracaoFiscal | None = No
 
 def obter_emissor_fiscal(configuracao: ConfiguracaoFiscal | None = None) -> InterfaceEmissorFiscal:
     cfg = configuracao or carregar_configuracao_fiscal()
+    if _provedor_fiscal(cfg) == "acbr":
+        return EmissorFiscalACBr(cfg)
+
     if not configuracao_fiscal_esta_pronta(cfg):
         return EmissorFiscalStandalone()
 

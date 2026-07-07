@@ -259,6 +259,16 @@ class FrmPDV(ctk.CTkToplevel):
                 cur.execute("ALTER TABLE pdv_vendas ADD COLUMN forma_pagamento TEXT")
             if "status" not in cols_pdv_vendas:
                 cur.execute("ALTER TABLE pdv_vendas ADD COLUMN status TEXT DEFAULT 'aberto'")
+            if "fiscal_modo" not in cols_pdv_vendas:
+                cur.execute("ALTER TABLE pdv_vendas ADD COLUMN fiscal_modo TEXT")
+            if "fiscal_status" not in cols_pdv_vendas:
+                cur.execute("ALTER TABLE pdv_vendas ADD COLUMN fiscal_status TEXT")
+            if "fiscal_referencia" not in cols_pdv_vendas:
+                cur.execute("ALTER TABLE pdv_vendas ADD COLUMN fiscal_referencia TEXT")
+            if "fiscal_retorno_json" not in cols_pdv_vendas:
+                cur.execute("ALTER TABLE pdv_vendas ADD COLUMN fiscal_retorno_json TEXT")
+            if "fiscal_atualizado_em" not in cols_pdv_vendas:
+                cur.execute("ALTER TABLE pdv_vendas ADD COLUMN fiscal_atualizado_em TEXT")
 
             # Compatibilidade com versão antiga: aproveita colunas existentes.
             if "data_hora" in cols_pdv_vendas:
@@ -300,6 +310,43 @@ class FrmPDV(ctk.CTkToplevel):
             cols_financeiro = {str(row[1]).lower() for row in cur.fetchall()}
             if "descricao" not in cols_financeiro:
                 cur.execute("ALTER TABLE financeiro_geral ADD COLUMN descricao TEXT")
+            conn.commit()
+
+    def _persistir_retorno_fiscal(self, venda_id, retorno_fiscal):
+        if int(venda_id or 0) <= 0:
+            return
+
+        dados = retorno_fiscal if isinstance(retorno_fiscal, dict) else {"raw": str(retorno_fiscal)}
+        referencia = (
+            str(dados.get("referencia") or "").strip()
+            or str(dados.get("chave") or "").strip()
+            or str(dados.get("sale_id") or "").strip()
+            or str(venda_id)
+        )
+        modo = str(dados.get("modo") or "standalone").strip() or "standalone"
+        status = str(dados.get("status") or ("ok" if dados.get("ok") else "erro")).strip() or "erro"
+
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE pdv_vendas
+                SET fiscal_modo = ?,
+                    fiscal_status = ?,
+                    fiscal_referencia = ?,
+                    fiscal_retorno_json = ?,
+                    fiscal_atualizado_em = ?
+                WHERE id = ?
+                """,
+                (
+                    modo,
+                    status,
+                    referencia,
+                    json.dumps(dados, ensure_ascii=False),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    int(venda_id),
+                ),
+            )
             conn.commit()
 
     def _carregar_colunas_produtos(self):
@@ -1808,10 +1855,21 @@ class FrmPDV(ctk.CTkToplevel):
             venda["sale_id"] = venda_id
             self._ultima_venda = venda
 
-            # Preparacao fiscal CBS/IBS: chamada opcional sem bloquear operacao do PDV.
-            # Em modo stand-alone (sem configuracao/adaptador), a venda segue normalmente.
+            retorno_fiscal = None
+            # Chamada fiscal opcional sem bloquear a operação principal do PDV.
             try:
-                tentar_enviar_venda(venda)
+                retorno_fiscal = tentar_enviar_venda(venda)
+            except Exception:
+                retorno_fiscal = {
+                    "ok": False,
+                    "modo": "standalone",
+                    "status": "erro",
+                    "motivo": "falha_na_chamada_fiscal",
+                    "sale_id": venda_id,
+                }
+
+            try:
+                self._persistir_retorno_fiscal(venda_id, retorno_fiscal)
             except Exception:
                 pass
 
