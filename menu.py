@@ -142,16 +142,13 @@ def verificar_e_criar_tabelas():
                     preco_custo REAL DEFAULT 0,
                     preco_venda REAL DEFAULT 0,
                     estoque INTEGER DEFAULT 0,
+                    ncm VARCHAR(8),
                     compatibilidade TEXT,
                     quantidade_minima INTEGER DEFAULT 3
                 )
             """)
-            cursor.execute("PRAGMA table_info(produtos)")
-            colunas = {str(row[1] or "") for row in cursor.fetchall()}
-            if "compatibilidade" not in colunas:
-                cursor.execute("ALTER TABLE produtos ADD COLUMN compatibilidade TEXT")
-            if "quantidade_minima" not in colunas:
-                cursor.execute("ALTER TABLE produtos ADD COLUMN quantidade_minima INTEGER DEFAULT 3")
+            # Não altera schema existente do cliente em runtime.
+            # Apenas garante criação inicial quando não há tabela.
             conn.commit()
         logger.info("Tabelas verificadas e prontas.")
     except Exception as e:
@@ -183,7 +180,7 @@ class FrmProdutos(ctk.CTkToplevel):
         f_busca.pack(pady=(0, 8), padx=20, fill="x")
         self.ent_busca_estoque = ctk.CTkEntry(
             f_busca,
-            placeholder_text="Buscar por Nome ou Compatibilidade",
+            placeholder_text="Buscar por Nome, NCM ou Compatibilidade",
             width=420,
         )
         self.ent_busca_estoque.pack(side="left", padx=(8, 8), pady=8, fill="x", expand=True)
@@ -206,33 +203,36 @@ class FrmProdutos(ctk.CTkToplevel):
         self.ent_compat = ctk.CTkEntry(f_inputs, placeholder_text="Compatibilidade", width=170)
         self.ent_compat.grid(row=0, column=1, padx=5, pady=5)
 
+        self.ent_ncm = ctk.CTkEntry(f_inputs, placeholder_text="NCM (8 dígitos)", width=130)
+        self.ent_ncm.grid(row=0, column=2, padx=5, pady=5)
+
         self.ent_custo = ctk.CTkEntry(f_inputs, placeholder_text="R$ Custo", width=90)
-        self.ent_custo.grid(row=0, column=2, padx=5, pady=5)
+        self.ent_custo.grid(row=0, column=3, padx=5, pady=5)
 
         # NOVO CAMPO: % Margem
         self.ent_margem = ctk.CTkEntry(f_inputs, placeholder_text="% Margem", width=90)
-        self.ent_margem.grid(row=0, column=3, padx=5, pady=5)
+        self.ent_margem.grid(row=0, column=4, padx=5, pady=5)
         # Ao digitar na margem, ele pode calcular a venda automaticamente
         self.ent_margem.bind("<KeyRelease>", self.calcular_venda_por_margem)
 
         self.ent_venda = ctk.CTkEntry(f_inputs, placeholder_text="R$ Venda", width=90)
-        self.ent_venda.grid(row=0, column=4, padx=5, pady=5)
+        self.ent_venda.grid(row=0, column=5, padx=5, pady=5)
 
         self.ent_qtd = ctk.CTkEntry(f_inputs, placeholder_text="Qtd", width=60)
-        self.ent_qtd.grid(row=0, column=5, padx=5, pady=5)
+        self.ent_qtd.grid(row=0, column=6, padx=5, pady=5)
 
         self.ent_qtd_min = ctk.CTkEntry(f_inputs, placeholder_text="Qtd Min (3)", width=90)
-        self.ent_qtd_min.grid(row=0, column=6, padx=5, pady=5)
+        self.ent_qtd_min.grid(row=0, column=7, padx=5, pady=5)
         self.ent_qtd_min.insert(0, "3")
 
         # BOTÕES
-        ctk.CTkButton(f_inputs, text="Salvar", fg_color="green", width=100, command=self.salvar_produto).grid(row=0, column=7, padx=5)
-        ctk.CTkButton(f_inputs, text="Excluir", fg_color="red", width=100, command=self.excluir_produto).grid(row=0, column=8, padx=5)
+        ctk.CTkButton(f_inputs, text="Salvar", fg_color="green", width=100, command=self.salvar_produto).grid(row=0, column=8, padx=5)
+        ctk.CTkButton(f_inputs, text="Excluir", fg_color="red", width=100, command=self.excluir_produto).grid(row=0, column=9, padx=5)
 
         # --- TABELA ---
         self.tabela = ttk.Treeview(
             self,
-            columns=("id", "nome", "custo", "venda", "margem", "qtd", "compat", "qtd_min"),
+            columns=("id", "nome", "custo", "venda", "margem", "qtd", "ncm", "compat", "qtd_min"),
             show="headings",
         )
         self.tabela.heading("id", text="ID")
@@ -241,12 +241,14 @@ class FrmProdutos(ctk.CTkToplevel):
         self.tabela.heading("venda", text="R$ VENDA")
         self.tabela.heading("margem", text="LUCRO %")
         self.tabela.heading("qtd", text="QTD")
+        self.tabela.heading("ncm", text="NCM")
         self.tabela.heading("compat", text="COMPATIBILIDADE")
         self.tabela.heading("qtd_min", text="QTD MIN")
         
         self.tabela.column("id", width=40)
         self.tabela.column("nome", width=250)
         self.tabela.column("margem", width=100, anchor="center")
+        self.tabela.column("ncm", width=110, anchor="center")
         self.tabela.column("compat", width=220)
         self.tabela.column("qtd_min", width=90, anchor="center")
         self.tabela.pack(pady=20, padx=20, fill="both", expand=True)
@@ -299,6 +301,10 @@ class FrmProdutos(ctk.CTkToplevel):
             # Durante digitação parcial, apenas ignora valores inválidos temporários.
             return
 
+    def _colunas_produtos(self, cursor):
+        cursor.execute("PRAGMA table_info(produtos)")
+        return {str(row[1] or "").lower() for row in cursor.fetchall()}
+
     def salvar_produto(self):
         # 1. Pega o nome e remove espaços extras
         nome = self.ent_nome.get().upper().strip()
@@ -313,6 +319,7 @@ class FrmProdutos(ctk.CTkToplevel):
             margem_txt = self.ent_margem.get().replace(",", ".").strip()
             venda_txt = self.ent_venda.get().replace(",", ".").strip()
             qtd_txt = self.ent_qtd.get().strip()
+            ncm = "".join(ch for ch in self.ent_ncm.get().strip() if ch.isdigit())[:8]
             compat = self.ent_compat.get().strip().upper()
             qtd_min_txt = self.ent_qtd_min.get().strip()
 
@@ -330,21 +337,30 @@ class FrmProdutos(ctk.CTkToplevel):
             # 5. Salva no Banco de Dados
             with get_db_connection() as conn:
                 cursor = conn.cursor()
-                # Nota: O banco só guarda Nome, Custo, Venda e Qtd.
-                # A margem a gente calcula apenas para mostrar na tela.
+                colunas = self._colunas_produtos(cursor)
+                campos = ["nome", "preco_custo", "preco_venda", "estoque"]
+                valores = [nome, c, v, q]
+
+                if "ncm" in colunas:
+                    campos.append("ncm")
+                    valores.append(ncm)
+                if "compatibilidade" in colunas:
+                    campos.append("compatibilidade")
+                    valores.append(compat)
+                if "quantidade_minima" in colunas:
+                    campos.append("quantidade_minima")
+                    valores.append(q_min)
+
+                placeholders = ", ".join(["?"] * len(campos))
                 cursor.execute(
-                    """
-                    INSERT INTO produtos
-                        (nome, preco_custo, preco_venda, estoque, compatibilidade, quantidade_minima)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (nome, c, v, q, compat, q_min),
+                    f"INSERT INTO produtos ({', '.join(campos)}) VALUES ({placeholders})",
+                    valores,
                 )
                 conn.commit()
             
             # 6. Atualiza a lista e limpa os campos
             self.carregar_dados()
-            for e in [self.ent_nome, self.ent_compat, self.ent_custo, self.ent_margem, self.ent_venda, self.ent_qtd, self.ent_qtd_min]:
+            for e in [self.ent_nome, self.ent_compat, self.ent_ncm, self.ent_custo, self.ent_margem, self.ent_venda, self.ent_qtd, self.ent_qtd_min]:
                 e.delete(0, 'end')
             self.ent_qtd_min.insert(0, "3")
             
@@ -360,38 +376,57 @@ class FrmProdutos(ctk.CTkToplevel):
         try:
             with get_db_connection() as conn:
                 cursor = conn.cursor()
+                colunas = self._colunas_produtos(cursor)
+                tem_ncm = "ncm" in colunas
+                tem_compat = "compatibilidade" in colunas
+                tem_qmin = "quantidade_minima" in colunas
+
+                select_ncm = "COALESCE(ncm,'')" if tem_ncm else "''"
+                select_compat = "COALESCE(compatibilidade,'')" if tem_compat else "''"
+                select_qmin = "COALESCE(quantidade_minima, 3)" if tem_qmin else "3"
+
                 termo = ""
                 if hasattr(self, "ent_busca_estoque"):
                     termo = str(self.ent_busca_estoque.get() or "").strip().upper()
                 if termo:
                     like = f"%{termo}%"
+                    filtros = ["UPPER(COALESCE(nome, '')) LIKE ?"]
+                    params = [like]
+                    if tem_ncm:
+                        filtros.append("UPPER(COALESCE(ncm, '')) LIKE ?")
+                        params.append(like)
+                    if tem_compat:
+                        filtros.append("UPPER(COALESCE(compatibilidade, '')) LIKE ?")
+                        params.append(like)
+
                     cursor.execute(
-                        """
+                        f"""
                         SELECT id, nome, preco_custo, preco_venda, estoque,
-                               COALESCE(compatibilidade,''), COALESCE(quantidade_minima, 3)
+                               {select_ncm},
+                               {select_compat}, {select_qmin}
                         FROM produtos
-                        WHERE UPPER(COALESCE(nome, '')) LIKE ?
-                           OR UPPER(COALESCE(compatibilidade, '')) LIKE ?
+                        WHERE {' OR '.join(filtros)}
                         ORDER BY nome
                         """,
-                        (like, like),
+                        tuple(params),
                     )
                 else:
                     cursor.execute(
-                        """
+                        f"""
                         SELECT id, nome, preco_custo, preco_venda, estoque,
-                               COALESCE(compatibilidade,''), COALESCE(quantidade_minima, 3)
+                               {select_ncm},
+                               {select_compat}, {select_qmin}
                         FROM produtos
                         ORDER BY nome
                         """
                     )
                 for linha in cursor.fetchall():
-                    id_p, nome, custo, venda, qtd, compat, qtd_min = linha
+                    id_p, nome, custo, venda, qtd, ncm, compat, qtd_min = linha
                     margem = ((venda - custo) / custo * 100) if custo > 0 else 0
                     self.tabela.insert(
                         "",
                         "end",
-                        values=(id_p, nome, f"{custo:.2f}", f"{venda:.2f}", f"{margem:.1f}%", qtd, compat, qtd_min),
+                        values=(id_p, nome, f"{custo:.2f}", f"{venda:.2f}", f"{margem:.1f}%", qtd, ncm, compat, qtd_min),
                     )
         except Exception as e:
             logger.exception("Erro ao carregar produtos: %s", e)
@@ -1875,6 +1910,10 @@ class FrmMenu(ctk.CTk):
         self._dash_mode = "COMPLETO"
         self._dashboard_auto_after_id = None
         self._dados_pendencias_dashboard = ([], [], []) #
+        self._bg_pil_original = None
+        self._bg_ctk_image = None
+        self._bg_area_label = None
+        self._bg_cache_size = None
 
         # Adia a criação da UI para garantir root estável
         self.after(250, self.setup_ui)
@@ -1953,8 +1992,11 @@ class FrmMenu(ctk.CTk):
         self.area_conteudo = ctk.CTkFrame(self.frame_layout, fg_color="#0f1720")
         self.area_conteudo.pack(side="left", fill="both", expand=True)
 
-        self.dashboard_frame = ctk.CTkFrame(self.area_conteudo, fg_color="#0f1720")
+        self.dashboard_frame = ctk.CTkFrame(self.area_conteudo, fg_color="transparent")
         self.dashboard_frame.pack(fill="both", expand=True, padx=24, pady=24)
+        self._configurar_fundo_dashboard()
+        self.bind("<Configure>", self._atualizar_fundo)
+        self.area_conteudo.bind("<Configure>", self._atualizar_fundo)
 
         # 2. Configurações Visuais
         self._aplicar_maximizacao()
@@ -2626,6 +2668,37 @@ class FrmMenu(ctk.CTk):
         except Exception as e:
             logger.exception("Erro ao verificar primeira instalação: %s", e)
 
+    def _configurar_fundo_dashboard(self):
+        if Image is None:
+            return
+        caminhos = [
+            _resolver_recurso("fundomenu.png"),
+            _resolver_recurso("assets", "fundomenu.png"),
+            os.path.join(_base_runtime_dir(), "fundomenu.png"),
+        ]
+        caminho_fundo = next((p for p in caminhos if os.path.exists(p)), "")
+        if not caminho_fundo:
+            return
+
+        try:
+            img = Image.open(caminho_fundo).convert("RGB")
+            escurecedor = Image.new("RGB", img.size, (0, 0, 0))
+            # Camada escura para manter legibilidade em dark mode.
+            self._bg_pil_original = Image.blend(img, escurecedor, 0.45)
+        except Exception as exc:
+            logger.info("Falha ao carregar fundo do dashboard: %s", exc)
+            self._bg_pil_original = None
+            return
+
+        if self._bg_area_label is None or not self._bg_area_label.winfo_exists():
+            self._bg_area_label = ctk.CTkLabel(self.area_conteudo, text="", fg_color="transparent")
+            self._bg_area_label.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        self._bg_area_label.lower()
+        self.dashboard_frame.lift()
+        self._bg_cache_size = None
+        self.after(80, self._atualizar_fundo)
+
     def _atualizar_fundo(self, _event=None):
         if self._bg_pil_original is None or Image is None or ImageTk is None:
             return
@@ -2672,11 +2745,13 @@ class FrmMenu(ctk.CTk):
         recorte = redimensionada.crop((left, top, left + largura, top + altura))
 
         self._bg_ctk_image = ctk.CTkImage(light_image=recorte, dark_image=recorte, size=(largura, altura))
-        self._bg_label.configure(image=self._bg_ctk_image, text="")
         if hasattr(self, "_bg_area_label") and self._bg_area_label is not None:
             self._bg_area_label.configure(image=self._bg_ctk_image, text="")
-            self._bg_area_label.lift()
-        self._bg_label.lower()
+            self._bg_area_label.lower()
+        if hasattr(self, "dashboard_frame") and self.dashboard_frame is not None:
+            self.dashboard_frame.lift()
+        if hasattr(self, "sidebar") and self.sidebar is not None:
+            self.sidebar.lift()
 
     def abrir_gestao_os(self):
         try:

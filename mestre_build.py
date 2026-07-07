@@ -10,7 +10,7 @@ import re
 import time
 
 DIV = "═" * 50
-VERSAO = "1.0.12"
+VERSAO = "1.0.27"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "menu.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -41,6 +41,7 @@ INSTALLER_REQUIRED_SPECS = [
 ]
 
 LOCAL_HIDDEN_IMPORTS = [
+    ("adaptador_acbr", "adaptador_acbr.py"),
     ("clientes", "clientes.py"),
     ("config", "config.py"),
     ("gestao_os", "gestao_os.py"),

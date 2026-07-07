@@ -8,7 +8,7 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.12"
+#define AppVersion "1.0.27"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
@@ -27,7 +27,7 @@ DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.12
+OutputBaseFilename=Setup_OficinaPesca_v1.0.27
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -74,6 +74,7 @@ Source: "client_secret_desktop.json"; DestDir: "{app}\_internal"; Flags: ignorev
 Source: "client_secret_desktop.json"; DestDir: "{app}\_internal\assets"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "templates\*";          DestDir: "{app}\templates"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "static\*";             DestDir: "{app}\static";    Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "instala\ACBrMonitorPLUS-DEMO-1.4.0.467-x86-I.exe"; DestDir: "{app}\instala"; Flags: ignoreversion
 [Icons]
 Name: "{group}\{#AppName}";           Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\icone_oficina.ico"
 Name: "{group}\Iniciar Servidor Web"; Filename: "{app}\iniciar_servidor.bat"; Comment: "Inicia o servidor para acesso via rede e celular"
@@ -102,3 +103,4 @@ end;
 
 [Run]
 Filename: "{app}\{#AppExeName}";        Description: "Abrir {#AppName} agora"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\instala\ACBrMonitorPLUS-DEMO-1.4.0.467-x86-I.exe"; Parameters: "/VERYSILENT"; Flags: nowait postinstall skipifsilent
