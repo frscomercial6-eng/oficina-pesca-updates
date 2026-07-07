@@ -10,7 +10,7 @@ import re
 import time
 
 DIV = "═" * 50
-VERSAO = "1.0.27.1"
+VERSAO = "1.0.27.2"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "menu.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -367,6 +367,24 @@ def _resolver_python_build() -> str:
     raise FileNotFoundError("Nenhum interpretador Python válido foi encontrado para o build.")
 
 
+def _validar_pasta_trabalho() -> bool:
+    """Bloqueia build acidental em diretório de homologação/limpo."""
+    cwd = os.path.abspath(os.getcwd())
+    nome_pasta = os.path.basename(cwd).upper()
+    if "LIMPA" not in nome_pasta:
+        return True
+
+    if os.environ.get("OFP_ALLOW_CLEAN_BUILD") == "1":
+        print("⚠️  OFP_ALLOW_CLEAN_BUILD=1 detectado. Prosseguindo mesmo em pasta 'LIMPA'.")
+        return True
+
+    print("❌ Build bloqueado: diretório atual contém 'LIMPA'.")
+    print(f"   Pasta atual: {cwd}")
+    print("   Use o workspace de produção (com dados/config reais) para gerar release oficial.")
+    print("   Se for um caso excepcional, execute com OFP_ALLOW_CLEAN_BUILD=1.")
+    return False
+
+
 def executar_smoke_test() -> bool:
     print(DIV)
     print(f"🧪 Smoke test de imports: {ENTRY_SCRIPT}")
@@ -627,6 +645,8 @@ def build(projeto, versao):
 
 def main():
     print_header()
+    if not _validar_pasta_trabalho():
+        sys.exit(1)
     projeto, versao = get_input()
     if versao != VERSAO:
         print(f"ℹ️  Versão informada ({versao}) ignorada. Usando fonte única do mestre_build.py: {VERSAO}")

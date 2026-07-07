@@ -8,7 +8,7 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.27.1"
+#define AppVersion "1.0.27.2"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
@@ -27,7 +27,7 @@ DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.27.1
+OutputBaseFilename=Setup_OficinaPesca_v1.0.27.2
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -49,7 +49,7 @@ Name: "desktopicon"; Description: "Criar ícone na Área de Trabalho"; GroupDesc
 
 [Files]
 ; Todos os arquivos gerados pelo PyInstaller (excluindo .env para nao expor credenciais)
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,apk_celular_distribuicao\*,oficina.db"
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,apk_celular_distribuicao\*,*.db,config.cfg,config.json,versao.json"
 ; Apenas os dois arquivos de distribuicao mobile (APK assinado + instrucoes)
 Source: "apk_celular_distribuicao\oficina_app_signed.apk"; DestDir: "{app}\apk_celular_distribuicao"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "apk_celular_distribuicao\instrucoes_instalacao.txt"; DestDir: "{app}\apk_celular_distribuicao"; Flags: ignoreversion skipifsourcedoesntexist
