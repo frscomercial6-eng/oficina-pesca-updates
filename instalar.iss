@@ -8,7 +8,7 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.27"
+#define AppVersion "1.0.27.1"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
@@ -27,7 +27,7 @@ DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.27
+OutputBaseFilename=Setup_OficinaPesca_v1.0.27.1
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -70,6 +70,7 @@ Source: "config.cfg";           DestDir: "{app}"; Flags: ignoreversion onlyifdoe
 Source: "config.json";          DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist
 Source: "versao.json";          DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist
 Source: "iniciar_servidor.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Atualizador.exe";      DestDir: "{app}"; Flags: ignoreversion
 Source: "client_secret_desktop.json"; DestDir: "{app}\_internal"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "client_secret_desktop.json"; DestDir: "{app}\_internal\assets"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "templates\*";          DestDir: "{app}\templates"; Flags: ignoreversion recursesubdirs createallsubdirs

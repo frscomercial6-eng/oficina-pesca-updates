@@ -10,7 +10,7 @@ import re
 import time
 
 DIV = "═" * 50
-VERSAO = "1.0.27"
+VERSAO = "1.0.27.1"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "menu.py"
 INSTALLER_SCRIPT = "instalar.iss"
