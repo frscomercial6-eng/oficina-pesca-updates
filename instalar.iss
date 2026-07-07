@@ -8,7 +8,7 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.27.4"
+#define AppVersion "1.0.27.5"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
@@ -20,20 +20,20 @@ AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={commonpf32}\Oficina de Pesca
+DefaultDirName={localappdata}\Oficina de Pesca
 DefaultGroupName={#AppName}
 UsePreviousAppDir=yes
 DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.27.4
+OutputBaseFilename=Setup_OficinaPesca_v1.0.27.5
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 LicenseFile=Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf
 ShowLanguageDialog=yes
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=commandline
 ChangesEnvironment=yes
 SetupIconFile=icone_oficina.ico
