@@ -17,6 +17,7 @@ INSTALLER_SCRIPT = "instalar.iss"
 INSTALLER_OUTPUT_DIR = "INSTALADOR_FINAL"
 DISTRIBUTION_DIR = "PACOTE_ENVIO"
 DISTRIBUTION_INSTALLER_NAME = "Oficina_Pesca_Instalador.exe"
+DISTRIBUTION_BOOTSTRAPPER_NAME = "Atualizador.exe"
 AUTO_MODE = "--auto" in sys.argv or os.environ.get("OFP_BUILD_AUTO") == "1"
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -26,12 +27,12 @@ def _resolver_diretorio_build() -> str:
     env_build = os.environ.get("OFP_BUILD_SOURCE_DIR", "").strip()
     if env_build:
         candidatos.append(env_build)
+    candidatos.append(REPO_ROOT)
     base = os.path.dirname(REPO_ROOT)
     candidatos.extend(
         [
             os.path.join(base, "ORIGINAL", "OFICINA_PESCA_ORIGINAL"),
             os.path.join(base, "OFICINA_PESCA_PRODUCAO"),
-            REPO_ROOT,
         ]
     )
     for candidato in candidatos:
@@ -64,6 +65,7 @@ INSTALLER_REQUIRED_SPECS = [
     ("config.json", "."),
     ("iniciar_servidor.bat", "."),
     ("servidor.py", "."),
+    ("Atualizador.exe", "."),
     ("static", "static"),
     ("templates", "templates"),
 ]
@@ -435,8 +437,9 @@ def _resolver_python_build() -> str:
         sys.executable,
     ]
     for caminho in candidatos:
-        if caminho and os.path.exists(caminho):
-            return caminho
+        caminho_abs = os.path.abspath(caminho) if caminho else ""
+        if caminho_abs and os.path.exists(caminho_abs):
+            return caminho_abs
     raise FileNotFoundError("Nenhum interpretador Python válido foi encontrado para o build.")
 
 
@@ -620,6 +623,30 @@ def _copiar_instalador_para_distribuicao(instalador: str) -> str:
     return destino
 
 
+def _garantir_bootstrapper_no_bundle(dist_dir: str) -> str:
+    origem = os.path.join(BUILD_ROOT, "Atualizador.exe")
+    if not os.path.exists(origem):
+        raise FileNotFoundError(
+            "Atualizador.exe não encontrado na raiz de build. "
+            "Este arquivo é obrigatório para o fluxo de atualização."
+        )
+
+    destino = os.path.join(dist_dir, "Atualizador.exe")
+    _copiar_executavel_com_retry(origem, destino)
+    if not os.path.exists(destino):
+        raise FileNotFoundError(f"Falha ao garantir Atualizador.exe no bundle: {destino}")
+    return destino
+
+
+def _copiar_bootstrapper_para_distribuicao(bootstrapper_bundle: str) -> str:
+    os.makedirs(DISTRIBUTION_DIR, exist_ok=True)
+    destino = os.path.join(DISTRIBUTION_DIR, DISTRIBUTION_BOOTSTRAPPER_NAME)
+    shutil.copy2(bootstrapper_bundle, destino)
+    if not os.path.exists(destino):
+        raise FileNotFoundError(f"Falha ao copiar bootstrapper para distribuição: {destino}")
+    return destino
+
+
 def _copiar_executavel_com_retry(origem: str, destino: str, tentativas: int = 8, espera_s: float = 1.25) -> str:
     ultimo_erro: Exception | None = None
     for tentativa in range(1, tentativas + 1):
@@ -711,12 +738,17 @@ def build(projeto, versao):
         if not os.path.exists(dist_dir):
             raise FileNotFoundError(f"Diretório do bundle não encontrado em {dist_dir}.")
 
+        caminho_bootstrapper = _garantir_bootstrapper_no_bundle(dist_dir)
+        print(f"✅ Bootstrapper de atualização garantido no bundle: {caminho_bootstrapper}")
+
         print("🛠️  Compilando instalador final com Inno Setup...")
         instalador = _compilar_instalador_final(versao)
         print(f"✅ Instalador final gerado: {instalador}")
 
         destino_distribuicao = _copiar_instalador_para_distribuicao(instalador)
+        destino_bootstrapper = _copiar_bootstrapper_para_distribuicao(caminho_bootstrapper)
         print(f"📤 Instalador copiado para distribuição: {destino_distribuicao}")
+        print(f"📤 Bootstrapper copiado para distribuição: {destino_bootstrapper}")
         return instalador, destino_distribuicao
     finally:
         os.chdir(old_cwd)
