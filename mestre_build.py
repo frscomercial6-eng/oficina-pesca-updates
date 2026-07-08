@@ -8,16 +8,20 @@ import sys
 import subprocess
 import re
 import time
+import zipfile
 
 DIV = "═" * 50
 VERSAO = "1.0.28.1"
 APP_NAME = "Oficina_Pesca"
-ENTRY_SCRIPT = "menu.py"
+ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
 INSTALLER_OUTPUT_DIR = "INSTALADOR_FINAL"
 DISTRIBUTION_DIR = "PACOTE_ENVIO"
 DISTRIBUTION_INSTALLER_NAME = "Oficina_Pesca_Instalador.exe"
 DISTRIBUTION_BOOTSTRAPPER_NAME = "Atualizador.exe"
+PORTABLE_STAGE_DIR = os.path.join(INSTALLER_OUTPUT_DIR, APP_NAME)
+PORTABLE_OUTPUT_DIR = "Output"
+PORTABLE_ZIP_NAME = "Oficina_Pesca_Portatil.zip"
 AUTO_MODE = "--auto" in sys.argv or os.environ.get("OFP_BUILD_AUTO") == "1"
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -70,12 +74,26 @@ INSTALLER_REQUIRED_SPECS = [
     ("templates", "templates"),
 ]
 
+PORTABLE_REQUIRED_SPECS = [
+    ("templates", "templates"),
+    ("static", "static"),
+    ("assets", "assets"),
+    ("servidor.py", "."),
+    ("config.py", "."),
+    ("iniciar_servidor.bat", "."),
+    ("config.json", "."),
+    ("config.cfg", "."),
+    ("versao.json", "."),
+    ("version.txt", "."),
+]
+
 LOCAL_HIDDEN_IMPORTS = [
     ("adaptador_acbr", "adaptador_acbr.py"),
     ("clientes", "clientes.py"),
     ("config", "config.py"),
     ("gestao_os", "gestao_os.py"),
-    ("menu", ENTRY_SCRIPT),
+    ("menu", "menu.py"),
+    ("login", "login.py"),
     ("migracao_fiscal_2027", "migracao_fiscal_2027.py"),
     ("pdv", "pdv.py"),
     ("shutdown_utils", "shutdown_utils.py"),
@@ -619,6 +637,8 @@ def _compilar_instalador_final(versao: str) -> str:
 def _copiar_instalador_para_distribuicao(instalador: str) -> str:
     os.makedirs(DISTRIBUTION_DIR, exist_ok=True)
     destino = os.path.join(DISTRIBUTION_DIR, DISTRIBUTION_INSTALLER_NAME)
+    print(f"🧾 CÓPIA instalador -> origem: {os.path.abspath(instalador)}")
+    print(f"🧾 CÓPIA instalador -> destino: {os.path.abspath(destino)}")
     shutil.copy2(instalador, destino)
     return destino
 
@@ -656,15 +676,140 @@ def _garantir_bootstrapper_no_bundle(dist_dir: str) -> str:
 def _copiar_bootstrapper_para_distribuicao(bootstrapper_bundle: str) -> str:
     os.makedirs(DISTRIBUTION_DIR, exist_ok=True)
     destino = os.path.join(DISTRIBUTION_DIR, DISTRIBUTION_BOOTSTRAPPER_NAME)
+    print(f"🧾 CÓPIA bootstrapper -> origem: {os.path.abspath(bootstrapper_bundle)}")
+    print(f"🧾 CÓPIA bootstrapper -> destino: {os.path.abspath(destino)}")
     shutil.copy2(bootstrapper_bundle, destino)
     if not os.path.exists(destino):
         raise FileNotFoundError(f"Falha ao copiar bootstrapper para distribuição: {destino}")
     return destino
 
 
+def _resolver_origem_recurso(rel_path: str) -> str:
+    candidatos = [
+        os.path.join(BUILD_ROOT, rel_path),
+        os.path.join(REPO_ROOT, rel_path),
+    ]
+    for caminho in candidatos:
+        if os.path.exists(caminho):
+            return caminho
+    raise FileNotFoundError(f"Recurso obrigatório não encontrado: {rel_path}")
+
+
+def _copiar_recurso_para_stage(rel_path: str, dest_rel: str, stage_dir: str) -> str:
+    origem = _resolver_origem_recurso(rel_path)
+    if dest_rel in (".", ""):
+        destino_base = stage_dir
+    else:
+        destino_base = os.path.join(stage_dir, dest_rel)
+
+    if os.path.isdir(origem):
+        destino = os.path.join(destino_base, os.path.basename(rel_path.rstrip("\\/"))) if dest_rel in (".", "") else destino_base
+        os.makedirs(os.path.dirname(destino) if os.path.splitext(destino)[1] else destino, exist_ok=True)
+        if os.path.splitext(destino)[1]:
+            # Segurança: se por engano destino for arquivo, ajusta para pasta de mesmo nome.
+            destino = os.path.splitext(destino)[0]
+        shutil.copytree(origem, destino, dirs_exist_ok=True)
+        return destino
+
+    os.makedirs(destino_base, exist_ok=True)
+    destino = os.path.join(destino_base, os.path.basename(rel_path))
+    shutil.copy2(origem, destino)
+    return destino
+
+
+def _montar_stage_portatil(dist_dir: str, bootstrapper_bundle: str) -> str:
+    stage_dir = PORTABLE_STAGE_DIR
+    if os.path.exists(stage_dir):
+        shutil.rmtree(stage_dir, ignore_errors=True)
+
+    print(f"🧾 Stage portátil -> origem bundle: {os.path.abspath(dist_dir)}")
+    print(f"🧾 Stage portátil -> destino: {os.path.abspath(stage_dir)}")
+    shutil.copytree(dist_dir, stage_dir, dirs_exist_ok=True)
+
+    destino_bootstrapper = os.path.join(stage_dir, "Atualizador.exe")
+    _copiar_executavel_com_retry(bootstrapper_bundle, destino_bootstrapper)
+
+    for rel_path, dest_rel in PORTABLE_REQUIRED_SPECS:
+        destino = _copiar_recurso_para_stage(rel_path, dest_rel, stage_dir)
+        print(f"🧾 Stage portátil recurso -> {rel_path} => {os.path.abspath(destino)}")
+
+    return stage_dir
+
+
+def _validar_stage_portatil(stage_dir: str) -> None:
+    obrigatorios = [
+        os.path.join(stage_dir, f"{APP_NAME}.exe"),
+        os.path.join(stage_dir, "Atualizador.exe"),
+        os.path.join(stage_dir, "templates"),
+        os.path.join(stage_dir, "static"),
+        os.path.join(stage_dir, "assets"),
+        os.path.join(stage_dir, "servidor.py"),
+        os.path.join(stage_dir, "config.py"),
+        os.path.join(stage_dir, "iniciar_servidor.bat"),
+    ]
+    faltando = [p for p in obrigatorios if not os.path.exists(p)]
+    if faltando:
+        raise FileNotFoundError(
+            "Pacote portátil incompleto em INSTALADOR_FINAL/Oficina_Pesca. Itens ausentes: " + ", ".join(faltando)
+        )
+
+
+def _gerar_zip_portatil(stage_dir: str) -> tuple[str, str]:
+    os.makedirs(PORTABLE_OUTPUT_DIR, exist_ok=True)
+    zip_output = os.path.join(PORTABLE_OUTPUT_DIR, PORTABLE_ZIP_NAME)
+    if os.path.exists(zip_output):
+        os.remove(zip_output)
+
+    with zipfile.ZipFile(zip_output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for raiz, _dirs, arquivos in os.walk(stage_dir):
+            for nome in arquivos:
+                caminho = os.path.join(raiz, nome)
+                arcname = os.path.relpath(caminho, stage_dir)
+                zf.write(caminho, arcname)
+
+    os.makedirs(DISTRIBUTION_DIR, exist_ok=True)
+    destino_pacote = os.path.join(DISTRIBUTION_DIR, PORTABLE_ZIP_NAME)
+    shutil.copy2(zip_output, destino_pacote)
+    return zip_output, destino_pacote
+
+
+def _copiar_artefatos_para_instalador_final(instalador: str, bootstrapper_bundle: str, versao: str) -> tuple[str, str]:
+    os.makedirs(INSTALLER_OUTPUT_DIR, exist_ok=True)
+
+    setup_destino = os.path.join(INSTALLER_OUTPUT_DIR, _nome_instalador_final(versao))
+    bootstrapper_destino = os.path.join(INSTALLER_OUTPUT_DIR, "Atualizador.exe")
+
+    print(f"🧾 CÓPIA INSTALADOR_FINAL setup -> origem: {os.path.abspath(instalador)}")
+    print(f"🧾 CÓPIA INSTALADOR_FINAL setup -> destino: {os.path.abspath(setup_destino)}")
+    print(f"🧾 CÓPIA INSTALADOR_FINAL bootstrapper -> origem: {os.path.abspath(bootstrapper_bundle)}")
+    print(f"🧾 CÓPIA INSTALADOR_FINAL bootstrapper -> destino: {os.path.abspath(bootstrapper_destino)}")
+
+    _copiar_executavel_com_retry(instalador, setup_destino)
+    _copiar_executavel_com_retry(bootstrapper_bundle, bootstrapper_destino)
+
+    # Força atualização da data de modificação para evidenciar o refresh no INSTALADOR_FINAL.
+    agora = time.time()
+    for caminho in [setup_destino, bootstrapper_destino]:
+        if os.path.exists(caminho):
+            os.utime(caminho, (agora, agora))
+
+    faltando: list[str] = []
+    for caminho in [setup_destino, bootstrapper_destino]:
+        if not os.path.exists(caminho):
+            faltando.append(caminho)
+
+    if faltando:
+        raise FileNotFoundError(
+            "Falha ao atualizar INSTALADOR_FINAL. Itens ausentes: " + ", ".join(faltando)
+        )
+
+    return setup_destino, bootstrapper_destino
+
+
 def _validar_pacote_distribuicao(instalador_destino: str, bootstrapper_destino: str) -> None:
     faltando: list[str] = []
-    for caminho in [instalador_destino, bootstrapper_destino]:
+    zip_portatil = os.path.join(DISTRIBUTION_DIR, PORTABLE_ZIP_NAME)
+    for caminho in [instalador_destino, bootstrapper_destino, zip_portatil]:
         if not os.path.exists(caminho):
             faltando.append(caminho)
     if faltando:
@@ -674,9 +819,19 @@ def _validar_pacote_distribuicao(instalador_destino: str, bootstrapper_destino: 
 
 
 def _copiar_executavel_com_retry(origem: str, destino: str, tentativas: int = 8, espera_s: float = 1.25) -> str:
+    origem_abs = os.path.abspath(origem)
+    destino_abs = os.path.abspath(destino)
+    if origem_abs == destino_abs:
+        if os.path.exists(origem_abs):
+            print(f"🧾 CÓPIA ignorada (origem=destino): {origem_abs}")
+            return destino
+        raise FileNotFoundError(f"Origem e destino apontam para arquivo inexistente: {origem}")
+
     ultimo_erro: Exception | None = None
     for tentativa in range(1, tentativas + 1):
         try:
+            print(f"🧾 CÓPIA executável tentativa {tentativa}/{tentativas} -> origem: {origem_abs}")
+            print(f"🧾 CÓPIA executável tentativa {tentativa}/{tentativas} -> destino: {destino_abs}")
             if os.path.exists(destino):
                 os.remove(destino)
             shutil.copy2(origem, destino)
@@ -767,9 +922,25 @@ def build(projeto, versao):
         caminho_bootstrapper = _garantir_bootstrapper_no_bundle(dist_dir)
         print(f"✅ Bootstrapper de atualização garantido no bundle: {caminho_bootstrapper}")
 
+        stage_portatil = _montar_stage_portatil(dist_dir, caminho_bootstrapper)
+        _validar_stage_portatil(stage_portatil)
+        print(f"✅ Stage portátil validado em: {stage_portatil}")
+
+        zip_portatil, zip_portatil_distribuicao = _gerar_zip_portatil(stage_portatil)
+        print(f"📦 ZIP portátil gerado: {zip_portatil}")
+        print(f"📤 ZIP portátil copiado para distribuição: {zip_portatil_distribuicao}")
+
         print("🛠️  Compilando instalador final com Inno Setup...")
         instalador = _compilar_instalador_final(versao)
         print(f"✅ Instalador final gerado: {instalador}")
+
+        setup_instalador_final, bootstrapper_instalador_final = _copiar_artefatos_para_instalador_final(
+            instalador,
+            caminho_bootstrapper,
+            versao,
+        )
+        print(f"📦 Setup garantido em INSTALADOR_FINAL: {setup_instalador_final}")
+        print(f"📦 Bootstrapper garantido em INSTALADOR_FINAL: {bootstrapper_instalador_final}")
 
         destino_distribuicao = _copiar_instalador_para_distribuicao(instalador)
         destino_bootstrapper = _copiar_bootstrapper_para_distribuicao(caminho_bootstrapper)

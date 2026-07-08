@@ -3493,4 +3493,4 @@ def iniciar_sistema(usuario: str = "", role: str = "VENDEDOR", senha_login: str 
 
 
 if __name__ == "__main__":
-    iniciar_sistema()
+    raise SystemExit("Fluxo direto desabilitado. Execute login.py para autenticar.")
