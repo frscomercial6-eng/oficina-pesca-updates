@@ -623,13 +623,28 @@ def _copiar_instalador_para_distribuicao(instalador: str) -> str:
     return destino
 
 
+def _resolver_origem_bootstrapper() -> str:
+    candidatos = [
+        os.path.join(BUILD_ROOT, "Atualizador.exe"),
+        os.path.join(REPO_ROOT, "Atualizador.exe"),
+    ]
+    for caminho in candidatos:
+        if os.path.exists(caminho):
+            return caminho
+    raise FileNotFoundError(
+        "Atualizador.exe não encontrado. Verifique a presença do arquivo em: "
+        + " | ".join(candidatos)
+    )
+
+
 def _garantir_bootstrapper_no_bundle(dist_dir: str) -> str:
-    origem = os.path.join(BUILD_ROOT, "Atualizador.exe")
-    if not os.path.exists(origem):
-        raise FileNotFoundError(
-            "Atualizador.exe não encontrado na raiz de build. "
-            "Este arquivo é obrigatório para o fluxo de atualização."
-        )
+    origem = _resolver_origem_bootstrapper()
+
+    # Se o arquivo vier da raiz do repositório, replica também para BUILD_ROOT
+    # para manter o diretório de build consistente para próximas etapas.
+    destino_build_root = os.path.join(BUILD_ROOT, "Atualizador.exe")
+    if os.path.abspath(origem) != os.path.abspath(destino_build_root):
+        _copiar_executavel_com_retry(origem, destino_build_root)
 
     destino = os.path.join(dist_dir, "Atualizador.exe")
     _copiar_executavel_com_retry(origem, destino)
@@ -645,6 +660,17 @@ def _copiar_bootstrapper_para_distribuicao(bootstrapper_bundle: str) -> str:
     if not os.path.exists(destino):
         raise FileNotFoundError(f"Falha ao copiar bootstrapper para distribuição: {destino}")
     return destino
+
+
+def _validar_pacote_distribuicao(instalador_destino: str, bootstrapper_destino: str) -> None:
+    faltando: list[str] = []
+    for caminho in [instalador_destino, bootstrapper_destino]:
+        if not os.path.exists(caminho):
+            faltando.append(caminho)
+    if faltando:
+        raise FileNotFoundError(
+            "Pacote final incompleto em PACOTE_ENVIO. Itens ausentes: " + ", ".join(faltando)
+        )
 
 
 def _copiar_executavel_com_retry(origem: str, destino: str, tentativas: int = 8, espera_s: float = 1.25) -> str:
@@ -747,6 +773,7 @@ def build(projeto, versao):
 
         destino_distribuicao = _copiar_instalador_para_distribuicao(instalador)
         destino_bootstrapper = _copiar_bootstrapper_para_distribuicao(caminho_bootstrapper)
+        _validar_pacote_distribuicao(destino_distribuicao, destino_bootstrapper)
         print(f"📤 Instalador copiado para distribuição: {destino_distribuicao}")
         print(f"📤 Bootstrapper copiado para distribuição: {destino_bootstrapper}")
         return instalador, destino_distribuicao
