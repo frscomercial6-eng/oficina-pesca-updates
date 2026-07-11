@@ -1,0 +1,101 @@
+name: Build e Release (main)
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-release-main
+  cancel-in-progress: true
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    env:
+      PYTHONIOENCODING: utf-8
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_NO_PYTHON_VERSION_WARNING: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Setup Java (Android/Gradle)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar pacotes Android necessários
+        shell: pwsh
+        run: |
+          cmd /c "echo y|sdkmanager --licenses >nul"
+          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Instalar Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") -and -not (Test-Path "C:\Program Files\Inno Setup 6\ISCC.exe")) {
+            throw "Inno Setup (ISCC.exe) não encontrado após instalação."
+          }
+
+      - name: Instalar dependências Python para build
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install pyinstaller customtkinter pillow bcrypt fastapi uvicorn "python-jose[cryptography]" python-multipart firebase-admin google-api-python-client google-auth-oauthlib google-auth python-dotenv requests fpdf2 reportlab zeroconf
+
+      - name: Build completo (exe + instalador + zip portátil + apk)
+        shell: pwsh
+        run: |
+          python mestre_build.py --auto
+
+      - name: Ler versão do projeto
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Get-Content version.txt -Raw).Trim()
+          if ([string]::IsNullOrWhiteSpace($v)) { throw "version.txt vazio" }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "tag=v$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Publicar Release com artefatos
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ steps.version.outputs.tag }}
+          name: Oficina de Pesca v${{ steps.version.outputs.version }}
+          allowUpdates: true
+          updateOnlyUnreleased: false
+          replacesArtifacts: true
+          makeLatest: true
+          artifacts: >-
+            PACOTE_ENVIO/Oficina_Pesca_Instalador.exe,
+            PACOTE_ENVIO/Oficina_Pesca_Portatil.zip,
+            PACOTE_ENVIO/apk_celular/Oficina_Pesca_WebView.apk,
+            PACOTE_ENVIO/Atualizador.exe
+          artifactErrorsFailBuild: true
+          body: |
+            Release automática gerada pelo GitHub Actions na branch main.
+
+            Artefatos publicados:
+            - Instalador: Oficina_Pesca_Instalador.exe
+            - Portátil: Oficina_Pesca_Portatil.zip
+            - APK: Oficina_Pesca_WebView.apk
+            - Bootstrapper: Atualizador.exe
