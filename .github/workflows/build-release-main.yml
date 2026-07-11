@@ -70,20 +70,19 @@ jobs:
             $env:GOOGLE_CLIENT_SECRET_DESKTOP_JSON | Out-File -FilePath "client_secret_desktop.json" -Encoding utf8
             Write-Host "client_secret_desktop.json criado a partir de secret do GitHub."
           } else {
-            Write-Warning "Secret GOOGLE_CLIENT_SECRET_DESKTOP_JSON não definido. Gerando placeholder para permitir build." 
-            @'
-{
-  "installed": {
-    "client_id": "placeholder.apps.googleusercontent.com",
-    "project_id": "oficina-pesca-ci",
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_secret": "placeholder",
-    "redirect_uris": ["http://localhost"]
-  }
-}
-'@ | Out-File -FilePath "client_secret_desktop.json" -Encoding utf8
+            Write-Warning "Secret GOOGLE_CLIENT_SECRET_DESKTOP_JSON não definido. Gerando placeholder para permitir build."
+            $placeholder = @{
+              installed = @{
+                client_id = "placeholder.apps.googleusercontent.com"
+                project_id = "oficina-pesca-ci"
+                auth_uri = "https://accounts.google.com/o/oauth2/auth"
+                token_uri = "https://oauth2.googleapis.com/token"
+                auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+                client_secret = "placeholder"
+                redirect_uris = @("http://localhost")
+              }
+            } | ConvertTo-Json -Depth 6
+            Set-Content -Path "client_secret_desktop.json" -Value $placeholder -Encoding utf8
           }
 
       - name: Build completo (exe + instalador + zip portátil + apk)
