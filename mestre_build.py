@@ -440,12 +440,17 @@ def _validar_apk_gerado(caminho_apk: str) -> dict:
 
 
 def _gerar_log_saude_sistema(versao: str, apk_path: str, instalador_path: str = "") -> str:
-    from config import obter_status_acesso_centralizado, obter_firebase_web_config, obter_config_backup_nuvem
+    from config import inicializar_banco, obter_status_acesso_centralizado, obter_firebase_web_config, obter_config_backup_nuvem
 
     os.makedirs("logs", exist_ok=True)
     caminho_log = os.path.join("logs", "saude_sistema_producao.json")
     apk_info = _validar_apk_gerado(apk_path)
     instalador_abs = os.path.abspath(instalador_path) if instalador_path else ""
+
+    try:
+        inicializar_banco()
+    except Exception:
+        pass
 
     payload = {
         "status": "Produção Autônoma",

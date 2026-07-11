@@ -3128,20 +3128,35 @@ def obter_status_trial():
     hoje_ordinal = date.today().toordinal()
     data_limite = ""
 
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT OR IGNORE INTO configuracoes (chave, valor) VALUES ('trial_inicio_ordinal', ?)",
-            (hoje_ordinal,)
-        )
-        conn.commit()
+    def _ler_trial() -> tuple[int, int]:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR IGNORE INTO configuracoes (chave, valor) VALUES ('trial_inicio_ordinal', ?)",
+                (hoje_ordinal,)
+            )
+            conn.commit()
 
-        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'trial_inicio_ordinal'")
-        row = cursor.fetchone()
+            cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'trial_inicio_ordinal'")
+            row = cursor.fetchone()
 
-        try:
-            inicio_ordinal = int(row[0]) if row and row[0] is not None else hoje_ordinal
-        except Exception:
+            try:
+                inicio = int(row[0]) if row and row[0] is not None else hoje_ordinal
+            except Exception:
+                inicio = hoje_ordinal
+            return inicio, hoje_ordinal
+
+    try:
+        inicio_ordinal, _ = _ler_trial()
+    except Exception as exc:
+        msg_exc = str(exc)
+        if "no such table: configuracoes" in msg_exc.lower():
+            try:
+                inicializar_banco()
+                inicio_ordinal, _ = _ler_trial()
+            except Exception:
+                inicio_ordinal = hoje_ordinal
+        else:
             inicio_ordinal = hoje_ordinal
 
     dias_passados = max(0, hoje_ordinal - inicio_ordinal)
