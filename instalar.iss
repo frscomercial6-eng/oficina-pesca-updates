@@ -54,9 +54,9 @@ Name: "desktopicon"; Description: "Criar ícone na Área de Trabalho"; GroupDesc
 ; Todos os arquivos gerados pelo PyInstaller (excluindo .env para nao expor credenciais)
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Components: core; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,apk_celular_distribuicao\*,*.db,config.cfg,config.json,versao.json,licenca.key,licenca.json,licencas.json"
 ; Apenas os dois arquivos de distribuicao mobile (APK assinado + instrucoes)
-Source: "apk_celular_distribuicao\oficina_app_signed.apk"; DestDir: "{app}\apk_celular_distribuicao"; Components: core; Flags: ignoreversion skipifsourcedoesntexist
+Source: "apk_celular_distribuicao\oficina_app_signed.apk"; DestDir: "{app}\apk_celular_distribuicao"; Components: core; Flags: ignoreversion
 Source: "apk_celular_distribuicao\instrucoes_instalacao.txt"; DestDir: "{app}\apk_celular_distribuicao"; Components: core; Flags: ignoreversion skipifsourcedoesntexist
-Source: "apk_celular_distribuicao\oficina_app_signed.apk"; DestDir: "{app}\_internal\apk_celular_distribuicao"; Components: core; Flags: ignoreversion skipifsourcedoesntexist
+Source: "apk_celular_distribuicao\oficina_app_signed.apk"; DestDir: "{app}\_internal\apk_celular_distribuicao"; Components: core; Flags: ignoreversion
 Source: "apk_celular_distribuicao\instrucoes_instalacao.txt"; DestDir: "{app}\_internal\apk_celular_distribuicao"; Components: core; Flags: ignoreversion skipifsourcedoesntexist
 ; Imagens de fundo do menu
 Source: "fundomenu.png";      DestDir: "{app}"; Components: core; Flags: ignoreversion
