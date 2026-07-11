@@ -27,6 +27,7 @@ client_secret_desktop.json
 build_final_setup_trace.txt
 Setup_OficinaPesca_v*.exe
 Output/
+logs/saude_sistema_producao.json
 
 # PyInstaller specs generated locally
 *.spec

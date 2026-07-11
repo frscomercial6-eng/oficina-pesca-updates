@@ -7,11 +7,81 @@ let syncChannel = "global";
 let heartbeatId = null;
 let versionCheckId = null;
 let licenseCheckId = null;
+let updateModalTimer = null;
+let updateModalShown = false;
 
 function redirectToBlockedPage() {
+  console.warn("[ofp-webview] Licença bloqueada detectada. Redirecionando para tela de bloqueio.");
   if (window.location.pathname !== "/web/licenca-bloqueada") {
     window.location.replace("/web/licenca-bloqueada");
   }
+}
+
+function isCriticalInteractionActive() {
+  const active = document.activeElement;
+  const editing = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName);
+  const criticalPath = ["/web/os", "/web/financeiro"].some((path) => window.location.pathname.startsWith(path));
+  return Boolean(editing || criticalPath);
+}
+
+function ensureUpdateModal() {
+  let modal = document.getElementById("ofp-update-modal");
+  if (modal) return modal;
+
+  modal = document.createElement("div");
+  modal.id = "ofp-update-modal";
+  modal.style.cssText = "position:fixed;inset:0;background:rgba(15,23,32,.78);display:none;align-items:center;justify-content:center;z-index:99999;padding:16px;";
+  modal.innerHTML = [
+    '<div style="max-width:520px;width:100%;background:#16202b;color:#ecf0f1;border-radius:18px;padding:24px;box-shadow:0 12px 40px rgba(0,0,0,.45);font-family:Segoe UI,Arial,sans-serif;">',
+    '<div style="font-size:1.25rem;font-weight:700;color:#f39c12;margin-bottom:10px;">Atualização disponível</div>',
+    '<div id="ofp-update-modal-text" style="font-size:0.98rem;color:#d6dde5;line-height:1.5;">Uma nova versão do sistema foi detectada.</div>',
+    '<div id="ofp-update-modal-countdown" style="font-size:0.9rem;color:#93c5fd;margin-top:12px;"></div>',
+    '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">',
+    '<button id="ofp-update-modal-btn" style="background:#16a34a;color:#fff;border:0;border-radius:10px;padding:10px 16px;font-weight:600;cursor:pointer;">Atualizar agora</button>',
+    '</div>',
+    '</div>'
+  ].join("");
+  document.body.appendChild(modal);
+  document.getElementById("ofp-update-modal-btn")?.addEventListener("click", () => window.location.reload());
+  return modal;
+}
+
+function showUpdateModal(remoteVersion, localVersion, forceUpdate) {
+  if (updateModalShown) return;
+  updateModalShown = true;
+  const modal = ensureUpdateModal();
+  const text = document.getElementById("ofp-update-modal-text");
+  const countdown = document.getElementById("ofp-update-modal-countdown");
+  const critical = isCriticalInteractionActive();
+  let seconds = forceUpdate ? 8 : (critical ? 20 : 5);
+
+  if (text) {
+    text.textContent = `Nova versão detectada (${remoteVersion} > ${localVersion || "em uso"}). A interface será recarregada para sincronizar com a atualização.`;
+  }
+  modal.style.display = "flex";
+
+  if (updateModalTimer) {
+    window.clearInterval(updateModalTimer);
+  }
+
+  if (countdown) {
+    countdown.textContent = critical
+      ? `Processo sensível detectado. Recarregando em ${seconds}s, ou clique em 'Atualizar agora'.`
+      : `Recarregando automaticamente em ${seconds}s.`;
+  }
+
+  updateModalTimer = window.setInterval(() => {
+    seconds -= 1;
+    if (countdown) {
+      countdown.textContent = critical
+        ? `Processo sensível detectado. Recarregando em ${seconds}s, ou clique em 'Atualizar agora'.`
+        : `Recarregando automaticamente em ${seconds}s.`;
+    }
+    if (seconds <= 0) {
+      window.clearInterval(updateModalTimer);
+      window.location.reload();
+    }
+  }, 1000);
 }
 
 function parseVersionTuple(value) {
@@ -50,7 +120,8 @@ async function checkRemoteVersion() {
     }
 
     if (forceUpdate || (remoteVersion && localVersion && isRemoteVersionNewer(remoteVersion, localVersion))) {
-      window.location.reload();
+      console.info(`[ofp-webview] Nova versão detectada (${remoteVersion} > ${localVersion}). Recarregando interface.`);
+      showUpdateModal(remoteVersion, localVersion, forceUpdate);
     }
   } catch (_) {
   }
@@ -61,6 +132,7 @@ async function checkLicenseStatus() {
     const resp = await fetch("/api/licenca-status", { cache: "no-store" });
     const data = await resp.json();
     if (data && data.bloqueada) {
+      console.warn("[ofp-webview] Endpoint de licença retornou bloqueio.");
       redirectToBlockedPage();
     }
   } catch (_) {
@@ -138,7 +210,8 @@ async function initFirebaseSync() {
     const val = snap.val() || {};
     window.__OFP_DESKTOP_SYNC_STATE__ = val;
     const lic = val.license || val.licenca || {};
-    if (lic && lic.blocked) {
+    if ((lic && lic.blocked) || Boolean(val.license_bloqueada)) {
+      console.warn("[ofp-webview] Bloqueio de licença recebido via Firebase.");
       redirectToBlockedPage();
     }
   });

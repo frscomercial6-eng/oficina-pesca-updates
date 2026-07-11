@@ -502,6 +502,7 @@ def publicar_heartbeat_firebase() -> tuple[bool, str]:
                 "version": APP_VERSION,
                 "db_mtime": int(os.path.getmtime(CAMINHO_BANCO)) if os.path.exists(CAMINHO_BANCO) else 0,
                 "status": "online",
+                "license_bloqueada": bool(status_licenca.get("bloqueada")),
                 "license": {
                     "allowed": bool(status_licenca.get("ativa")),
                     "blocked": bool(status_licenca.get("bloqueada")),

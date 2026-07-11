@@ -3406,8 +3406,6 @@ class FrmMenu(ctk.CTk):
             os.path.join(base_dir, "PACOTE_ENVIO", "apk_celular"),
             os.path.join(base_dir, "dist", "apk_celular"),
             os.path.join(base_dir, "apk_celular_distribuicao"),
-            os.path.join(base_dir, "PACOTE_ENVIO", "apk"),
-            os.path.join(base_dir, "dist", "apk"),
             os.path.join(base_dir, "android_apk", "app", "build", "outputs", "apk", "debug"),
         ]
 
@@ -3422,11 +3420,10 @@ class FrmMenu(ctk.CTk):
         candidatos = [
             os.path.join(base_dir, "PACOTE_ENVIO", "apk_celular", "Oficina_Pesca_WebView.apk"),
             os.path.join(base_dir, "apk_celular_distribuicao", "oficina_app_signed.apk"),
-            os.path.join(base_dir, "PACOTE_ENVIO", "apk", "Oficina_Pesca_WebView.apk"),
             os.path.join(base_dir, "android_apk", "app", "build", "outputs", "apk", "debug", "app-debug.apk"),
         ]
 
-        for dist_apk_dir in [os.path.join(base_dir, "dist", "apk_celular"), os.path.join(base_dir, "dist", "apk")]:
+        for dist_apk_dir in [os.path.join(base_dir, "dist", "apk_celular")]:
             if os.path.isdir(dist_apk_dir):
                 for nome in sorted(os.listdir(dist_apk_dir), reverse=True):
                     if nome.lower().endswith(".apk"):

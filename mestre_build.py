@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import json
 import configparser
+import hashlib
 import os
 import shutil
 import sys
@@ -418,6 +419,57 @@ def _gerar_wrapper_gradle_android() -> str:
     return wrapper
 
 
+def _validar_apk_gerado(caminho_apk: str) -> dict:
+    caminho = os.path.abspath(str(caminho_apk or ""))
+    if not caminho or not os.path.exists(caminho):
+        raise FileNotFoundError("Falha ao localizar APK para distribuição")
+
+    tamanho = int(os.path.getsize(caminho) or 0)
+    if tamanho < 256 * 1024:
+        raise RuntimeError("Falha ao localizar APK para distribuição")
+
+    with open(caminho, "rb") as f:
+        assinatura = f.read(2)
+        f.seek(0)
+        sha256 = hashlib.sha256(f.read()).hexdigest()
+
+    if assinatura != b"PK":
+        raise RuntimeError("Falha ao localizar APK para distribuição")
+
+    return {"path": caminho, "size": tamanho, "sha256": sha256}
+
+
+def _gerar_log_saude_sistema(versao: str, apk_path: str, instalador_path: str = "") -> str:
+    from config import obter_status_acesso_centralizado, obter_firebase_web_config, obter_config_backup_nuvem
+
+    os.makedirs("logs", exist_ok=True)
+    caminho_log = os.path.join("logs", "saude_sistema_producao.json")
+    apk_info = _validar_apk_gerado(apk_path)
+    instalador_abs = os.path.abspath(instalador_path) if instalador_path else ""
+
+    payload = {
+        "status": "Produção Autônoma",
+        "versao": versao,
+        "gerado_em": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "licenca": obter_status_acesso_centralizado(),
+        "firebase": obter_firebase_web_config(),
+        "backup": obter_config_backup_nuvem(),
+        "artefatos": {
+            "apk": apk_info,
+            "instalador": {
+                "path": instalador_abs,
+                "exists": bool(instalador_abs and os.path.exists(instalador_abs)),
+                "size": int(os.path.getsize(instalador_abs) or 0) if instalador_abs and os.path.exists(instalador_abs) else 0,
+            },
+        },
+    }
+
+    with open(caminho_log, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    print(f"🩺 Log único de saúde do sistema gerado: {caminho_log}")
+    return caminho_log
+
+
 def _build_apk_android(versao: str) -> tuple[str, str]:
     print("📱 Compilando APK WebView com a mesma versão do Desktop...")
     _gerar_wrapper_gradle_android()
@@ -432,6 +484,8 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
     if not origem_apk:
         raise FileNotFoundError("Falha ao localizar APK para distribuição")
 
+    _validar_apk_gerado(origem_apk)
+
     os.makedirs(ANDROID_APK_DIST_DIR, exist_ok=True)
     os.makedirs(ANDROID_APK_PACKAGE_DIR, exist_ok=True)
     os.makedirs(ANDROID_APK_LEGACY_DIR, exist_ok=True)
@@ -445,8 +499,9 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
     shutil.copy2(origem_apk, destino_pacote)
     shutil.copy2(origem_apk, destino_legacy)
 
-    if not os.path.exists(destino_dist):
-        raise FileNotFoundError("Falha ao localizar APK para distribuição")
+    _validar_apk_gerado(destino_dist)
+    _validar_apk_gerado(destino_pacote)
+    _validar_apk_gerado(destino_legacy)
 
     print(f"📦 APK copiado para dist: {destino_dist}")
     print(f"📤 APK copiado para distribuição: {destino_pacote}")
@@ -1126,6 +1181,7 @@ def build(projeto, versao):
         print(f"📤 Instalador copiado para distribuição: {destino_distribuicao}")
         print(f"📤 Bootstrapper copiado para distribuição: {destino_bootstrapper}")
         print(f"📤 APK copiado para distribuição: {apk_distribuicao}")
+        _gerar_log_saude_sistema(versao, apk_dist, instalador)
         return instalador, destino_distribuicao
     finally:
         os.chdir(old_cwd)
