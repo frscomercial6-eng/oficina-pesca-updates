@@ -20,7 +20,7 @@
   .btn-entrar:hover { background: #2ecc71; }
 </style>
 </head>
-<body>
+<body data-app-version="{{ versao if versao is defined else '' }}">
 <div class="login-card">
   <div class="text-center mb-4">
     <div class="login-logo"><i class="bi bi-fish"></i></div>
@@ -59,6 +59,8 @@
     <i class="bi bi-info-circle"></i>
     Somente usuários cadastrados pelo ADMIN têm acesso.
   </p>
+
+  <p class="text-center text-muted mt-2 small">v{{ versao if versao is defined else "" }}</p>
 </div>
 <script>
 function toggleSenha() {
@@ -68,5 +70,6 @@ function toggleSenha() {
   else { i.type = 'password'; ic.className = 'bi bi-eye'; }
 }
 </script>
+<script type="module" src="/static/ofp_firebase_sync.js"></script>
 </body>
 </html>

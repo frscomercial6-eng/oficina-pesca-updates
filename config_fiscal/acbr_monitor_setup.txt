@@ -1,0 +1,7 @@
+CONFIGURACAO PADRAO ACBrMonitor
+================================
+Pasta monitor: D:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\config_fiscal\acbr_monitor
+ENT (entrada): D:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\config_fiscal\acbr_monitor\ENT.txt
+SAI (saida): D:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\config_fiscal\acbr_monitor\SAI.txt
+INI ACBr: D:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\config_fiscal\acbrlib.ini
+Modalidade fiscal: nfe

@@ -1,0 +1,18 @@
+{
+  "api_key_plugnotas": "",
+  "api_key_focusnfe": "",
+  "ambiente": "homologacao",
+  "provedor": "acbr",
+  "acbr_modo": "monitor",
+  "modalidade_fiscal": "nfe",
+  "acbr_path": "D:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\config_fiscal\\acbr",
+  "acbr_monitor_path": "D:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\config_fiscal\\acbr_monitor",
+  "acbr_entrada": "D:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\config_fiscal\\acbr_monitor\\ENT.txt",
+  "acbr_saida": "D:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\config_fiscal\\acbr_monitor\\SAI.txt",
+  "acbr_ini": "D:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\config_fiscal\\acbrlib.ini",
+  "acbr_certificado_a1_path": "",
+  "certificado_a1_path": "",
+  "emitente_cnpj": "",
+  "emitente_ie": "",
+  "acbr_token": ""
+}

@@ -21,6 +21,23 @@ venv/
 *.sqlite
 *.sqlite3
 *.log
+.env
+.vscode/
+client_secret_desktop.json
+build_final_setup_trace.txt
+Setup_OficinaPesca_v*.exe
+Output/
 
 # PyInstaller specs generated locally
 *.spec
+
+# Android local secrets and build metadata
+android_apk/.env
+android_apk/app/src/main/assets/.env
+android_apk/local.properties
+android_apk/.gradle/
+android_apk/app/build/
+android_apk/build/
+android_apk/keystore.properties
+*.jks
+*.keystore

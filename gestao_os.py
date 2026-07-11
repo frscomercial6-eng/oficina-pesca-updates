@@ -8,6 +8,7 @@ from tkinter import messagebox, ttk
 from datetime import datetime
 from config import CAMINHO_BANCO, inicializar_banco, get_db_connection, enviar_registro_os_central_silencioso
 from util_recibo import gerar_recibo_entrega
+from status_os import normalizar_status_orcamento, is_status_aguardando_orcamento, is_status_orcamento
 
 import tela_os
 
@@ -120,7 +121,39 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
         self.tab.bind("<Double-1>", self.gerar_recibo_duplo_clique)
 
         self.dados_os = None
+        self.dados_os_precarregados = None
         self.buscar_os()
+
+    def _extrair_campos_os(self, registro):
+        if not registro:
+            return None
+        try:
+            cliente = str(registro[1] or "").strip().upper()
+            equipamento = str(registro[2] or "").strip().upper()
+            defeito = str(registro[3] or "").strip().upper()
+            status = normalizar_status_orcamento(registro[7] or "ORÇAMENTO")
+            dados_adicionais = {}
+            if len(registro) > 10 and registro[10]:
+                try:
+                    dados_adicionais = json.loads(registro[10])
+                except Exception:
+                    dados_adicionais = {}
+
+            equipamentos = dados_adicionais.get("equipamentos") if isinstance(dados_adicionais, dict) else None
+            if isinstance(equipamentos, list) and equipamentos:
+                primeiro = equipamentos[0] if isinstance(equipamentos[0], dict) else {}
+                equipamento = str(primeiro.get("equipamento") or equipamento).strip().upper()
+                defeito = str(primeiro.get("defeito") or defeito).strip().upper()
+
+            return {
+                "id": int(registro[0]),
+                "cliente": cliente,
+                "equipamento": equipamento,
+                "defeito": defeito,
+                "status": status,
+            }
+        except Exception:
+            return None
 
     def _notificar_dashboard(self):
         try:
@@ -188,9 +221,10 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
 
         def aplicar(novo_status):
             try:
+                status_final = normalizar_status_orcamento(novo_status)
                 with get_db_connection() as conn:
                     cursor = conn.cursor()
-                    if str(novo_status).upper() == "FINALIZADO":
+                    if str(status_final).upper() == "FINALIZADO":
                         data_finalizacao = datetime.now().strftime("%d/%m/%Y")
                         cursor.execute(
                             """
@@ -200,16 +234,16 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
                                 status_entrega = COALESCE(NULLIF(status_entrega, ''), 'PENDENTE')
                             WHERE id = ?
                             """,
-                            (novo_status, data_finalizacao, num_os),
+                            (status_final, data_finalizacao, num_os),
                         )
                     else:
-                        cursor.execute("UPDATE orcamentos_aguardo SET status = ? WHERE id = ?", (novo_status, num_os))
+                        cursor.execute("UPDATE orcamentos_aguardo SET status = ? WHERE id = ?", (status_final, num_os))
                     conn.commit()
                 try:
                     enviar_registro_os_central_silencioso(
                         {
                             "id": int(num_os),
-                            "status": str(novo_status).upper(),
+                            "status": str(status_final).upper(),
                             "data": datetime.now().strftime("%d/%m/%Y"),
                         },
                         operacao="status",
@@ -225,8 +259,8 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
         f_btns = ctk.CTkFrame(dialogo, fg_color="#161b22")
         f_btns.pack(padx=14, fill="x")
 
-        opcoes_status = ["AGUARDANDO", "EM ANDAMENTO", "FINALIZADO"]
-        status_var = ctk.StringVar(value="AGUARDANDO")
+        opcoes_status = ["ORÇAMENTO", "AGUARDANDO ORÇAMENTO", "EM ANDAMENTO", "FINALIZADO", "APROVADO", "REPROVADO"]
+        status_var = ctk.StringVar(value="ORÇAMENTO")
 
         seletor_status = ctk.CTkOptionMenu(
             f_btns,
@@ -305,8 +339,9 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
                         telefone = str(json_adicional.get("cliente_telefone", "") or "").strip()
                     except Exception:
                         telefone = ""
-                status_upper = (status or "").upper()
-                if status_upper in ("AGUARDANDO", "EM ANDAMENTO"):
+                status_norm = normalizar_status_orcamento(status)
+                status_upper = (status_norm or "").upper()
+                if is_status_orcamento(status_upper) or is_status_aguardando_orcamento(status_upper) or status_upper == "EM ANDAMENTO":
                     tag = "st_amarelo"
                 elif status_upper in ("FINALIZADO", "APROVADO"):
                     tag = "st_verde"
@@ -326,7 +361,7 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
                         f"R$ {float(total or 0):.2f}",
                         f"R$ {float(sinal or 0):.2f}",
                         f"R$ {float(saldo or 0):.2f}",
-                        status or "",
+                        status_norm or "",
                         data or "-",
                         descricao_fmt,
                     ),
@@ -379,6 +414,7 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
         selecao = self.tab.selection()
         if not selecao:
             self.dados_os = None
+            self.dados_os_precarregados = None
             return
 
         item = self.tab.item(selecao[0], "values")
@@ -389,13 +425,14 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT id, cliente, equipamento, defeito, valor_total, sinal, saldo, status, data
+                    SELECT id, cliente, equipamento, defeito, valor_total, sinal, saldo, status, data, resumo_equipamento_defeito, COALESCE(dados_adicionais, '')
                     FROM orcamentos_aguardo
                     WHERE id = ?
                     """,
                     (num_os,)
                 )
                 self.dados_os = cursor.fetchone()
+                self.dados_os_precarregados = self._extrair_campos_os(self.dados_os)
 
             if hasattr(self.master, "_ultima_os_contexto"):
                 self.master._ultima_os_contexto = self.dados_os
@@ -405,9 +442,12 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
                 return
 
             status = (self.dados_os[7] or "").upper()
+            dados_auto = self.dados_os_precarregados or {}
+            modelo_auto = str(dados_auto.get("equipamento") or self.dados_os[2] or "")
+            defeito_auto = str(dados_auto.get("defeito") or self.dados_os[3] or "")
             resumo = (
                 f"Nº {self.dados_os[0]}  |  {self.dados_os[1] or ''}  |  "
-                f"{self.dados_os[2] or ''}  |  R$ {float(self.dados_os[4] or 0):.2f}  |  {status or '-'}"
+                f"{modelo_auto} / {defeito_auto}  |  R$ {float(self.dados_os[4] or 0):.2f}  |  {status or '-'}"
             )
             self.lbl_info.configure(text=resumo)
         except Exception as e:
@@ -427,7 +467,12 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
             except Exception:
                 pass
             self.destroy()
-            janela = tela_os.FrmOS(self.master, id_orc=self.dados_os[0], on_save_callback=self.on_os_update_callback)
+            janela = tela_os.FrmOS(
+                self.master,
+                id_orc=self.dados_os[0],
+                on_save_callback=self.on_os_update_callback,
+                dados_precarregados=self.dados_os_precarregados,
+            )
             if hasattr(self.master, "_janela_os_atual"):
                 self.master._janela_os_atual = janela
             if hasattr(self.master, "_janela_gestao_os"):

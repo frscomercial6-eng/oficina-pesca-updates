@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1a1a2e">
+<title>Licença Bloqueada — Oficina de Pesca</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  body { background: #0f1923; min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #ecf0f1; }
+  .card-bloqueio { background: #1a2535; border-radius: 20px; padding: 2.2rem 2rem; width: 100%; max-width: 520px; box-shadow: 0 8px 32px rgba(0,0,0,0.45); }
+  .titulo { color: #f39c12; font-weight: 700; font-size: 1.7rem; }
+  .mensagem { color: #cbd5e1; }
+  .versao { color: #94a3b8; font-size: 0.9rem; }
+</style>
+</head>
+<body data-app-version="{{ versao if versao is defined else '' }}">
+  <div class="card-bloqueio text-center">
+    <div class="titulo mb-3">Acesso Bloqueado</div>
+    <p class="mensagem mb-3">{{ mensagem if mensagem is defined and mensagem else 'A licença deste sistema está inválida, suspensa ou sem liberação para uso.' }}</p>
+    <p class="mensagem mb-3">Contate o administrador responsável pelo Desktop para regularizar a licença.</p>
+    <p class="versao mb-0">v{{ versao if versao is defined else '' }}</p>
+  </div>
+  <script type="module" src="/static/ofp_firebase_sync.js"></script>
+</body>
+</html>

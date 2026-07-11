@@ -3,14 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
     <title>Oficina Pesca - App Celular</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            background: #f5f6fa;
+            background: radial-gradient(circle at top, #1f2937, #0b1220 60%, #04070f);
             margin: 0;
             padding: 0;
-            color: #222;
+            color: #f3f4f6;
         }
         .container {
             max-width: 420px;
@@ -18,7 +19,7 @@
             padding: 24px 12px 48px 12px;
         }
         h1 {
-            color: #2980b9;
+            color: #93c5fd;
             font-size: 2rem;
             margin-bottom: 12px;
         }
@@ -30,7 +31,7 @@
         .btn {
             display: block;
             width: 100%;
-            background: #27ae60;
+            background: #1d4ed8;
             color: #fff;
             border: none;
             border-radius: 6px;
@@ -41,11 +42,11 @@
             transition: background 0.2s;
         }
         .btn:hover {
-            background: #219150;
+            background: #1e40af;
         }
         .info {
             margin-top: 18px;
-            color: #555;
+            color: #cbd5e1;
             font-size: 1rem;
             text-align: center;
         }
@@ -56,7 +57,7 @@
         <img src="/static/logo.png" alt="Logo Oficina" class="logo" onerror="this.style.display='none'">
         <h1>Oficina Pesca</h1>
         <button class="btn" onclick="window.location.href='/web/login'">Acessar Sistema</button>
-        <button class="btn" style="background:#2980b9; margin-top:10px;" onclick="localizarOficinaNaRede(this)">Localizar Oficina na Rede</button>
+        <button class="btn" style="background:#0ea5e9; margin-top:10px;" onclick="localizarOficinaNaRede(this)">Localizar Oficina na Rede</button>
         <div class="info">
             <p>Bem-vindo ao app da Oficina Pesca!<br>Use o botão acima para acessar o sistema pelo celular.</p>
         </div>
@@ -83,5 +84,6 @@
             }
         }
     </script>
+    <script type="module" src="/static/ofp_firebase_sync.js"></script>
 </body>
 </html>

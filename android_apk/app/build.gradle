@@ -1,0 +1,66 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+def rootVersionFile = file('../../version.txt')
+def appVersion = rootVersionFile.exists() ? rootVersionFile.text.trim() : '1.0.28'
+def versionParts = appVersion.tokenize('.').collect { token -> token.isInteger() ? token.toInteger() : 0 }
+while (versionParts.size() < 3) {
+    versionParts << 0
+}
+def appVersionCode = (versionParts[0] * 10000) + (versionParts[1] * 100) + versionParts[2]
+
+android {
+    namespace 'com.oficinapesca.mobile'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.oficinapesca.mobile"
+        minSdk 24
+        targetSdk 34
+        versionCode appVersionCode
+        versionName appVersion
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField "String", "WEB_APP_URL", "\"${System.getenv('OFP_WEB_APP_URL') ?: 'https://oficinapesca.app/web/login'}\""
+        buildConfigField "String", "FIREBASE_API_KEY", "\"${System.getenv('OFP_FIREBASE_API_KEY') ?: ''}\""
+        buildConfigField "String", "FIREBASE_AUTH_DOMAIN", "\"${System.getenv('OFP_FIREBASE_AUTH_DOMAIN') ?: ''}\""
+        buildConfigField "String", "FIREBASE_DATABASE_URL", "\"${System.getenv('OFP_FIREBASE_DATABASE_URL') ?: 'https://oficinapescasystem-default-rtdb.firebaseio.com/'}\""
+        buildConfigField "String", "FIREBASE_PROJECT_ID", "\"${System.getenv('OFP_FIREBASE_PROJECT_ID') ?: ''}\""
+        buildConfigField "String", "FIREBASE_STORAGE_BUCKET", "\"${System.getenv('OFP_FIREBASE_STORAGE_BUCKET') ?: ''}\""
+        buildConfigField "String", "FIREBASE_MESSAGING_SENDER_ID", "\"${System.getenv('OFP_FIREBASE_MESSAGING_SENDER_ID') ?: ''}\""
+        buildConfigField "String", "FIREBASE_APP_ID", "\"${System.getenv('OFP_FIREBASE_APP_ID') ?: ''}\""
+        buildConfigField "String", "FIREBASE_SYNC_CHANNEL", "\"${System.getenv('OFP_FIREBASE_SYNC_CHANNEL') ?: 'global'}\""
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+}

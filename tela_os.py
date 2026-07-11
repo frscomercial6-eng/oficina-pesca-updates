@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from typing import Optional, List, Dict, Any
 import customtkinter as ctk
+import tkinter as tk
 import sqlite3
 import os
 import json
@@ -10,11 +11,16 @@ import concurrent.futures
 import time
 import base64
 import configparser
+import traceback
 import threading
 import subprocess
 import webbrowser
 import socket
 import urllib.request
+try:
+    import psutil
+except Exception:
+    psutil = None
 from urllib.parse import quote, quote_plus, urljoin, urlparse, parse_qs, unquote
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from reportlab.pdfgen import canvas
@@ -23,6 +29,13 @@ from datetime import datetime
 # Corrige imports ausentes para web scraping
 from urllib.request import Request, urlopen
 from core.financeiro.calculos import OSCalculator, formatar_monetario
+from status_os import normalizar_status_orcamento, STATUS_ORCAMENTO, STATUS_AGUARDANDO_ORCAMENTO
+from configuracao_fiscal import tentar_enviar_venda, consultar_nota_fiscal, imprimir_danfe_fiscal
+from validador_fiscal import (
+    obter_cliente_por_nome_telefone,
+    validar_pre_emissao_nota,
+    formatar_mensagem_bloqueio_emissao,
+)
 
 # Importações centralizadas do arquivo config.py (Versão 1.0.6)
 from config import (
@@ -35,6 +48,44 @@ from config import (
 
 # Inicialização da variável global logger (Resolve o NameError)
 logger = get_logger()
+
+
+def _finalizar_instancias_anteriores_tela_os():
+    """Encerra processos antigos de tela_os.py para evitar processo zumbi/recursos presos."""
+    if psutil is None:
+        print("psutil nao instalado. Me passe autorizacao para rodar: pip install psutil", flush=True)
+        return
+
+    pid_atual = os.getpid()
+    alvo = "tela_os.py"
+
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            pid = int(proc.info.get("pid") or 0)
+            if pid <= 0 or pid == pid_atual:
+                continue
+
+            nome = str(proc.info.get("name") or "").lower()
+            cmdline_lista = proc.info.get("cmdline") or []
+            cmdline = " ".join(str(p) for p in cmdline_lista).lower()
+
+            if "python" not in nome and "python" not in cmdline:
+                continue
+            if alvo not in cmdline:
+                continue
+
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+                print(f"Processo antigo finalizado: PID={pid}", flush=True)
+            except Exception:
+                try:
+                    proc.kill()
+                    print(f"Processo antigo forçado: PID={pid}", flush=True)
+                except Exception:
+                    pass
+        except Exception:
+            continue
 
 
 def _quebrar_linha(c, texto: str, largura_max: float, fonte: str = "Helvetica", tamanho: int = 10):
@@ -71,11 +122,178 @@ def _sanitizar_nome_arquivo(nome: str) -> str:
     return nome or "CLIENTE"
 
 
+def obter_proximo_numero_orcamento_oficial():
+    """Fonte única oficial da O.S. para sequência de numeração de orçamento."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'ultimo_orcamento'")
+            res = cursor.fetchone()
+            ultimo_config = int(res[0] or 0) if res else 0
+            cursor.execute("SELECT COALESCE(MAX(id), 0) FROM orcamentos_aguardo")
+            ultimo_banco = int((cursor.fetchone() or [0])[0] or 0)
+        return max(ultimo_config, ultimo_banco, 500) + 1
+    except Exception as e:
+        logger.exception("Erro ao carregar próximo número oficial de orçamento: %s", e)
+        return 501
+
+
+def salvar_orcamento_aguardo_oficial(os_id: int, dados: dict, sinal: float = 0.0, saldo: float = 0.0):
+    """Persistência oficial de O.S. usada pela tela de O.S. e fluxos rápidos do PDV."""
+    if not isinstance(dados, dict):
+        raise ValueError("Dados inválidos para salvar O.S.")
+
+    status_final = normalizar_status_orcamento(dados.get("status", "AGUARDANDO"))
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO orcamentos_aguardo
+            (id, cliente, telefone_cliente_whatsapp, equipamento, defeito, resumo_equipamento_defeito,
+             valor_total, sinal, saldo, status, data, itens_detalhes, dados_adicionais)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(os_id),
+                str(dados.get("cliente", "")),
+                str(dados.get("telefone_cliente_whatsapp", "")),
+                str(dados.get("equipamento", "")),
+                str(dados.get("defeito", "")),
+                str(dados.get("resumo_equipamento_defeito", "")),
+                float(dados.get("total", 0.0) or 0.0),
+                float(sinal or 0.0),
+                float(saldo or 0.0),
+                str(status_final),
+                str(dados.get("data", "")),
+                str(dados.get("itens_json", "[]")),
+                str(dados.get("dados_adicionais", "{}")),
+            ),
+        )
+        cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('ultimo_orcamento', ?)", (int(os_id),))
+        conn.commit()
+
+
+def _subtotal_equipamento_payload(equipamento: dict) -> float:
+    itens_ativos = []
+    for item in (equipamento.get("itens") or []):
+        if not isinstance(item, (list, tuple)) or len(item) < 4:
+            continue
+        status_item = str(item[4] if len(item) > 4 else "ATIVO").strip().upper()
+        if status_item == "REPROVADO":
+            continue
+        itens_ativos.append(float(item[3] or 0))
+
+    return OSCalculator.calcular_total(
+        itens=itens_ativos,
+        desconto=equipamento.get("desconto", 0),
+        frete=equipamento.get("frete", 0),
+        adicional=equipamento.get("opcional", 0),
+    )
+
+
+def salvar_os_completa(
+    os_id: int,
+    cliente: str,
+    telefone: str,
+    endereco: str,
+    equipamentos: list[dict],
+    status: str = STATUS_ORCAMENTO,
+    forma_pagamento: str | None = None,
+    on_save_callback=None,
+):
+    cliente_final = str(cliente or "").strip().upper()
+    telefone_final = str(telefone or "").strip()
+    endereco_final = str(endereco or "").strip()
+    equipamentos_validos = [
+        eq for eq in (equipamentos or [])
+        if isinstance(eq, dict) and (eq.get("equipamento") or eq.get("defeito") or eq.get("itens"))
+    ]
+
+    if not cliente_final:
+        cliente_final = "CLIENTE NÃO INFORMADO"
+
+    itens_flat = []
+    total_os = 0.0
+    for eq in equipamentos_validos:
+        total_os += _subtotal_equipamento_payload(eq)
+        for item in eq.get("itens") or []:
+            if isinstance(item, (list, tuple)) and len(item) >= 4:
+                status_item = str(item[4] if len(item) > 4 else "ATIVO").strip().upper()
+                itens_flat.append([str(item[0]), str(item[1]), str(item[2]), str(item[3]), status_item])
+
+    primeiro_item = equipamentos_validos[0] if equipamentos_validos else {}
+    resumo_equipamento_defeito = f"{str(primeiro_item.get('equipamento', '') or '').strip().upper()} - {str(primeiro_item.get('defeito', '') or '').strip().upper()}".strip(" -")
+    status_final = normalizar_status_orcamento(status)
+
+    sinal = OSCalculator.calcular_sinal_por_forma(total_os, forma_pagamento) if status_final == 'APROVADO' else 0.0
+    saldo = float(total_os - sinal)
+
+    dados = {
+        "cliente": cliente_final,
+        "telefone_cliente_whatsapp": telefone_final,
+        "equipamento": primeiro_item.get("equipamento", ""),
+        "defeito": primeiro_item.get("defeito", ""),
+        "resumo_equipamento_defeito": resumo_equipamento_defeito,
+        "total": total_os,
+        "status": status_final,
+        "data": datetime.now().strftime("%d/%m/%Y"),
+        "itens_json": json.dumps(itens_flat),
+        "dados_adicionais": json.dumps({
+            "modo_os_por_cliente": True,
+            "cliente_telefone": telefone_final,
+            "cliente_endereco": endereco_final,
+            "resumo_equipamento_defeito": resumo_equipamento_defeito,
+            "equipamentos": equipamentos_validos,
+            "equipamento_ativo_idx": None,
+            "historico_itens_reprovados": [],
+            "opcional": float(primeiro_item.get("opcional", 0.0)),
+            "frete": float(primeiro_item.get("frete", 0.0)),
+            "desconto": float(primeiro_item.get("desconto", 0.0)),
+            "prazo": str(primeiro_item.get("prazo", "7 dias úteis")),
+            "obs": str(primeiro_item.get("obs", "")),
+            "forma_de_pagamento": forma_pagamento,
+        })
+    }
+
+    salvar_orcamento_aguardo_oficial(os_id, dados, sinal=sinal, saldo=saldo)
+
+    try:
+        enviar_registro_os_central_silencioso({
+            "id": int(os_id),
+            "cliente": dados["cliente"],
+            "status": dados["status"],
+            "total": float(dados["total"]),
+        }, operacao="upsert")
+    except Exception:
+        logger.exception("Falha ao enfileirar sincronização central da O.S. %s.", os_id)
+
+    if callable(on_save_callback):
+        on_save_callback()
+
+    return dados
+
+
 # --- CONFIGURACOES DE CAMINHOS ---
 def _garantir_colunas_orcamentos_aguardo():
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS status_orcamento (
+                    status TEXT PRIMARY KEY,
+                    ativo INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            for status in ("ORÇAMENTO", "AGUARDANDO ORÇAMENTO", "EM ANDAMENTO", "APROVADO", "FINALIZADO", "REPROVADO", "ENTREGUE"):
+                cursor.execute(
+                    "INSERT OR REPLACE INTO status_orcamento (status, ativo) VALUES (?, 1)",
+                    (status,),
+                )
+            cursor.execute("UPDATE orcamentos_aguardo SET status = ? WHERE UPPER(COALESCE(status,'')) = 'AGUARDANDO'", (STATUS_ORCAMENTO,))
+            cursor.execute("UPDATE orcamentos_aguardo SET status = ? WHERE UPPER(COALESCE(status,'')) = 'AGUARDANDO ORCAMENTO'", (STATUS_AGUARDANDO_ORCAMENTO,))
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS esquemas_vistas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -240,9 +458,15 @@ class FrmOS(ctk.CTkToplevel):
             conn.commit()
 
 
-    def __init__(self, master, id_orc=None, on_save_callback=None):
+    def __init__(self, master, id_orc=None, on_save_callback=None, dados_precarregados=None):
+        # if psutil is not None:
+        #     for proc in psutil.process_iter(['name']):
+        #         if proc.info['name'] == 'python.exe' and proc.pid != os.getpid():
+        #             proc.terminate()
         super().__init__(master)
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.on_save_callback = on_save_callback
+        self._dados_precarregados = dados_precarregados if isinstance(dados_precarregados, dict) else None
         inicializar_banco()
         _garantir_colunas_orcamentos_aguardo()
         
@@ -289,7 +513,8 @@ class FrmOS(ctk.CTkToplevel):
         self.numero_whatsapp_reposicao = "553791910037"
         self.os_equipamentos = []
         self.indice_equipamento_ativo = None
-        self.carregar_dados_oficina()
+        # TESTE DE ISOLAMENTO: desabilitado temporariamente para validar abertura da tela sem carga inicial.
+        # self.carregar_dados_oficina()
         
         self.num_oc = self.carregar_proximo_numero() if not id_orc else id_orc
 
@@ -315,6 +540,30 @@ class FrmOS(ctk.CTkToplevel):
         self.btn_recibo.pack(pady=10, padx=10, fill="x")
         self.btn_pdf = ctk.CTkButton(self.sidebar, text="📄 GERAR ORÇAMENTO", fg_color="#e67e22", command=self.finalizar_e_abrir_pdf)
         self.btn_pdf.pack(pady=10, padx=10, fill="x")
+        self.btn_emitir_nota_fiscal = ctk.CTkButton(
+            self.sidebar,
+            text="🧾 EMITIR NOTA FISCAL",
+            fg_color="#f39c12",
+            hover_color="#d68910",
+            command=self.emitir_nota_fiscal,
+        )
+        self.btn_emitir_nota_fiscal.pack(pady=10, padx=10, fill="x")
+        self.btn_consultar_nota_fiscal = ctk.CTkButton(
+            self.sidebar,
+            text="🔎 CONSULTAR NOTA",
+            fg_color="#2563eb",
+            hover_color="#1d4ed8",
+            command=self.consultar_nota_fiscal,
+        )
+        self.btn_consultar_nota_fiscal.pack(pady=10, padx=10, fill="x")
+        self.btn_imprimir_danfe_fiscal = ctk.CTkButton(
+            self.sidebar,
+            text="🖨 IMPRIMIR DANFE",
+            fg_color="#7c3aed",
+            hover_color="#6d28d9",
+            command=self.imprimir_danfe_fiscal,
+        )
+        self.btn_imprimir_danfe_fiscal.pack(pady=10, padx=10, fill="x")
         self.btn_aprovar = ctk.CTkButton(
             self.sidebar,
             text="✅ APROVAR",
@@ -339,8 +588,33 @@ class FrmOS(ctk.CTkToplevel):
         self.setup_campos()
         self._setup_interface()
         self._atualizar_label_historico_itens()
+        self._aplicar_dados_precarregados()
         if id_orc:
             self.carregar_dados_orcamento(id_orc)
+
+    def _aplicar_dados_precarregados(self):
+        dados = self._dados_precarregados or {}
+        if not dados:
+            return
+        try:
+            cliente = str(dados.get("cliente") or "").strip().upper()
+            equipamento = str(dados.get("equipamento") or "").strip().upper()
+            defeito = str(dados.get("defeito") or "").strip().upper()
+            status = normalizar_status_orcamento(dados.get("status") or STATUS_ORCAMENTO)
+
+            if cliente:
+                self.txt_cliente.delete(0, 'end')
+                self.txt_cliente.insert(0, cliente)
+            if equipamento:
+                self.txt_equip.delete(0, 'end')
+                self.txt_equip.insert(0, equipamento)
+            if defeito:
+                self.txt_defeito.delete(0, 'end')
+                self.txt_defeito.insert(0, defeito)
+
+            self.atualizar_identificacao_documento(status)
+        except Exception:
+            pass
 
     def destroy(self):
         """Fecha a janela de forma segura para evitar travamentos em encerramento."""
@@ -354,6 +628,9 @@ class FrmOS(ctk.CTkToplevel):
             super().destroy()
         except Exception:
             pass
+
+    def on_closing(self):
+        self.destroy()
             
     def _setup_interface(self):
         # Limpa o frame_conteudo antes de adicionar widgets
@@ -439,7 +716,15 @@ class FrmOS(ctk.CTkToplevel):
         barra_equip = ctk.CTkFrame(f_lista_equip, fg_color="#1f2a38")
         barra_equip.pack(fill="x", padx=10, pady=(0, 8))
         ctk.CTkButton(barra_equip, text="➕ ADICIONAR ITEM", fg_color="#27ae60", width=160, command=self._adicionar_equipamento).pack(side="left", padx=(0, 8), pady=4)
-        ctk.CTkButton(barra_equip, text="🗑 REMOVER ITEM", fg_color="#c0392b", width=150, command=self._remover_equipamento_ativo).pack(side="left", padx=(0, 8), pady=4)
+        self.btn_excluir_item = ctk.CTkButton(
+            barra_equip,
+            text="REMOVER ITEM",
+            fg_color="#c0392b",
+            hover_color="#a93226",
+            width=150,
+            command=self.remover_item_selecionado,
+        )
+        self.btn_excluir_item.pack(side="left", padx=(0, 8), pady=4)
 
         self.tab_equipamentos = ttk.Treeview(f_lista_equip, columns=("idx", "equip", "def", "subtotal", "status"), show="headings", height=5)
         self.tab_equipamentos.heading("idx", text="#")
@@ -485,9 +770,16 @@ class FrmOS(ctk.CTkToplevel):
         self.txt_val.grid(row=1, column=2, padx=3, pady=(2, 10))
         self.txt_val.bind("<Return>", lambda _e: self.add_item())
         self.btn_add = ctk.CTkButton(f_item, text="ADD", fg_color="#27ae60", width=90, command=self.add_item)
-        self.btn_add.grid(row=1, column=3, padx=(5, 15), pady=(2, 10))
-        self.btn_remover = ctk.CTkButton(f_item, text="REMOVER", fg_color="#c0392b", width=90, command=self.remover_item_selecionado)
-        self.btn_remover.grid(row=1, column=4, padx=(0, 15), pady=(2, 10))
+        self.btn_add.grid(row=1, column=3, padx=(5, 8), pady=(2, 10))
+        self.btn_excluir_peca = ctk.CTkButton(
+            f_item,
+            text="REMOVER PEÇA",
+            fg_color="#c0392b",
+            hover_color="#a93226",
+            width=130,
+            command=self.executar_exclusao_peca,
+        )
+        self.btn_excluir_peca.grid(row=1, column=4, padx=(0, 15), pady=(2, 10))
         f_item.grid_columnconfigure(0, weight=1)
 
         self.tab = ttk.Treeview(self.main_scroll, columns=("d","q","u","t","s"), show="headings", height=8, displaycolumns=("d","q","u","t"))
@@ -508,10 +800,8 @@ class FrmOS(ctk.CTkToplevel):
         style.configure("evenrow.Treeview", background="#2c3e50")
         style.configure("oddrow.Treeview", background="#34495e")
         self.tab.pack(pady=(5, 10), padx=10, fill="both", expand=True)
+        self.tabela = self.tab
         self.tab.tag_configure('reprovado', foreground="#fca5a5")
-        self.tab.bind("<Delete>", self.remover_item_selecionado)
-        self.tab.bind("<<TreeviewSelect>>", self._on_selecionar_item_tabela)
-        self.tab.bind("<Double-1>", self._on_duplo_clique_item_tabela)
 
         self.lbl_hist_itens = ctk.CTkLabel(
             self.main_scroll,
@@ -645,15 +935,7 @@ class FrmOS(ctk.CTkToplevel):
             pass
 
     def carregar_proximo_numero(self):
-        try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'ultimo_orcamento'")
-                res = cursor.fetchone()
-            return (res[0] + 1) if res else 501
-        except Exception as e:
-            logger.exception("Erro ao carregar próximo número de orçamento: %s", e)
-            return 501
+        return obter_proximo_numero_orcamento_oficial()
 
     def _parse_valor(self, valor, default=0.0):
         """Converte valores monetários aceitando vírgula ou ponto."""
@@ -848,7 +1130,8 @@ class FrmOS(ctk.CTkToplevel):
 
                 self.after(0, finalizar)
 
-            threading.Thread(target=worker, daemon=True).start()
+            # Modo teste síncrono: execução direta sem thread.
+            worker()
 
         bloco_rede = ctk.CTkFrame(form, fg_color="#1f2937")
         bloco_rede.pack(fill="x", padx=15, pady=(4, 10))
@@ -919,95 +1202,16 @@ class FrmOS(ctk.CTkToplevel):
                     }
                 )
 
-            equipamentos_validos = [
-                eq for eq in self.os_equipamentos
-                if eq.get("equipamento") or eq.get("defeito") or eq.get("itens")
-            ]
-
-            if not equipamentos_validos:
-                raise ValueError("Adicione ao menos um equipamento na O.S. antes de salvar.")
-
-            itens_flat = []
-            for eq in equipamentos_validos:
-                for item in eq.get("itens") or []:
-                    if isinstance(item, (list, tuple)) and len(item) >= 4:
-                        status_item = self._normalizar_status_item(item[4] if len(item) > 4 else "ATIVO")
-                        itens_flat.append([str(item[0]), str(item[1]), str(item[2]), str(item[3]), status_item])
-
-            primeiro_item = equipamentos_validos[0]
-            total_os = self._total_os_atual()
-            telefone_whatsapp = self._normalizar_telefone_whatsapp(self.txt_fone.get())
-            resumo_equipamento_defeito = self._montar_resumo_equipamento_defeito(
-                primeiro_item.get("equipamento", ""),
-                primeiro_item.get("defeito", ""),
+            dados = salvar_os_completa(
+                self.num_oc,
+                self.txt_cliente.get().strip().upper(),
+                self._normalizar_telefone_whatsapp(self.txt_fone.get()),
+                self.txt_end_cliente.get().strip(),
+                list(self.os_equipamentos),
+                status=status,
+                forma_pagamento=forma_pagamento,
+                on_save_callback=self.on_save_callback,
             )
-            dados = {
-                "cliente": self.txt_cliente.get().strip().upper(),
-                "telefone_cliente_whatsapp": telefone_whatsapp,
-                "equipamento": primeiro_item.get("equipamento", ""),
-                "defeito": primeiro_item.get("defeito", ""),
-                "resumo_equipamento_defeito": resumo_equipamento_defeito,
-                "total": total_os,
-                "status": status,
-                "data": datetime.now().strftime("%d/%m/%Y"),
-                "itens_json": json.dumps(itens_flat),
-                "dados_adicionais": json.dumps({
-                    "modo_os_por_cliente": True,
-                    "cliente_telefone": telefone_whatsapp,
-                    "cliente_endereco": self.txt_end_cliente.get().strip(),
-                    "resumo_equipamento_defeito": resumo_equipamento_defeito,
-                    "equipamentos": equipamentos_validos,
-                    "equipamento_ativo_idx": self.indice_equipamento_ativo,
-                    "historico_itens_reprovados": list(self._historico_itens_reprovados or []),
-                    # Chaves legadas preservadas para compatibilidade com relatórios antigos.
-                    "opcional": float(primeiro_item.get("opcional", 0.0)),
-                    "frete": float(primeiro_item.get("frete", 0.0)),
-                    "desconto": float(primeiro_item.get("desconto", 0.0)),
-                    "prazo": str(primeiro_item.get("prazo", "7 dias úteis")),
-                    "obs": str(primeiro_item.get("obs", "")),
-                    "forma_de_pagamento": forma_pagamento,
-                })
-            }
-
-            sinal = (
-                OSCalculator.calcular_sinal_por_forma(dados["total"], forma_pagamento)
-                if status == 'APROVADO'
-                else 0.0
-            )
-            saldo = float(dados["total"] - sinal)
-
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO orcamentos_aguardo 
-                    (id, cliente, telefone_cliente_whatsapp, equipamento, defeito, resumo_equipamento_defeito,
-                     valor_total, sinal, saldo, status, data, itens_detalhes, dados_adicionais)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (self.num_oc, dados["cliente"], dados["telefone_cliente_whatsapp"], dados["equipamento"],
-                     dados["defeito"], dados["resumo_equipamento_defeito"], dados["total"], sinal,
-                     saldo, dados["status"], dados["data"], 
-                     dados["itens_json"], dados["dados_adicionais"])
-                )
-                cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('ultimo_orcamento', ?)", (self.num_oc,))
-                conn.commit()
-
-            try:
-                if self.on_save_callback and self.winfo_exists():
-                    self.after_idle(self.on_save_callback)
-            except Exception:
-                logger.exception("Falha ao agendar atualização do dashboard após salvar a O.S. %s.", self.num_oc)
-
-            try:
-                enviar_registro_os_central_silencioso({
-                    "id": int(self.num_oc),
-                    "cliente": dados["cliente"],
-                    "status": dados["status"],
-                    "total": float(dados["total"]),
-                }, operacao="upsert")
-            except Exception:
-                logger.exception("Falha ao enfileirar sincronização central da O.S. %s.", self.num_oc)
             
             self.atualizar_identificacao_documento(dados["status"])
             duracao = time.perf_counter() - inicio_salvamento
@@ -1169,7 +1373,8 @@ class FrmOS(ctk.CTkToplevel):
                 import pyperclip
                 link = pyperclip.paste()
                 if link and link.lower().endswith('.pdf') and link.startswith('http'):
-                    threading.Thread(target=self._salvar_pdf_silencioso, args=(link,), daemon=True).start()
+                    # Modo teste síncrono: execução direta sem thread.
+                    self._salvar_pdf_silencioso(link)
             except Exception as e:
                 logger.info(f"Modo Escuta: erro ao ler clipboard: {e}")
             self.after(2000, self._modo_escuta_pdf_clipboard)
@@ -1184,8 +1389,8 @@ class FrmOS(ctk.CTkToplevel):
         except Exception as e:
             logger.info(f"Modo Escuta: erro ao salvar no banco: {e}")
         try:
-            # Sincronização Drive em thread, sem popup
-            threading.Thread(target=self._enviar_drive_silencioso, args=(link,), daemon=True).start()
+            # Modo teste síncrono: execução direta sem thread.
+            self._enviar_drive_silencioso(link)
         except Exception as e:
             logger.info(f"Modo Escuta: erro ao iniciar thread do Drive: {e}")
 
@@ -1206,8 +1411,8 @@ class FrmOS(ctk.CTkToplevel):
             if self._defeito_cronico_conhecido(modelo):
                 self._exibir_alerta_cronico(modelo)
             else:
-                # Busca proativa de defeitos crônicos/manhas em thread
-                threading.Thread(target=self._minerar_defeitos_cronicos_google, args=(modelo,), daemon=True).start()
+                # Modo teste síncrono: execução direta sem thread.
+                self._minerar_defeitos_cronicos_google(modelo)
 
     def _minerar_defeitos_cronicos_google(self, modelo):
         try:
@@ -1394,10 +1599,10 @@ class FrmOS(ctk.CTkToplevel):
         return itens
 
     def _normalizar_status_item(self, status_item):
-        status = str(status_item or "ATIVO").strip().upper()
+        status = str(status_item or "AGUARDANDO").strip().upper()
         if status in ("REPROVADO", "REPROVADA"):
             return "REPROVADO"
-        return "ATIVO"
+        return "AGUARDANDO"
 
     def _tags_item(self, idx, status_item):
         zebra = 'evenrow' if idx % 2 == 0 else 'oddrow'
@@ -1411,7 +1616,7 @@ class FrmOS(ctk.CTkToplevel):
         for item in itens:
             if len(item) >= 5 and self._normalizar_status_item(item[4]) == "REPROVADO":
                 return "REPROVADO"
-        return "ATIVO"
+        return "AGUARDANDO"
 
     def _aplicar_itens_tabela(self, itens):
         for item_id in self.tab.get_children():
@@ -1527,7 +1732,7 @@ class FrmOS(ctk.CTkToplevel):
             if len(valores) < 4:
                 continue
 
-            status_exist = self._normalizar_status_item(valores[4] if len(valores) > 4 else "ATIVO")
+            status_exist = self._normalizar_status_item(valores[4] if len(valores) > 4 else "AGUARDANDO")
             if status_exist == "REPROVADO":
                 continue
 
@@ -1550,7 +1755,7 @@ class FrmOS(ctk.CTkToplevel):
 
             qtd_nova = max(1, qtd_exist + int(qtd))
             total_novo = qtd_nova * float(valor_unitario)
-            self.tab.item(item_id, values=(desc_norm, qtd_nova, f"{valor_unitario:.2f}", f"{total_novo:.2f}", "ATIVO"))
+            self.tab.item(item_id, values=(desc_norm, qtd_nova, f"{valor_unitario:.2f}", f"{total_novo:.2f}", "AGUARDANDO"))
             self._reaplicar_zebra_tabela_itens()
             return
 
@@ -1559,8 +1764,8 @@ class FrmOS(ctk.CTkToplevel):
         self.tab.insert(
             "",
             "end",
-            values=(desc_norm, int(qtd), f"{valor_unitario:.2f}", f"{subtotal:.2f}", "ATIVO"),
-            tags=self._tags_item(row_count, "ATIVO"),
+            values=(desc_norm, int(qtd), f"{valor_unitario:.2f}", f"{subtotal:.2f}", "AGUARDANDO"),
+            tags=self._tags_item(row_count, "AGUARDANDO"),
         )
         self._reaplicar_zebra_tabela_itens()
 
@@ -1568,7 +1773,7 @@ class FrmOS(ctk.CTkToplevel):
         itens_ativos = [
             item[3]
             for item in (equipamento.get("itens") or [])
-            if len(item) >= 4 and self._normalizar_status_item(item[4] if len(item) > 4 else "ATIVO") == "ATIVO"
+            if len(item) >= 4 and self._normalizar_status_item(item[4] if len(item) > 4 else "AGUARDANDO") != "REPROVADO"
         ]
         return OSCalculator.calcular_total(
             itens=itens_ativos,
@@ -1691,7 +1896,14 @@ class FrmOS(ctk.CTkToplevel):
                 selecao = (foco,)
         if not selecao:
             return
-        indice = int(selecao[0])
+        try:
+            indice = int(str(selecao[0]))
+        except Exception:
+            valores = self.tab_equipamentos.item(selecao[0], "values")
+            try:
+                indice = int(valores[0]) - 1 if valores else -1
+            except Exception:
+                indice = -1
         if indice < 0 or indice >= len(self.os_equipamentos):
             return
         if not messagebox.askyesno("Remover item", "Deseja remover este equipamento da O.S.?", parent=self):
@@ -1706,10 +1918,12 @@ class FrmOS(ctk.CTkToplevel):
             self._limpar_formulario_item_ativo()
         self._limpar_edicao_item()
         self.atualizar_total()
-        try:
-            self.salvar_documento(status="AGUARDANDO")
-        except Exception:
-            pass
+        if self._orcamento_em_edicao:
+            try:
+                self.salvar_documento(status="AGUARDANDO")
+            except Exception as exc:
+                logger.exception("Falha ao persistir remoção de equipamento da O.S. %s.", getattr(self, "num_oc", ""))
+                messagebox.showwarning("Remover item", f"Item removido da tela, mas não foi possível atualizar o banco agora: {exc}", parent=self)
 
     def _on_selecionar_equipamento(self, _event=None):
         selecao = self.tab_equipamentos.selection()
@@ -1803,32 +2017,88 @@ class FrmOS(ctk.CTkToplevel):
             messagebox.showwarning("Erro", "Preencha Descrição, Qtd e Valor corretamente!")
 
     def remover_item_selecionado(self, _event=None):
-        selecionado = self.tab.selection()
-        if not selecionado:
-            foco = self.tab.focus()
+        # O botão REMOVER ITEM atua somente na tabela superior: ITENS DA O.S. (Envelope do Cliente).
+        tabela_alvo = self.tab_equipamentos
+        item_selecionado = tabela_alvo.selection()
+
+        if not item_selecionado:
+            foco = tabela_alvo.focus()
             if foco:
-                selecionado = (foco,)
-        if not selecionado:
-            messagebox.showwarning("Remover item", "Selecione um item para remover.", parent=self)
+                tabela_alvo.selection_set(foco)
+                item_selecionado = (foco,)
+
+        if not item_selecionado and self.indice_equipamento_ativo is not None:
+            try:
+                iid_ativo = str(int(self.indice_equipamento_ativo))
+                tabela_alvo.selection_set(iid_ativo)
+                tabela_alvo.focus(iid_ativo)
+                item_selecionado = (iid_ativo,)
+            except Exception:
+                item_selecionado = ()
+
+        if not item_selecionado:
             return
-        if not messagebox.askyesno("Remover item", "Deseja marcar o item como REMOVIDO/REPROVADO e manter no histórico?", parent=self):
-            return
-        for item_id in selecionado:
-            valores = list(self.tab.item(item_id).get("values", []))
-            if len(valores) < 4:
-                continue
-            status_atual = self._normalizar_status_item(valores[4] if len(valores) > 4 else "ATIVO")
-            if status_atual != "REPROVADO":
-                self._registrar_item_reprovado("REMOVER", valores, "REMOVIDO")
-            self.tab.item(item_id, values=(valores[0], valores[1], valores[2], valores[3], "REPROVADO"))
-            if item_id == self._item_em_edicao_id:
-                self._limpar_edicao_item()
-        self._reaplicar_zebra_tabela_itens()
-        self.atualizar_total()
+
         try:
-            self.salvar_documento(status="AGUARDANDO")
+            indice = int(str(item_selecionado[0]))
         except Exception:
-            pass
+            valores = tabela_alvo.item(item_selecionado[0], "values")
+            try:
+                indice = int(valores[0]) - 1 if valores else -1
+            except Exception:
+                indice = -1
+
+        if indice < 0 or indice >= len(self.os_equipamentos):
+            return
+
+        if not messagebox.askyesno("Remover item", "Deseja remover este equipamento da O.S.?", parent=self):
+            return
+
+        self._salvar_equipamento_ativo()
+        self.os_equipamentos.pop(indice)
+        self.indice_equipamento_ativo = None
+        self._atualizar_lista_equipamentos_ui()
+        if self.os_equipamentos:
+            self._carregar_equipamento_no_form(min(indice, len(self.os_equipamentos) - 1))
+        else:
+            self._limpar_formulario_item_ativo()
+        self._limpar_edicao_item()
+        self.atualizar_total()
+
+        if self._orcamento_em_edicao:
+            try:
+                self.salvar_documento(status="AGUARDANDO")
+            except Exception as exc:
+                logger.exception("Falha ao persistir remoção de equipamento da O.S. %s.", getattr(self, "num_oc", ""))
+                messagebox.showwarning("Remover item", f"Item removido da tela, mas não foi possível atualizar o banco agora: {exc}", parent=self)
+
+    def executar_exclusao_item(self):
+        try:
+            selecao = self.tabela.selection()
+            if not selecao:
+                messagebox.showwarning("Remover item", "Selecione um item na tabela principal da O.S.", parent=self)
+                return
+            if not messagebox.askyesno("Remover item", "Deseja remover o item selecionado da O.S.?", parent=self):
+                return
+            self.tabela.delete(selecao[0])
+            self._limpar_edicao_item()
+            self.atualizar_total()
+        except Exception as e:
+            logger.exception("Erro ao excluir item da tabela principal da O.S.: %s", e)
+
+    def executar_exclusao_peca(self):
+        try:
+            selecao = self.tabela.selection()
+            if not selecao:
+                messagebox.showwarning("Remover peça", "Selecione uma peça/serviço na tabela principal da O.S.", parent=self)
+                return
+            if not messagebox.askyesno("Remover peça", "Deseja remover a peça/serviço selecionado?", parent=self):
+                return
+            self.tabela.delete(selecao[0])
+            self._limpar_edicao_item()
+            self.atualizar_total()
+        except Exception as e:
+            logger.exception("Erro ao excluir peça/serviço da tabela principal da O.S.: %s", e)
 
     def marcar_item_reprovado(self):
         selecionado = self.tab.selection()
@@ -2013,6 +2283,143 @@ class FrmOS(ctk.CTkToplevel):
                 (nome,)
             )
             return cursor.fetchone()
+
+    def _itens_para_emissao_fiscal(self):
+        itens = []
+        for equipamento in list(self.os_equipamentos or []):
+            if not isinstance(equipamento, dict):
+                continue
+            for item in list(equipamento.get("itens") or []):
+                if not isinstance(item, (list, tuple)) or len(item) < 4:
+                    continue
+                status_item = str(item[4] if len(item) > 4 else "ATIVO").strip().upper()
+                if status_item == "REPROVADO":
+                    continue
+
+                descricao = str(item[0] or "").strip()
+                try:
+                    qtd = max(int(float(item[1] or 1)), 1)
+                except Exception:
+                    qtd = 1
+                try:
+                    unit = float(str(item[2] or 0).replace(",", "."))
+                except Exception:
+                    unit = 0.0
+                try:
+                    total = float(str(item[3] or (qtd * unit)).replace(",", "."))
+                except Exception:
+                    total = float(qtd * unit)
+
+                itens.append(
+                    {
+                        "produto_id": 0,
+                        "nome_produto": descricao,
+                        "quantidade": qtd,
+                        "preco_unitario": unit,
+                        "total_item": total,
+                    }
+                )
+        return itens
+
+    def _cliente_para_emissao_fiscal(self):
+        nome = str(self.txt_cliente.get() or "").strip().upper()
+        telefone = str(self.txt_fone.get() or "").strip()
+        cliente = obter_cliente_por_nome_telefone(nome, telefone) if nome else None
+        if cliente:
+            return cliente
+        return {
+            "nome": nome,
+            "cpf_cnpj": "",
+            "cep": "",
+            "rua": "",
+            "numero": "",
+            "cidade": "",
+            "estado": "",
+        }
+
+    def emitir_nota_fiscal(self):
+        itens = self._itens_para_emissao_fiscal()
+        cliente = self._cliente_para_emissao_fiscal()
+        faltantes = validar_pre_emissao_nota(
+            cliente=cliente,
+            itens=itens,
+            tipo_documento="nfse",
+        )
+        if faltantes:
+            mensagem = formatar_mensagem_bloqueio_emissao(faltantes, tipo_documento="nfse")
+            messagebox.showwarning("O.S.", mensagem, parent=self)
+            return
+
+        venda = {
+            "sale_id": int(self.num_oc or 0),
+            "date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+            "total": float(self.atualizar_total() or 0.0),
+            "payment_method": str(self.var_pagamento.get() or "A DEFINIR"),
+            "items": itens,
+            "fiscal_tipo": "nfse",
+        }
+
+        try:
+            retorno = tentar_enviar_venda(venda)
+            if bool(retorno and retorno.get("ok")):
+                messagebox.showinfo("O.S.", "NFS-e emitida com sucesso.", parent=self)
+            else:
+                msg = str((retorno or {}).get("mensagem") or "")
+                motivo = str((retorno or {}).get("motivo") or "retorno_fiscal_indisponivel")
+                corpo = msg or f"Validação concluída, mas o envio ao ACBr não foi concluído.\nMotivo: {motivo}"
+                messagebox.showwarning(
+                    "O.S.",
+                    corpo,
+                    parent=self,
+                )
+        except Exception as e:
+            messagebox.showerror("O.S.", f"Erro ao emitir nota fiscal: {e}", parent=self)
+
+    def consultar_nota_fiscal(self):
+        referencia = str(int(self.num_oc or 0))
+        retorno = consultar_nota_fiscal(referencia)
+        if bool(retorno.get("ok")):
+            messagebox.showinfo("O.S.", f"Consulta de nota concluída com sucesso.\nReferência: {referencia}", parent=self)
+        else:
+            corpo = str(retorno.get("mensagem") or retorno.get("motivo") or "Falha na consulta fiscal.")
+            messagebox.showwarning("O.S.", corpo, parent=self)
+
+    def imprimir_danfe_fiscal(self):
+        itens = self._itens_para_emissao_fiscal()
+        cliente = self._cliente_para_emissao_fiscal()
+        faltantes = validar_pre_emissao_nota(
+            cliente=cliente,
+            itens=itens,
+            tipo_documento="nfse",
+        )
+        if faltantes:
+            mensagem = formatar_mensagem_bloqueio_emissao(faltantes, tipo_documento="nfse")
+            messagebox.showwarning("O.S.", mensagem, parent=self)
+            return
+
+        venda = {
+            "sale_id": int(self.num_oc or 0),
+            "date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+            "total": float(self.atualizar_total() or 0.0),
+            "payment_method": str(self.var_pagamento.get() or "A DEFINIR"),
+            "items": itens,
+            "fiscal_tipo": "nfse",
+        }
+        retorno = imprimir_danfe_fiscal(venda)
+        if bool(retorno.get("ok")):
+            caminho = str(retorno.get("arquivo") or "")
+            messagebox.showinfo("O.S.", f"DANFE gerado com sucesso.\nArquivo: {caminho}", parent=self)
+            if caminho and hasattr(os, "startfile"):
+                try:
+                    os.startfile(caminho, "print")  # type: ignore[attr-defined]
+                except Exception:
+                    try:
+                        os.startfile(caminho)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+        else:
+            corpo = str(retorno.get("mensagem") or retorno.get("motivo") or "Falha ao gerar DANFE.")
+            messagebox.showwarning("O.S.", corpo, parent=self)
 
     def _preencher_cliente(self, dados_cliente):
         nome, telefone, rua, numero, bairro, cidade, estado = dados_cliente
@@ -2241,7 +2648,8 @@ class FrmOS(ctk.CTkToplevel):
         telefone = recibo.get("telefone", "")
         texto = quote(mensagem)
         link = f"https://wa.me/{telefone}?text={texto}" if telefone else f"https://wa.me/?text={texto}"
-        threading.Thread(target=webbrowser.open, args=(link,), daemon=True).start()
+        # Modo teste síncrono: execução direta sem thread.
+        webbrowser.open(link)
 
     def gerar_recibo_entrada(self):
         cliente = self.txt_cliente.get().strip().upper()
@@ -2277,7 +2685,8 @@ class FrmOS(ctk.CTkToplevel):
                     if self.winfo_exists():
                         self.after(0, lambda err=exc: self._falhar_recibo_entrada(err))
 
-            threading.Thread(target=worker, daemon=True).start()
+            # Modo teste síncrono: execução direta sem thread.
+            worker()
         except Exception as e:
             self._alternar_estado_botao_recibo(False)
             messagebox.showerror("Recibo", f"Não foi possível iniciar a geração do recibo: {e}", parent=self)
@@ -2458,7 +2867,8 @@ class FrmOS(ctk.CTkToplevel):
             if self.winfo_exists():
                 self.after(0, aplicar)
 
-        threading.Thread(target=worker, daemon=True).start()
+        # Modo teste síncrono: execução direta sem thread.
+        worker()
 
     def _detectar_peca_com_desgaste(self, texto: str) -> str:
         base = str(texto or "").lower()
@@ -2875,7 +3285,8 @@ class FrmOS(ctk.CTkToplevel):
                 logger.exception("Falha ao registrar links descobertos para o Drive colaborativo.")
 
         try:
-            threading.Thread(target=_worker, daemon=True).start()
+            # Modo teste síncrono: execução direta sem thread.
+            _worker()
         except Exception:
             pass
 
@@ -2927,7 +3338,8 @@ class FrmOS(ctk.CTkToplevel):
             except Exception as e:
                 logger.info(f"Falha na sincronização inteligente com Drive: {e}")
         
-        threading.Thread(target=_thread_save, daemon=True).start()
+        # Modo teste síncrono: execução direta sem thread.
+        _thread_save()
 
     def _pontuar_link_diagrama(self, link: str, fabricante: str, modelo: str) -> int:
         l = (link or "").lower()
@@ -3253,8 +3665,8 @@ class FrmOS(ctk.CTkToplevel):
         ctk.CTkLabel(win, text=f"Diagrama para: {display_name}", font=("Arial", 16, "bold"), text_color="#f8f8f8", fg_color="#000000").pack(pady=(15, 5))
         ctk.CTkLabel(win, text="Abrindo no navegador...", font=("Arial", 12), text_color="#cccccc", fg_color="#000000").pack(pady=(5, 10))
 
-        # Trigger AI alert scan in background
-        threading.Thread(target=self._run_ai_alert_scan_and_notify, args=(fabricante, modelo, termo_busca), daemon=True).start()
+        # Modo teste síncrono: execução direta sem thread.
+        self._run_ai_alert_scan_and_notify(fabricante, modelo, termo_busca)
 
         def _open_and_save():
             try:
@@ -3306,13 +3718,13 @@ class FrmOS(ctk.CTkToplevel):
         if not links:
             ctk.CTkLabel(scroll_frame, text="Nenhum diagrama encontrado para este equipamento.", text_color="#ff6b6b", font=("Arial", 12)).pack(pady=30)
             ctk.CTkButton(scroll_frame, text="📸 TENTAR IDENTIFICAÇÃO POR FOTO", fg_color="#e67e22", hover_color="#d35400", width=250, height=40,
-                          command=lambda: (win.destroy(), threading.Thread(target=self._executar_busca_por_foto_bg, args=(termo_busca,), daemon=True).start())).pack(pady=10)
+                          command=lambda: (win.destroy(), self._executar_busca_por_foto_bg(termo_busca))).pack(pady=10)
             return
 
         def on_click_link(url_to_open: str, display_name: str):
-            # Trigger AI alert scan in background when a link is clicked
+            # Modo teste síncrono: execução direta sem thread.
             fabricante, modelo = self._extrair_fabricante_modelo(termo_busca)
-            threading.Thread(target=self._run_ai_alert_scan_and_notify, args=(fabricante, modelo, termo_busca), daemon=True).start()
+            self._run_ai_alert_scan_and_notify(fabricante, modelo, termo_busca)
 
             webbrowser.open(url_to_open)
             self._salvar_diagrama_silencioso(fabricante, modelo, url_to_open) # Step 5: Total Synchronization
@@ -3360,8 +3772,8 @@ class FrmOS(ctk.CTkToplevel):
 
         self._atualizar_status_busca_diagrama("Buscando diagramas técnicos...", cor="#f1c40f")
 
-        # Processo de Busca, Filtro e Sincronização em Thread para fluidez total da UI
-        threading.Thread(target=self._executar_busca_filtrada_bg, args=(termo,), daemon=True).start()
+        # Modo teste síncrono: execução direta sem thread.
+        self._executar_busca_filtrada_bg(termo)
 
     def _executar_busca_filtrada_bg(self, termo):
         """Lógica de raspagem, aplicação de filtros rigorosos por marca e upload para o cérebro compartilhado."""
@@ -3398,8 +3810,9 @@ class FrmOS(ctk.CTkToplevel):
                                     links_coletados.append({"url": link_url, "display_name": self._obter_nome_modelo_do_link(link_url, fabricante, modelo)})
             except: pass
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(alvos)) as executor:
-            executor.map(scraper, alvos)
+        # Modo teste síncrono: varredura sequencial sem ThreadPoolExecutor.
+        for alvo in alvos:
+            scraper(alvo)
 
         # Incluir links do Drive colaborativo (Etapa 5)
         drive_links = self._buscar_links_colaborativos_drive(fabricante, modelo)
@@ -3488,7 +3901,7 @@ class FrmOS(ctk.CTkToplevel):
                 self.after(0, lambda: self.winfo_exists() and self._atualizar_status_busca_diagrama("Identificação por foto falhou ou cancelada. Iniciando busca manual...", cor="#e74c3c"))
             # Fallback para a Etapa 4 se a identificação por foto falhar
             self.after(0, lambda: self.winfo_exists() and self._abrir_busca_global_navegador(termo_busca))
-            self.after(0, lambda: self.winfo_exists() and threading.Thread(target=self._monitorar_clipboard_escuta, args=(termo_busca,), daemon=True).start())
+            self.after(0, lambda: self.winfo_exists() and self._monitorar_clipboard_escuta(termo_busca))
 
     def _gemini_identificar_modelo_por_foto_com_dialog(self, fabricante: str, modelo: str) -> str:
         """
@@ -4085,8 +4498,10 @@ class FrmOS(ctk.CTkToplevel):
 
 
 if __name__ == "__main__":
+    # _finalizar_instancias_anteriores_tela_os()
     inicializar_banco() # <--- Garante a criação da tabela configuracoes
     app = ctk.CTk()
     app.withdraw()
     FrmOS(app)
+    print('INICIANDO INTERFACE', flush=True)
     app.mainloop()

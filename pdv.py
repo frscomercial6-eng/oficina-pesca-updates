@@ -13,8 +13,14 @@ from xml.etree import ElementTree as ET
 import customtkinter as ctk
 
 from config import CAMINHO_BANCO, get_db_connection
-from configuracao_fiscal import tentar_enviar_venda
+from configuracao_fiscal import tentar_enviar_venda, consultar_nota_fiscal, imprimir_danfe_fiscal, verificar_status_motor_fiscal
 from dados_oficina import obter_dados_oficina
+from validador_fiscal import (
+    obter_cliente_por_id,
+    obter_cliente_por_nome_telefone,
+    validar_pre_emissao_nota,
+    formatar_mensagem_bloqueio_emissao,
+)
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -122,11 +128,12 @@ def _mapear_tpag_fiscal(metodo_pagamento):
 
 
 class FrmPDV(ctk.CTkToplevel):
-    def __init__(self, master):
+    def __init__(self, master, on_os_update_callback=None):
         super().__init__(master)
         self.title("PDV - Venda de Balcao")
         self.geometry("1220x760")
         self.configure(fg_color="#0f1720")
+        self.on_os_update_callback = on_os_update_callback
 
         self._carrinho = []
         self._pagamentos = []
@@ -386,7 +393,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         self.ent_busca = ctk.CTkEntry(
             topo,
-            placeholder_text="Produto / codigo de barras... (Enter adiciona | Tab vazio abre busca)",
+            placeholder_text="Produto / codigo de barras... (Enter adiciona | Tab abre busca)",
             height=30,
             fg_color="#111827",
             border_color="#93c5fd",
@@ -398,7 +405,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         acoes_topo = ctk.CTkFrame(topo, fg_color="transparent")
         acoes_topo.grid(row=0, column=3, padx=(8, 12), pady=6, sticky="e")
-        acoes_topo.grid_columnconfigure(0, weight=1)
+        acoes_topo.grid_columnconfigure((0, 1, 2), weight=0)
         ctk.CTkButton(
             acoes_topo,
             text="Adicionar item da Oficina",
@@ -416,29 +423,20 @@ class FrmPDV(ctk.CTkToplevel):
             fg_color="#0ea5e9",
             hover_color="#0284c7",
             command=self._abrir_busca_estoque,
-        ).grid(row=0, column=1, sticky="e")
-        ctk.CTkLabel(
+        ).grid(row=0, column=1, sticky="e", padx=(0, 6))
+        ctk.CTkButton(
             acoes_topo,
-            text="F1 Finaliza | F2 Limpa | F3 Busca | Delete Remove",
-            font=("Arial", 10, "bold"),
-            text_color="#cbd5e1",
-        ).grid(row=1, column=0, columnspan=2, sticky="e", pady=(4, 0))
+            text="SOLICITAÇÃO PARA OFICINA",
+            width=230,
+            height=30,
+            fg_color="#7c3aed",
+            hover_color="#6d28d9",
+            command=self._abrir_modal_solicitacao_oficina,
+        ).grid(row=0, column=2, sticky="e")
 
-        frame_item = ctk.CTkFrame(topo, fg_color="transparent")
-        frame_item.grid(row=1, column=0, columnspan=4, sticky="ew", padx=(10, 12), pady=(0, 8))
-        frame_item.grid_columnconfigure(3, weight=1)
-
-        ctk.CTkLabel(frame_item, text="ID", text_color="#cbd5e1").grid(row=0, column=0, padx=(0, 6), sticky="w")
-        self.ent_item_id = ctk.CTkEntry(frame_item, width=90, height=28, state="readonly")
-        self.ent_item_id.grid(row=0, column=1, padx=(0, 10), sticky="w")
-
-        ctk.CTkLabel(frame_item, text="Produto", text_color="#cbd5e1").grid(row=0, column=2, padx=(0, 6), sticky="w")
-        self.ent_item_nome = ctk.CTkEntry(frame_item, height=28, state="readonly")
-        self.ent_item_nome.grid(row=0, column=3, padx=(0, 10), sticky="ew")
-
-        ctk.CTkLabel(frame_item, text="Valor", text_color="#cbd5e1").grid(row=0, column=4, padx=(0, 6), sticky="w")
-        self.ent_item_valor = ctk.CTkEntry(frame_item, width=130, height=28, justify="right", state="readonly")
-        self.ent_item_valor.grid(row=0, column=5, sticky="w")
+        self.ent_item_id = None
+        self.ent_item_nome = None
+        self.ent_item_valor = None
 
         centro = ctk.CTkFrame(self, fg_color="#111827", corner_radius=8)
         centro.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 6))
@@ -486,7 +484,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         self.seg_pagamento = ctk.CTkSegmentedButton(
             painel_pagamento,
-            values=["DINHEIRO", "CHEQUE", "CARTAO"],
+            values=["DINHEIRO", "PIX", "CARTAO"],
             command=self._sync_metodo_pagamento,
             fg_color="#1f2937",
             selected_color="#f59e0b",
@@ -542,7 +540,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             acoes_venda,
-            text="GERAR XML",
+            text="EMITIR NOTA",
             width=108,
             height=34,
             fg_color="#f59e0b",
@@ -551,12 +549,30 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             acoes_venda,
+            text="CONSULTAR",
+            width=104,
+            height=34,
+            fg_color="#2563eb",
+            command=self._consultar_nota_fiscal_da_tela,
+        ).grid(row=0, column=2, padx=6)
+
+        ctk.CTkButton(
+            acoes_venda,
+            text="IMPRIMIR DANFE",
+            width=138,
+            height=34,
+            fg_color="#7c3aed",
+            command=self._imprimir_danfe_fiscal_da_tela,
+        ).grid(row=0, column=3, padx=6)
+
+        ctk.CTkButton(
+            acoes_venda,
             text="GERAR PDF",
             width=108,
             height=34,
             fg_color="#64748b",
             command=self._gerar_pdf_da_tela,
-        ).grid(row=0, column=2, padx=6)
+        ).grid(row=0, column=4, padx=6)
 
         ctk.CTkButton(
             acoes_venda,
@@ -565,7 +581,7 @@ class FrmPDV(ctk.CTkToplevel):
             height=34,
             fg_color="#16a34a",
             command=self._fechamento_de_caixa,
-        ).grid(row=0, column=3, padx=(6, 0))
+        ).grid(row=0, column=5, padx=(6, 0))
 
         self.tree_pagamentos = ttk.Treeview(
             painel_pagamento,
@@ -668,6 +684,8 @@ class FrmPDV(ctk.CTkToplevel):
             pass
 
     def _set_entry_value(self, entry, valor):
+        if entry is None:
+            return
         try:
             entry.configure(state="normal")
             entry.delete(0, "end")
@@ -692,9 +710,9 @@ class FrmPDV(ctk.CTkToplevel):
             return
 
         self._produto_preselecionado = (produto_id, nome, preco, estoque)
-        self._set_entry_value(self.ent_item_id, produto_id)
-        self._set_entry_value(self.ent_item_nome, nome)
-        self._set_entry_value(self.ent_item_valor, f"{preco:.2f}")
+        self._set_entry_value(getattr(self, "ent_item_id", None), produto_id)
+        self._set_entry_value(getattr(self, "ent_item_nome", None), nome)
+        self._set_entry_value(getattr(self, "ent_item_valor", None), f"{preco:.2f}")
         self.ent_busca.delete(0, "end")
         self._focar_qtd()
 
@@ -759,11 +777,8 @@ class FrmPDV(ctk.CTkToplevel):
         return max(self._total_itens() - self._total_desconto(), 0.0)
 
     def _tab_na_busca(self, _event=None):
-        termo = (self.ent_busca.get() or "").strip()
-        if not termo:
-            self._abrir_busca_estoque()
-            return "break"
-        return None
+        self._abrir_busca_estoque()
+        return "break"
 
     def _enter_na_busca(self, _event=None):
         termo = (self.ent_busca.get() or "").strip()
@@ -993,6 +1008,520 @@ class FrmPDV(ctk.CTkToplevel):
             )
             return cur.fetchall() or []
 
+    def _proximo_numero_solicitacao_oficina(self):
+        try:
+            import tela_os
+
+            return int(tela_os.obter_proximo_numero_orcamento_oficial())
+        except Exception:
+            return 501
+
+    def _abrir_modal_solicitacao_oficina(self):
+        win = ctk.CTkToplevel(self)
+        win.title("Solicitação para Oficina")
+        win.geometry("1220x700")
+        win.minsize(1100, 620)
+        win.grab_set()
+        win.focus_force()
+
+        numero_preview = self._proximo_numero_solicitacao_oficina()
+
+        itens_solicitacao = []
+
+        cabecalho = ctk.CTkFrame(win, fg_color="#0f172a", corner_radius=10)
+        cabecalho.pack(fill="x", padx=14, pady=(14, 8))
+
+        ctk.CTkLabel(
+            cabecalho,
+            text=f"ORÇAMENTO N°: {numero_preview}",
+            font=("Arial", 28, "bold"),
+            text_color="#f97316",
+        ).pack(anchor="w", padx=16, pady=(14, 0))
+        ctk.CTkLabel(
+            cabecalho,
+            text="Registro rápido cliente + equipamentos. Orçamento por item quando necessário.",
+            font=("Arial", 12),
+            text_color="#94a3b8",
+        ).pack(anchor="w", padx=16, pady=(2, 12))
+
+        grid = ctk.CTkFrame(cabecalho, fg_color="transparent")
+        grid.pack(fill="x", padx=16, pady=(0, 14))
+        grid.grid_columnconfigure(0, weight=3)
+        grid.grid_columnconfigure(1, weight=1)
+        grid.grid_columnconfigure(2, weight=3)
+        grid.grid_columnconfigure(3, weight=5)
+
+        ctk.CTkLabel(grid, text="CLIENTE", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
+        ctk.CTkLabel(grid, text="BUSCA", font=("Arial", 11, "bold")).grid(row=0, column=1, sticky="w", padx=(10, 0), pady=(0, 4))
+        ctk.CTkLabel(grid, text="TELEFONE / WHATSAPP", font=("Arial", 11, "bold")).grid(row=0, column=2, columnspan=2, sticky="w", padx=(10, 0), pady=(0, 4))
+
+        ent_cliente = ctk.CTkEntry(grid, placeholder_text="NOME DO CLIENTE", height=34)
+        ent_cliente.grid(row=1, column=0, sticky="ew", padx=(0, 0), pady=(0, 12))
+
+        cliente_selecionado = {"id": None}
+
+        ctk.CTkButton(
+            grid,
+            text="🔍",
+            width=60,
+            height=34,
+            fg_color="#2563eb",
+            hover_color="#1d4ed8",
+            command=lambda: self._abrir_busca_cliente_solicitacao(ent_cliente, ent_telefone, cliente_selecionado, win),
+        ).grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(0, 12))
+
+        ent_telefone = ctk.CTkEntry(grid, placeholder_text="TELEFONE / WHATSAPP", height=34)
+        ent_telefone.grid(row=1, column=2, columnspan=2, sticky="ew", padx=(10, 0), pady=(0, 12))
+
+        ctk.CTkLabel(grid, text="MODELO / EQUIPAMENTO", font=("Arial", 11, "bold")).grid(row=2, column=0, sticky="w", pady=(0, 4))
+        ctk.CTkLabel(grid, text="DEFEITO RELATADO", font=("Arial", 11, "bold")).grid(row=2, column=1, columnspan=3, sticky="w", padx=(10, 0), pady=(0, 4))
+
+        ent_equipamento = ctk.CTkEntry(grid, placeholder_text="MODELO / EQUIPAMENTO", height=34)
+        ent_equipamento.grid(row=3, column=0, sticky="ew", pady=(0, 0))
+
+        ent_defeito = ctk.CTkEntry(grid, placeholder_text="DEFEITO RELATADO", height=34)
+        ent_defeito.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(10, 0), pady=(0, 0))
+
+        ent_cliente.bind("<KeyRelease>", lambda _e: cliente_selecionado.update({"id": None}))
+        ent_telefone.bind("<KeyRelease>", lambda _e: cliente_selecionado.update({"id": None}))
+
+        bloco_itens = ctk.CTkFrame(win, fg_color="#0f172a", corner_radius=10)
+        bloco_itens.pack(fill="both", expand=True, padx=14, pady=(0, 14))
+
+        ctk.CTkLabel(
+            bloco_itens,
+            text="ITENS DA O.S. (ENVELOPE DO CLIENTE)",
+            font=("Arial", 14, "bold"),
+        ).pack(anchor="w", padx=16, pady=(12, 8))
+
+        barra_acoes = ctk.CTkFrame(bloco_itens, fg_color="transparent")
+        barra_acoes.pack(fill="x", padx=16, pady=(0, 8))
+        barra_acoes.grid_columnconfigure(0, weight=0)
+        barra_acoes.grid_columnconfigure(1, weight=0)
+        barra_acoes.grid_columnconfigure(2, weight=1)
+        barra_acoes.grid_columnconfigure(3, weight=0)
+        barra_acoes.grid_columnconfigure(4, weight=0)
+
+        tree = ttk.Treeview(
+            bloco_itens,
+            columns=("idx", "equipamento", "defeito", "subtotal", "status"),
+            show="headings",
+            style="PDV.Treeview",
+            height=9,
+        )
+        tree.heading("idx", text="#")
+        tree.heading("equipamento", text="Equipamento")
+        tree.heading("defeito", text="Defeito")
+        tree.heading("subtotal", text="Subtotal")
+        tree.heading("status", text="Status")
+        tree.column("idx", width=60, anchor="center")
+        tree.column("equipamento", width=390)
+        tree.column("defeito", width=390)
+        tree.column("subtotal", width=130, anchor="e")
+        tree.column("status", width=130, anchor="center")
+        tree.pack(fill="both", expand=True, padx=16, pady=(0, 14))
+
+        def atualizar_tabela_itens():
+            for iid in tree.get_children():
+                tree.delete(iid)
+            for idx, item in enumerate(itens_solicitacao, start=1):
+                tree.insert(
+                    "",
+                    "end",
+                    iid=str(idx - 1),
+                    values=(idx, item.get("equipamento", ""), item.get("defeito", ""), "R$ 0,00", "AGUARDANDO"),
+                )
+
+        def adicionar_item():
+            equipamento = str(ent_equipamento.get() or "").strip().upper()
+            defeito = str(ent_defeito.get() or "").strip()
+            if not equipamento:
+                messagebox.showwarning("PDV", "Informe o modelo/equipamento para adicionar o item.", parent=win)
+                return
+            itens_solicitacao.append(
+                {
+                    "equipamento": equipamento,
+                    "modelo": "",
+                    "defeito": defeito or "A DEFINIR",
+                    "itens": [],
+                    "prazo": "A DEFINIR",
+                    "obs": "Solicitação criada pelo PDV",
+                }
+            )
+            atualizar_tabela_itens()
+            ent_equipamento.delete(0, "end")
+            ent_defeito.delete(0, "end")
+            ent_equipamento.focus_force()
+
+        def remover_item():
+            selecao = tree.selection()
+            if not selecao:
+                foco = tree.focus()
+                if foco:
+                    selecao = (foco,)
+            if not selecao:
+                messagebox.showwarning("PDV", "Selecione um item para remover.", parent=win)
+                return
+            try:
+                idx = int(str(selecao[0]))
+            except Exception:
+                valores = tree.item(selecao[0], "values")
+                idx = int(valores[0]) - 1 if valores else -1
+            if idx < 0 or idx >= len(itens_solicitacao):
+                return
+            itens_solicitacao.pop(idx)
+            atualizar_tabela_itens()
+
+        def cancelar_solicitacao():
+            possui_dados = any(
+                [
+                    ent_cliente.get().strip(),
+                    ent_telefone.get().strip(),
+                    ent_equipamento.get().strip(),
+                    ent_defeito.get().strip(),
+                    bool(itens_solicitacao),
+                ]
+            )
+            if possui_dados and not messagebox.askyesno(
+                "Cancelar solicitação",
+                "Descartar os dados preenchidos e cancelar esta solicitação?",
+                parent=win,
+            ):
+                return
+            # O número exibido é apenas uma prévia local; como não houve commit, ele permanece livre.
+            win.destroy()
+
+        def salvar_solicitacao():
+            self._salvar_solicitacao_oficina(
+                ent_cliente.get(),
+                ent_telefone.get(),
+                ent_equipamento.get(),
+                "",
+                ent_defeito.get(),
+                win,
+                cliente_selecionado.get("id"),
+                equipamentos=list(itens_solicitacao),
+                numero_solicitacao=numero_preview,
+            )
+
+        ctk.CTkButton(
+            barra_acoes,
+            text="➕ ADICIONAR ITEM",
+            fg_color="#16a34a",
+            hover_color="#15803d",
+            width=170,
+            command=adicionar_item,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8))
+
+        ctk.CTkButton(
+            barra_acoes,
+            text="🗑 REMOVER ITEM",
+            fg_color="#ef4444",
+            hover_color="#dc2626",
+            width=170,
+            command=remover_item,
+        ).grid(row=0, column=1, sticky="w")
+
+        ctk.CTkButton(
+            barra_acoes,
+            text="SALVAR SOLICITAÇÃO",
+            fg_color="#16a34a",
+            hover_color="#15803d",
+            width=210,
+            command=salvar_solicitacao,
+        ).grid(row=0, column=3, sticky="e", padx=(8, 8))
+
+        ctk.CTkButton(
+            barra_acoes,
+            text="CANCELAR SOLICITAÇÃO",
+            fg_color="#dc2626",
+            hover_color="#b91c1c",
+            width=220,
+            command=cancelar_solicitacao,
+        ).grid(row=0, column=4, sticky="e")
+
+        ent_cliente.focus_force()
+
+    def _abrir_busca_cliente_solicitacao(self, ent_cliente, ent_telefone, cliente_selecionado, parent_modal):
+        win = ctk.CTkToplevel(self)
+        win.title("Buscar Cliente")
+        win.geometry("760x460")
+        win.grab_set()
+        win.focus_force()
+
+        ctk.CTkLabel(win, text="Buscar por nome ou telefone", font=("Arial", 12, "bold")).pack(anchor="w", padx=12, pady=(12, 4))
+        ent_filtro = ctk.CTkEntry(
+            win,
+            placeholder_text="Digite nome ou telefone...",
+            height=32,
+            fg_color="#1e293b",
+            border_color="#f8fafc",
+            border_width=1,
+        )
+        ent_filtro.pack(fill="x", padx=12, pady=(0, 8))
+
+        tree = ttk.Treeview(win, columns=("id", "nome", "telefone"), show="headings", style="PDV.Treeview")
+        tree.heading("id", text="ID")
+        tree.heading("nome", text="Cliente")
+        tree.heading("telefone", text="Telefone")
+        tree.column("id", width=70, anchor="center")
+        tree.column("nome", width=440)
+        tree.column("telefone", width=180, anchor="w")
+        tree.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+        def carregar_lista():
+            termo = (ent_filtro.get() or "").strip()
+            termo_up = termo.upper()
+            termo_digitos = "".join(ch for ch in termo if ch.isdigit())
+            for iid in tree.get_children():
+                tree.delete(iid)
+
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT id, COALESCE(nome,''), COALESCE(telefone,'')
+                    FROM clientes
+                    WHERE (
+                        UPPER(COALESCE(nome,'')) LIKE ?
+                        OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(telefone,''), '(', ''), ')', ''), '-', ''), ' ', '') LIKE ?
+                    )
+                    ORDER BY nome ASC
+                    LIMIT 500
+                    """,
+                    (f"%{termo_up}%", f"%{termo_digitos}%" if termo_digitos else "%"),
+                )
+                for row in cur.fetchall():
+                    tree.insert("", "end", values=(row[0], row[1], row[2]))
+
+            itens = tree.get_children()
+            if itens:
+                tree.selection_set(itens[0])
+                tree.focus(itens[0])
+
+        def confirmar(_event=None):
+            sel = tree.selection()
+            if not sel:
+                return "break"
+            valores = tree.item(sel[0], "values")
+            if not valores:
+                return "break"
+
+            cliente_id = int(valores[0])
+            nome = str(valores[1] or "").strip().upper()
+            telefone = str(valores[2] or "").strip()
+
+            ent_cliente.delete(0, "end")
+            ent_cliente.insert(0, nome)
+            ent_telefone.delete(0, "end")
+            ent_telefone.insert(0, telefone)
+            cliente_selecionado["id"] = cliente_id
+
+            win.destroy()
+            try:
+                parent_modal.focus_force()
+            except Exception:
+                pass
+            return "break"
+
+        ent_filtro.bind("<KeyRelease>", lambda _e: carregar_lista())
+        ent_filtro.bind("<Return>", confirmar)
+        tree.bind("<Double-1>", confirmar)
+        tree.bind("<Return>", confirmar)
+
+        carregar_lista()
+        ent_filtro.focus_force()
+
+    def _normalizar_telefone_cliente(self, telefone):
+        digitos = "".join(ch for ch in str(telefone or "") if ch.isdigit())
+        if len(digitos) == 11:
+            return f"({digitos[:2]}) {digitos[2:7]}-{digitos[7:]}"
+        if len(digitos) == 10:
+            return f"({digitos[:2]}) {digitos[2:6]}-{digitos[6:]}"
+        return str(telefone or "").strip()
+
+    def _buscar_ou_criar_cliente_rapido(self, cursor, nome_cliente, telefone):
+        nome = str(nome_cliente or "").strip().upper()
+        telefone_fmt = self._normalizar_telefone_cliente(telefone)
+        telefone_digits = "".join(ch for ch in telefone_fmt if ch.isdigit())
+
+        if telefone_digits:
+            cursor.execute(
+                """
+                SELECT id, COALESCE(nome,''), COALESCE(telefone,''),
+                       COALESCE(rua,''), COALESCE(numero,''),
+                       COALESCE(bairro,''), COALESCE(cidade,''), COALESCE(estado,'')
+                FROM clientes
+                WHERE UPPER(COALESCE(nome,'')) = UPPER(?)
+                  AND REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(telefone,''), '(', ''), ')', ''), '-', ''), ' ', '') = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (nome, telefone_digits),
+            )
+            row = cursor.fetchone()
+            if row:
+                endereco = " ".join(part for part in [row[3], row[4], row[5], row[6], row[7]] if str(part or "").strip())
+                return int(row[0]), str(row[1] or nome).strip().upper(), str(row[2] or telefone_fmt).strip(), endereco.strip(), False
+
+        cursor.execute(
+            """
+            SELECT id, COALESCE(nome,''), COALESCE(telefone,''),
+                   COALESCE(rua,''), COALESCE(numero,''),
+                   COALESCE(bairro,''), COALESCE(cidade,''), COALESCE(estado,'')
+            FROM clientes
+            WHERE UPPER(COALESCE(nome,'')) = UPPER(?)
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (nome,),
+        )
+        row = cursor.fetchone()
+        if row:
+            endereco = " ".join(part for part in [row[3], row[4], row[5], row[6], row[7]] if str(part or "").strip())
+            telefone_final = str(row[2] or telefone_fmt).strip()
+            if telefone_fmt and not str(row[2] or "").strip():
+                cursor.execute("UPDATE clientes SET telefone = ? WHERE id = ?", (telefone_fmt, int(row[0])))
+                telefone_final = telefone_fmt
+            return int(row[0]), str(row[1] or nome).strip().upper(), telefone_final, endereco.strip(), False
+
+        data_cadastro = datetime.now().strftime("%d/%m/%Y")
+        cursor.execute(
+            """
+            INSERT INTO clientes (nome, telefone, email, cep, rua, numero, bairro, cidade, estado, data_cadastro)
+            VALUES (?, ?, '', '', '', '', '', '', '', ?)
+            """,
+            (nome, telefone_fmt, data_cadastro),
+        )
+        cliente_id = int(cursor.lastrowid)
+        return cliente_id, nome, telefone_fmt, "", True
+
+    def _buscar_cliente_por_id_rapido(self, cursor, cliente_id):
+        try:
+            cid = int(cliente_id)
+        except Exception:
+            return None
+        if cid <= 0:
+            return None
+
+        cursor.execute(
+            """
+            SELECT id, COALESCE(nome,''), COALESCE(telefone,''),
+                   COALESCE(rua,''), COALESCE(numero,''),
+                   COALESCE(bairro,''), COALESCE(cidade,''), COALESCE(estado,'')
+            FROM clientes
+            WHERE id = ?
+            LIMIT 1
+            """,
+            (cid,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        endereco = " ".join(part for part in [row[3], row[4], row[5], row[6], row[7]] if str(part or "").strip())
+        return int(row[0]), str(row[1] or "").strip().upper(), str(row[2] or "").strip(), endereco.strip()
+
+    def _salvar_solicitacao_oficina(self, nome_cliente, telefone, nome_equipamento, modelo, defeito, janela_modal=None, cliente_id_preferido=None, equipamentos=None, numero_solicitacao=None):
+        cliente = str(nome_cliente or "").strip().upper() or "CLIENTE NÃO INFORMADO"
+        telefone_txt = str(telefone or "").strip()
+        equipamento = str(nome_equipamento or "").strip().upper()
+        modelo_txt = str(modelo or "").strip().upper()
+        defeito_txt = str(defeito or "").strip()
+
+        equipamentos_limpos = []
+        for item in list(equipamentos or []):
+            if not isinstance(item, dict):
+                continue
+            nome_eq = str(item.get("equipamento") or "").strip().upper()
+            if not nome_eq:
+                continue
+            equipamentos_limpos.append(
+                {
+                    "equipamento": nome_eq,
+                    "modelo": str(item.get("modelo") or "").strip().upper(),
+                    "defeito": str(item.get("defeito") or "").strip() or "A DEFINIR",
+                    "itens": list(item.get("itens") or []),
+                    "prazo": str(item.get("prazo") or "A DEFINIR"),
+                    "obs": str(item.get("obs") or "Solicitação criada pelo PDV"),
+                }
+            )
+
+        if not equipamentos_limpos:
+            equipamentos_limpos.append(
+                {
+                    "equipamento": equipamento or "EQUIPAMENTO NÃO INFORMADO",
+                    "modelo": modelo_txt,
+                    "defeito": defeito_txt or "A DEFINIR",
+                    "itens": [],
+                    "prazo": "A DEFINIR",
+                    "obs": "Solicitação criada pelo PDV",
+                }
+            )
+
+        primeiro_item = equipamentos_limpos[0]
+        equipamento_exibicao = primeiro_item.get("equipamento", "")
+        if primeiro_item.get("modelo"):
+            equipamento_exibicao = f"{equipamento_exibicao} | {primeiro_item['modelo']}"
+        defeito_final = primeiro_item.get("defeito", "A DEFINIR")
+
+        data_atual = datetime.now().strftime("%d/%m/%Y")
+        os_id_desejado = int(numero_solicitacao or 0)
+
+        try:
+            import tela_os
+
+            if os_id_desejado <= 0:
+                os_id_desejado = int(tela_os.obter_proximo_numero_orcamento_oficial())
+
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT COALESCE(MAX(id), 0) FROM orcamentos_aguardo")
+                ultimo_id_real = int((cur.fetchone() or [0])[0] or 0)
+                os_id_desejado = max(os_id_desejado, ultimo_id_real + 1, 501)
+
+                cliente_vinculado = self._buscar_cliente_por_id_rapido(cur, cliente_id_preferido)
+                if cliente_vinculado:
+                    cliente_id, cliente_final, telefone_existente, endereco_final = cliente_vinculado
+                    telefone_final = telefone_existente or self._normalizar_telefone_cliente(telefone_txt)
+                    if telefone_txt and not telefone_existente:
+                        cur.execute("UPDATE clientes SET telefone = ? WHERE id = ?", (telefone_final, cliente_id))
+                else:
+                    cliente_id, cliente_final, telefone_final, endereco_final, _foi_criado = self._buscar_ou_criar_cliente_rapido(
+                        cur,
+                        cliente,
+                        telefone_txt,
+                    )
+
+                conn.commit()
+
+                for eq in equipamentos_limpos:
+                    eq["cliente_id"] = cliente_id
+                    eq["cliente_telefone"] = telefone_final
+                    eq["cliente_endereco"] = endereco_final
+                    eq["origem"] = "PDV"
+
+            tela_os.salvar_os_completa(
+                os_id_desejado,
+                cliente_final,
+                telefone_final,
+                endereco_final,
+                equipamentos_limpos,
+                status="AGUARDANDO ORÇAMENTO",
+                forma_pagamento=None,
+                on_save_callback=self.on_os_update_callback,
+            )
+
+            if janela_modal is not None:
+                try:
+                    janela_modal.destroy()
+                except Exception:
+                    pass
+
+            # Fluxo sem travas: após salvar, fecha modal e já deixa PDV pronto para próxima solicitação.
+            self._focar_busca()
+        except Exception as exc:
+            messagebox.showerror("PDV", f"Erro ao salvar solicitação: {exc}", parent=self)
+
     def _extrair_itens_orcamento_para_pdv(self, itens_detalhes_raw, dados_adicionais_raw):
         itens = []
         desconto_total = 0.0
@@ -1077,9 +1606,26 @@ class FrmPDV(ctk.CTkToplevel):
             ):
                 return False
 
+        cliente_id_vinculado = None
+        cliente_telefone_vinculado = ""
+        cliente_endereco_vinculado = ""
+        try:
+            dados = json.loads(str(dados_adicionais or "").strip() or "{}")
+            equipamentos = dados.get("equipamentos") if isinstance(dados, dict) else []
+            if isinstance(equipamentos, list) and equipamentos:
+                primeiro = equipamentos[0] if isinstance(equipamentos[0], dict) else {}
+                cliente_id_vinculado = primeiro.get("cliente_id")
+                cliente_telefone_vinculado = str(primeiro.get("cliente_telefone") or "").strip()
+                cliente_endereco_vinculado = str(primeiro.get("cliente_endereco") or "").strip()
+        except Exception:
+            pass
+
         self._orcamento_vinculado = {
             "id": int(orc_id or 0),
             "cliente": str(cliente or ""),
+            "cliente_id": int(cliente_id_vinculado or 0) if str(cliente_id_vinculado or "").strip() else 0,
+            "cliente_telefone": cliente_telefone_vinculado,
+            "cliente_endereco": cliente_endereco_vinculado,
             "equipamento": str(equipamento or ""),
             "status": str(status or ""),
             "data": str(data_orc or ""),
@@ -1329,6 +1875,7 @@ class FrmPDV(ctk.CTkToplevel):
             "troco": max(self._total_pago() - total_liquido, 0.0),
             "items": [dict(i) for i in self._carrinho],
             "payments": [dict(p) for p in self._pagamentos],
+            "orcamento_vinculado": dict(self._orcamento_vinculado or {}),
         }
 
     def _base_venda_para_saida(self):
@@ -1480,6 +2027,32 @@ class FrmPDV(ctk.CTkToplevel):
                     "aliquota_icms": aliq,
                 }
             return mapa
+
+    def _validar_pre_emissao_fiscal(self, venda):
+        orc = venda.get("orcamento_vinculado") or {}
+        cliente_id = int(orc.get("cliente_id") or 0) if str(orc.get("cliente_id") or "").strip() else 0
+        cliente = obter_cliente_por_id(cliente_id) if cliente_id > 0 else None
+        if not cliente:
+            cliente = obter_cliente_por_nome_telefone(
+                str(orc.get("cliente") or "").strip(),
+                str(orc.get("cliente_telefone") or "").strip(),
+            )
+        if not cliente:
+            cliente = {
+                "nome": str(orc.get("cliente") or "").strip(),
+                "cpf_cnpj": "",
+                "cep": "",
+                "rua": "",
+                "numero": "",
+                "cidade": "",
+                "estado": "",
+            }
+
+        return validar_pre_emissao_nota(
+            cliente=cliente,
+            itens=list(venda.get("items") or []),
+            tipo_documento="nfe",
+        )
 
     def _gerar_xml_fiscal(self, venda):
         pasta = Path("C:/PDV/XML_SAIDA")
@@ -1637,13 +2210,79 @@ class FrmPDV(ctk.CTkToplevel):
     def _gerar_xml_fiscal_da_tela(self):
         venda = self._base_venda_para_saida()
         if not venda:
-            messagebox.showwarning("PDV", "Nenhuma venda disponivel para gerar XML.", parent=self)
+            messagebox.showwarning("PDV", "Nenhuma venda disponivel para emitir nota fiscal.", parent=self)
             return
+
+        faltantes = self._validar_pre_emissao_fiscal(venda)
+        if faltantes:
+            mensagem = formatar_mensagem_bloqueio_emissao(faltantes, tipo_documento="nfe")
+            messagebox.showwarning("PDV", mensagem, parent=self)
+            return
+
+        status_motor = verificar_status_motor_fiscal()
+        if not bool(status_motor.get("ok")):
+            messagebox.showwarning(
+                "PDV",
+                str(status_motor.get("mensagem") or "Motor fiscal não detectado. Verifique se o ACBrMonitor está aberto"),
+                parent=self,
+            )
+            return
+
         try:
+            venda["fiscal_tipo"] = "nfe"
             caminho = self._gerar_xml_fiscal(venda)
-            messagebox.showinfo("PDV", f"XML fiscal gerado com sucesso:\n{caminho}", parent=self)
+            retorno_fiscal = tentar_enviar_venda(venda)
+            sale_id = int(venda.get("sale_id") or 0)
+            if sale_id > 0:
+                try:
+                    self._persistir_retorno_fiscal(sale_id, retorno_fiscal)
+                except Exception:
+                    pass
+
+            if bool(retorno_fiscal and retorno_fiscal.get("ok")):
+                messagebox.showinfo("PDV", f"Nota fiscal emitida com sucesso:\n{caminho}", parent=self)
+            else:
+                msg = str((retorno_fiscal or {}).get("mensagem") or "")
+                motivo = str((retorno_fiscal or {}).get("motivo") or "retorno_fiscal_indisponivel")
+                corpo = msg or f"XML fiscal gerado, mas o envio ao ACBr não foi concluído.\nMotivo: {motivo}\nArquivo: {caminho}"
+                messagebox.showwarning("PDV", corpo, parent=self)
         except Exception as e:
-            messagebox.showerror("PDV", f"Erro ao gerar XML fiscal: {e}", parent=self)
+            messagebox.showerror("PDV", f"Erro ao emitir nota fiscal: {e}", parent=self)
+
+    def _consultar_nota_fiscal_da_tela(self):
+        venda = self._base_venda_para_saida()
+        if not venda:
+            messagebox.showwarning("PDV", "Nenhuma venda disponível para consulta fiscal.", parent=self)
+            return
+        referencia = str(venda.get("sale_id") or "").strip()
+        retorno = consultar_nota_fiscal(referencia)
+        if bool(retorno.get("ok")):
+            messagebox.showinfo("PDV", f"Consulta de nota concluída com sucesso.\nReferência: {referencia}", parent=self)
+        else:
+            corpo = str(retorno.get("mensagem") or retorno.get("motivo") or "Falha na consulta fiscal.")
+            messagebox.showwarning("PDV", corpo, parent=self)
+
+    def _imprimir_danfe_fiscal_da_tela(self):
+        venda = self._base_venda_para_saida()
+        if not venda:
+            messagebox.showwarning("PDV", "Nenhuma venda disponível para imprimir DANFE.", parent=self)
+            return
+        venda["fiscal_tipo"] = "nfe"
+        retorno = imprimir_danfe_fiscal(venda)
+        if bool(retorno.get("ok")):
+            caminho = str(retorno.get("arquivo") or "")
+            messagebox.showinfo("PDV", f"DANFE gerado com sucesso.\nArquivo: {caminho}", parent=self)
+            if caminho and hasattr(os, "startfile"):
+                try:
+                    os.startfile(caminho, "print")  # type: ignore[attr-defined]
+                except Exception:
+                    try:
+                        os.startfile(caminho)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+        else:
+            corpo = str(retorno.get("mensagem") or retorno.get("motivo") or "Falha ao gerar DANFE.")
+            messagebox.showwarning("PDV", corpo, parent=self)
 
     def _imprimir_nao_fiscal_da_tela(self):
         venda = self._base_venda_para_saida()
@@ -1854,24 +2493,6 @@ class FrmPDV(ctk.CTkToplevel):
 
             venda["sale_id"] = venda_id
             self._ultima_venda = venda
-
-            retorno_fiscal = None
-            # Chamada fiscal opcional sem bloquear a operação principal do PDV.
-            try:
-                retorno_fiscal = tentar_enviar_venda(venda)
-            except Exception:
-                retorno_fiscal = {
-                    "ok": False,
-                    "modo": "standalone",
-                    "status": "erro",
-                    "motivo": "falha_na_chamada_fiscal",
-                    "sale_id": venda_id,
-                }
-
-            try:
-                self._persistir_retorno_fiscal(venda_id, retorno_fiscal)
-            except Exception:
-                pass
 
             if bool(self._auto_impressao.get()):
                 self._imprimir_cupom_automatico(venda)

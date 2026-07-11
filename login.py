@@ -82,6 +82,9 @@ from config import (
     obter_chave_instalacao,
     diagnosticar_chave_licenca,
     iniciar_sincronizacao_hibrida_nuvem,
+    iniciar_listener_firebase_realtime,
+    obter_status_acesso_centralizado,
+    modo_cliente_final_licenciado,
 )
 from shutdown_utils import fechar_sistema
 
@@ -414,6 +417,14 @@ def _inicializar_fluxo_pos_termos() -> None:
             logger.warning("[startup] Sync híbrida não iniciada: %s", msg_sync_bg)
     except Exception as e:
         logger.warning("[startup] Falha ao iniciar sincronização híbrida automática: %s", e)
+
+    try:
+        ok_fb_listener, msg_fb_listener = iniciar_listener_firebase_realtime()
+        logger.info("[startup] Listener Firebase realtime: %s", msg_fb_listener)
+        if not ok_fb_listener:
+            logger.warning("[startup] Listener Firebase não iniciado: %s", msg_fb_listener)
+    except Exception as e:
+        logger.warning("[startup] Falha ao iniciar listener Firebase realtime: %s", e)
 
     atualizar_status_trial_tela()
     atualizar_status_primeiro_acesso()
@@ -1030,10 +1041,13 @@ def verificar_login():
                 messagebox.showerror("Erro de Acesso", "Usuário ou senha inválidos.")
                 return
 
-            lic_ativa, _msg_lic, _cliente_lic, _validade_lic = obter_status_licenca()
-            trial_ativo, _, _ = obter_status_trial()
-            if not lic_ativa and not trial_ativo:
-                label_status.configure(text="Trial expirado. Ative a licença.", text_color="red")
+            status_acesso = obter_status_acesso_centralizado()
+            if not bool(status_acesso.get("ativa")):
+                label_status.configure(
+                    text=str(status_acesso.get("mensagem") or "Licença ausente/inválida e trial expirado. Ative a licença para continuar."),
+                    text_color="red",
+                )
+                logger.warning("[startup] Login bloqueado por licença/acesso centralizado: %s", status_acesso)
                 return
 
             print("Log: Autenticação bem-sucedida.")
@@ -1046,16 +1060,12 @@ def verificar_login():
             def transicao_final_segura():
                 global _LOGIN_TRANSICAO_EM_ANDAMENTO
                 try:
-                    # 1. Esconde a janela de login e encerra o loop atual.
+                    # 1. Esconde a janela de login.
                     janela_login.withdraw()
-                    try:
-                        janela_login.quit()
-                    except Exception:
-                        pass
 
-                    # 2. Inicia o menu principal na sequência.
-                    menu = importlib.import_module("menu")
-                    menu.iniciar_sistema(usuario=u, role=role, senha_login=s)
+                    # 2. Inicia apenas o menu principal (fluxo padrão da aplicação).
+                    menu_mod = importlib.import_module("menu")
+                    menu_mod.iniciar_sistema(usuario=u, role=role, senha_login=s)
 
                     # 3. Garante encerramento da janela de login ao fechar o menu.
                     try:
@@ -1264,26 +1274,35 @@ label_trial.pack(pady=(0, 6))
 
 label_status = ctk.CTkLabel(main_frame, text="", text_color="red")
 label_status.pack(pady=(8, 12))
+
+progress_update = ctk.CTkProgressBar(main_frame, width=320)
+progress_update.set(0)
+progress_update.pack(pady=(0, 8))
+progress_update.pack_forget()
+
 logger.info("[startup] Interface de login carregada com sucesso.")
 
 _url_update_disponivel = ""
 _auto_update_liberado = False
 _mensagem_politica_update = ""
+_popup_update_exibido = False
+_auto_update_disparada = False
 
 
-def _executar_instalacao_update():
+def _executar_instalacao_update(confirmar_usuario: bool = True):
     if not _url_update_disponivel:
         messagebox.showwarning("Atualização", "Link de atualização indisponível no momento.", parent=janela_login)
         return
 
-    confirmar = messagebox.askyesno(
-        "Atualização",
-        "Deseja baixar e instalar a nova versão agora?\n\n"
-        "O sistema será fechado para concluir a atualização.",
-        parent=janela_login,
-    )
-    if not confirmar:
-        return
+    if confirmar_usuario:
+        confirmar = messagebox.askyesno(
+            "Atualização",
+            "Deseja baixar e instalar a nova versão agora?\n\n"
+            "O sistema será fechado para concluir a atualização.",
+            parent=janela_login,
+        )
+        if not confirmar:
+            return
 
     risco_banco, msg_risco = avaliar_risco_banco_antes_atualizacao()
     if risco_banco:
@@ -1302,18 +1321,35 @@ def _executar_instalacao_update():
     )
 
     btn_atualizar.configure(state="disabled")
+    progress_update.set(0)
+    progress_update.pack(pady=(0, 8))
+    label_status.configure(text="Iniciando atualização...", text_color="#f1c40f")
 
     def _worker_update():
+        def _progresso(valor: float, mensagem: str = ""):
+            try:
+                janela_login.after(
+                    0,
+                    lambda: (
+                        progress_update.set(max(0.0, min(float(valor or 0.0), 1.0))),
+                        label_status.configure(text=str(mensagem or ""), text_color="#f1c40f")
+                    )
+                )
+            except Exception:
+                pass
+
         ok, msg = executar_atualizacao(
             _url_update_disponivel,
             app_executavel=sys.executable,
             processo_pid=os.getpid(),
             silenciosa=True,
-            progresso_cb=None,
+            progresso_cb=_progresso,
         )
 
         def _finalizar():
             if ok:
+                label_status.configure(text="Atualização baixada. Reiniciando sistema...", text_color="#2ecc71")
+                progress_update.set(1.0)
                 # Ordem profissional: fecha app principal para o Atualizador assumir o processo.
                 try:
                     janela_login.after(100, janela_login.destroy)
@@ -1325,6 +1361,8 @@ def _executar_instalacao_update():
                     pass
             else:
                 btn_atualizar.configure(state="normal")
+                progress_update.pack_forget()
+                label_status.configure(text=msg, text_color="red")
                 messagebox.showerror("Atualização", msg, parent=janela_login)
 
         janela_login.after(0, _finalizar)
@@ -1387,7 +1425,7 @@ def atualizar_status_trial_tela():
     lic_ativa, _msg_lic, cliente_lic, validade_lic = obter_status_licenca()
     if lic_ativa:
         _PAGAMENTO_EXPIRADO_JA_EXIBIDO = False
-        texto_validade = "PERMANENTE" if str(validade_lic).upper() == "PERMANENTE" else str(validade_lic)
+        texto_validade = "ATIVA (arquivo local)" if str(validade_lic).upper() == "PERMANENTE" else str(validade_lic)
         label_trial.configure(
             text=f"LICENCA ATIVA ({cliente_lic}) - validade: {texto_validade}",
             text_color="#2ecc71"
@@ -1475,9 +1513,12 @@ label_versao = ctk.CTkLabel(
 label_versao.pack(pady=(0, 4))
 
 def _checar_versao_bg():
-    global _url_update_disponivel, _auto_update_liberado, _mensagem_politica_update
-    if not deve_verificar_atualizacao(INTERVALO_DIAS_CHECK_VERSAO):
-        return
+    global _url_update_disponivel, _auto_update_liberado, _mensagem_politica_update, _popup_update_exibido, _auto_update_disparada
+    try:
+        # Mantém registro histórico, mas sem bloquear a checagem no startup.
+        deve_verificar_atualizacao(INTERVALO_DIAS_CHECK_VERSAO)
+    except Exception:
+        pass
 
     info_versao = obter_info_nova_versao()
     erro = str(info_versao.get("erro", "")).strip()
@@ -1520,7 +1561,7 @@ def _checar_versao_bg():
             )
 
         def _mostrar():
-            global _url_update_disponivel, _auto_update_liberado, _mensagem_politica_update
+            global _url_update_disponivel, _auto_update_liberado, _mensagem_politica_update, _popup_update_exibido, _auto_update_disparada
             _auto_update_liberado = auto_update_liberado
             _mensagem_politica_update = msg_politica
             tipo_txt = tipo_licenca.title() if tipo_licenca else "Licença"
@@ -1539,6 +1580,13 @@ def _checar_versao_bg():
                     )
                 else:
                     btn_atualizar.configure(state="disabled")
+
+                if not _popup_update_exibido and _url_update_disponivel:
+                    _popup_update_exibido = True
+                    # Fluxo automático: versão remota maior dispara atualização sem confirmação manual.
+                    if not _auto_update_disparada:
+                        _auto_update_disparada = True
+                        _executar_instalacao_update(confirmar_usuario=False)
             else:
                 texto_update = f"Nova versão {versao_nova} disponível ({tipo_txt}). {msg_politica}"
                 cor = "#f39c12"

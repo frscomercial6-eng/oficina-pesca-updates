@@ -11,7 +11,7 @@ import time
 import zipfile
 
 DIV = "═" * 50
-VERSAO = "1.0.28.1"
+VERSAO = "1.0.29"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -22,6 +22,12 @@ DISTRIBUTION_BOOTSTRAPPER_NAME = "Atualizador.exe"
 PORTABLE_STAGE_DIR = os.path.join(INSTALLER_OUTPUT_DIR, APP_NAME)
 PORTABLE_OUTPUT_DIR = "Output"
 PORTABLE_ZIP_NAME = "Oficina_Pesca_Portatil.zip"
+ANDROID_PROJECT_DIR = "android_apk"
+ANDROID_APK_DIST_DIR = os.path.join("dist", "apk_celular")
+ANDROID_APK_PACKAGE_DIR = os.path.join(DISTRIBUTION_DIR, "apk_celular")
+ANDROID_APK_LEGACY_DIR = "apk_celular_distribuicao"
+ANDROID_APK_NAME = "Oficina_Pesca_WebView.apk"
+ANDROID_APK_INSTALLER_NAME = "oficina_app_signed.apk"
 AUTO_MODE = "--auto" in sys.argv or os.environ.get("OFP_BUILD_AUTO") == "1"
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -55,11 +61,15 @@ BUILD_ROOT = _resolver_diretorio_build()
 
 RESOURCE_SPECS = [
     ("assets", "assets"),
+    ("client_secret_desktop.json", "."),
+    ("client_secret_desktop.json", "assets"),
+    ("dados_oficina.py", "."),
     ("fundomenu.png", "."),
     ("LOGO.bmp", "."),
     ("icone_oficina.ico", "."),
     ("config.cfg", "."),
     ("versao.json", "."),
+    ("version.json", "."),
     ("version.txt", "."),
     ("Documentos/termos_de_uso.txt", "Documentos"),
     ("Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf", "."),
@@ -87,10 +97,31 @@ PORTABLE_REQUIRED_SPECS = [
     ("version.txt", "."),
 ]
 
+FUNDO_MENU_CANDIDATOS = [
+    os.path.join("assets", "fundo_menu.jpeg"),
+    os.path.join("assets", "fundo_menu.jpg"),
+    os.path.join("assets", "fundo_menu.png"),
+    os.path.join("assets", "fundomenu.png"),
+    os.path.join("_internal", "assets", "fundo_menu.jpeg"),
+    os.path.join("_internal", "assets", "fundo_menu.jpg"),
+    os.path.join("_internal", "assets", "fundo_menu.png"),
+    os.path.join("_internal", "assets", "fundomenu.png"),
+    os.path.join("_internal", "fundo_menu.jpeg"),
+    os.path.join("_internal", "fundo_menu.jpg"),
+    os.path.join("_internal", "fundo_menu.png"),
+    os.path.join("_internal", "fundomenu.png"),
+    "fundo_menu.jpeg",
+    "fundo_menu.jpg",
+    "fundo_menu.png",
+    "fundomenu.png",
+]
+
 LOCAL_HIDDEN_IMPORTS = [
     ("adaptador_acbr", "adaptador_acbr.py"),
     ("clientes", "clientes.py"),
     ("config", "config.py"),
+    ("configuracao_fiscal", "configuracao_fiscal.py"),
+    ("dados_oficina", "dados_oficina.py"),
     ("gestao_os", "gestao_os.py"),
     ("menu", "menu.py"),
     ("login", "login.py"),
@@ -184,6 +215,22 @@ def atualizar_versao_json(nova_versao):
         json.dump(dados, f, ensure_ascii=False, indent=2)
     print(f"✅ versao.json atualizado de {versao_antiga} para {nova_versao}.")
 
+    caminho_version = "version.json"
+    dados_version = {
+        "versao": nova_versao,
+        "novidades": f"v{nova_versao}: Atualização de versão automática.",
+        "url_download": f"https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v{nova_versao}/Oficina_Pesca_Instalador.exe",
+        "download_url": f"https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v{nova_versao}/Oficina_Pesca_Instalador.exe",
+        "force_update": False,
+        "apk": {
+            "versao": nova_versao,
+            "canal": "webview",
+        },
+    }
+    with open(caminho_version, "w", encoding="utf-8") as f:
+        json.dump(dados_version, f, ensure_ascii=False, indent=2)
+    print(f"✅ version.json sincronizado para {nova_versao}.")
+
 
 def _sincronizar_manifests(nova_versao: str) -> None:
     """Propaga a versão para config.cfg, versao.json e version.txt."""
@@ -224,7 +271,7 @@ def _atualizar_version_info(nova_versao: str) -> None:
         return
     txt, enc = _read_text_any(path)
     novo = re.sub(
-        r'(?m)^\s*VERSION\s*=\s*["\']\d+\.\d+\.\d+["\']\s*$',
+        r'(?m)^\s*VERSION\s*=\s*["\'][0-9]+(?:\.[0-9]+){2,}["\']\s*$',
         f'VERSION = "{nova_versao}"',
         txt,
     )
@@ -245,10 +292,10 @@ def _atualizar_eula(nova_versao: str) -> None:
             continue
         txt, enc = _read_text_any(path)
         novo = txt
-        novo = re.sub(r'(Vers[aã]o\s+)(\d+\.\d+\.\d+)', rf'\g<1>{nova_versao}', novo, flags=re.IGNORECASE)
+        novo = re.sub(r'(Vers[aã]o\s+)([0-9]+(?:\.[0-9]+){2,})', rf'\g<1>{nova_versao}', novo, flags=re.IGNORECASE)
         # Caso específico em RTF onde "Versão" aparece com escapes.
         novo = re.sub(
-            r"(Vers\\'e3\\loch\\f1\s+\\hich\\f1\s*o\s+)(\d+\.\d+\.\d+)",
+            r"(Vers\\'e3\\loch\\f1\s+\\hich\\f1\s*o\s+)([0-9]+(?:\.[0-9]+){2,})",
             rf"\g<1>{nova_versao}",
             novo,
             flags=re.IGNORECASE,
@@ -271,7 +318,7 @@ def _atualizar_scripts_instalador(nova_versao: str) -> None:
         txt, enc = _read_text_any(path)
         novo = txt
         novo = re.sub(
-            r'(?im)^\s*#define\s+AppVersion\s+"[0-9]+\.[0-9]+\.[0-9]+"\s*$',
+            r'(?im)^\s*#define\s+AppVersion\s+"[0-9]+(?:\.[0-9]+){2,}"\s*$',
             f'#define AppVersion "{nova_versao}"',
             novo,
         )
@@ -304,17 +351,17 @@ def _atualizar_scripts_instalador(nova_versao: str) -> None:
         txt, enc = _read_text_any(path)
         novo = txt
         novo = re.sub(
-            r'(?im)^\s*set\s+"SETUP_NAME=Setup_OficinaPesca_v[0-9]+\.[0-9]+\.[0-9]+\.exe"\s*$',
+            r'(?im)^\s*set\s+"SETUP_NAME=Setup_OficinaPesca_v[0-9]+(?:\.[0-9]+){2,}\.exe"\s*$',
             f'set "SETUP_NAME=Setup_OficinaPesca_v{nova_versao}.exe"',
             novo,
         )
         novo = re.sub(
-            r'(?im)(/DInstallerOutputName=Setup_OficinaPesca_v)[0-9]+\.[0-9]+\.[0-9]+(_FINAL)',
+            r'(?im)(/DInstallerOutputName=Setup_OficinaPesca_v)[0-9]+(?:\.[0-9]+){2,}(_FINAL)',
             rf'\g<1>{nova_versao}\g<2>',
             novo,
         )
         novo = re.sub(
-            r'(?im)^\s*set\s+"FINAL_SETUP=Setup_OficinaPesca_v[0-9]+\.[0-9]+\.[0-9]+_FINAL\.exe"\s*$',
+            r'(?im)^\s*set\s+"FINAL_SETUP=Setup_OficinaPesca_v[0-9]+(?:\.[0-9]+){2,}_FINAL\.exe"\s*$',
             f'set "FINAL_SETUP=Setup_OficinaPesca_v{nova_versao}_FINAL.exe"',
             novo,
         )
@@ -334,6 +381,77 @@ def _sincronizar_versao_global(nova_versao: str) -> None:
     _atualizar_scripts_instalador(nova_versao)
     print("✅ Sincronização global de versão concluída.")
     print(DIV)
+
+
+def _caminho_gradle_wrapper() -> str:
+    return os.path.join(ANDROID_PROJECT_DIR, "gradlew.bat" if os.name == "nt" else "gradlew")
+
+
+def _resolver_comando_gradle() -> list[str]:
+    wrapper = _caminho_gradle_wrapper()
+    if os.path.exists(wrapper):
+        return [os.path.abspath(wrapper)]
+    gradle_cmd = shutil.which("gradle")
+    if gradle_cmd:
+        return [gradle_cmd]
+    raise FileNotFoundError(
+        "Gradle não encontrado. Gere o wrapper em android_apk/ ou instale gradle no PATH."
+    )
+
+
+def _gerar_wrapper_gradle_android() -> str:
+    wrapper = _caminho_gradle_wrapper()
+    if os.path.exists(wrapper):
+        print(f"ℹ️  Gradle wrapper já disponível: {wrapper}")
+        return wrapper
+
+    gradle_cmd = shutil.which("gradle")
+    if not gradle_cmd:
+        raise FileNotFoundError(
+            "Gradle não encontrado para gerar wrapper do APK. Instale gradle ou versione o wrapper em android_apk/."
+        )
+
+    print("🧰 Gerando gradle wrapper do APK...")
+    subprocess.run([gradle_cmd, "wrapper"], cwd=ANDROID_PROJECT_DIR, check=True)
+    if not os.path.exists(wrapper):
+        raise FileNotFoundError("Gradle wrapper não foi gerado em android_apk/.")
+    return wrapper
+
+
+def _build_apk_android(versao: str) -> tuple[str, str]:
+    print("📱 Compilando APK WebView com a mesma versão do Desktop...")
+    _gerar_wrapper_gradle_android()
+    gradle_cmd = _resolver_comando_gradle()
+    subprocess.run([*gradle_cmd, "assembleDebug"], cwd=ANDROID_PROJECT_DIR, check=True)
+
+    candidatos_origem = [
+        os.path.join(ANDROID_PROJECT_DIR, "build", "outputs", "apk", "debug", "app-debug.apk"),
+        os.path.join(ANDROID_PROJECT_DIR, "app", "build", "outputs", "apk", "debug", "app-debug.apk"),
+    ]
+    origem_apk = next((c for c in candidatos_origem if os.path.exists(c)), "")
+    if not origem_apk:
+        raise FileNotFoundError("Falha ao localizar APK para distribuição")
+
+    os.makedirs(ANDROID_APK_DIST_DIR, exist_ok=True)
+    os.makedirs(ANDROID_APK_PACKAGE_DIR, exist_ok=True)
+    os.makedirs(ANDROID_APK_LEGACY_DIR, exist_ok=True)
+
+    nome_versionado = f"Oficina_Pesca_WebView_v{versao}.apk"
+    destino_dist = os.path.join(ANDROID_APK_DIST_DIR, nome_versionado)
+    destino_pacote = os.path.join(ANDROID_APK_PACKAGE_DIR, ANDROID_APK_NAME)
+    destino_legacy = os.path.join(ANDROID_APK_LEGACY_DIR, ANDROID_APK_INSTALLER_NAME)
+
+    shutil.copy2(origem_apk, destino_dist)
+    shutil.copy2(origem_apk, destino_pacote)
+    shutil.copy2(origem_apk, destino_legacy)
+
+    if not os.path.exists(destino_dist):
+        raise FileNotFoundError("Falha ao localizar APK para distribuição")
+
+    print(f"📦 APK copiado para dist: {destino_dist}")
+    print(f"📤 APK copiado para distribuição: {destino_pacote}")
+    print(f"📤 APK copiado para pasta legada do instalador: {destino_legacy}")
+    return destino_dist, destino_pacote
 
 
 def analisar_todos():
@@ -412,9 +530,12 @@ def _sincronizar_fonte_para_build() -> None:
     itens = [
         ENTRY_SCRIPT,
         "config.py",
+        "configuracao_fiscal.py",
+        "dados_oficina.py",
         "config.json",
         "config.cfg",
         "versao.json",
+        "version.json",
         "version.txt",
         "version_info.py",
         "Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf",
@@ -434,6 +555,7 @@ def _sincronizar_fonte_para_build() -> None:
         "templates",
         "static",
         "apk_celular_distribuicao",
+        ANDROID_PROJECT_DIR,
     ]
 
     for rel_path in itens:
@@ -754,6 +876,53 @@ def _validar_stage_portatil(stage_dir: str) -> None:
         )
 
 
+def _validar_fundo_menu_em_diretorio(base_dir: str, contexto: str) -> str:
+    candidatos_abs = [os.path.abspath(os.path.join(base_dir, rel)) for rel in FUNDO_MENU_CANDIDATOS]
+    encontrados = [c for c in candidatos_abs if os.path.exists(c)]
+    for caminho in candidatos_abs:
+        status = "FOUND" if os.path.exists(caminho) else "FileNotFound"
+        print(f"🖼️  Fundo menu ({contexto}) tentativa: {caminho} -> {status}")
+    if not encontrados:
+        raise FileNotFoundError(
+            f"Imagem de fundo_menu não encontrada em {contexto} ({os.path.abspath(base_dir)})."
+        )
+    selecionado = encontrados[0]
+    print(f"✅ Fundo menu validado em {contexto}: {selecionado}")
+    return selecionado
+
+
+def _validar_assets_bundle_interno(dist_dir: str) -> None:
+    """Garante que o bundle interno tenha assets visuais antes da etapa do instalador."""
+    pasta_assets = os.path.abspath(os.path.join(dist_dir, "_internal", "assets"))
+    print(f"🧪 Verificando assets internos do bundle: {pasta_assets}")
+
+    if not os.path.isdir(pasta_assets):
+        raise FileNotFoundError(
+            f"Pasta de assets internos ausente: {pasta_assets}. Build abortado."
+        )
+
+    imagens = []
+    for nome in sorted(os.listdir(pasta_assets)):
+        caminho = os.path.join(pasta_assets, nome)
+        if not os.path.isfile(caminho):
+            continue
+        ext = os.path.splitext(nome)[1].lower()
+        if ext in {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".ico"}:
+            imagens.append(nome)
+
+    if not imagens:
+        raise RuntimeError(
+            f"Assets internos sem imagens em {pasta_assets}. Build abortado."
+        )
+
+    if "fundo_menu.jpeg" not in imagens:
+        raise RuntimeError(
+            f"Arquivo obrigatório 'fundo_menu.jpeg' ausente em {pasta_assets}. Build abortado."
+        )
+
+    print(f"✅ Assets internos validados ({len(imagens)} imagem(ns)): {', '.join(imagens)}")
+
+
 def _gerar_zip_portatil(stage_dir: str) -> tuple[str, str]:
     os.makedirs(PORTABLE_OUTPUT_DIR, exist_ok=True)
     zip_output = os.path.join(PORTABLE_OUTPUT_DIR, PORTABLE_ZIP_NAME)
@@ -809,7 +978,8 @@ def _copiar_artefatos_para_instalador_final(instalador: str, bootstrapper_bundle
 def _validar_pacote_distribuicao(instalador_destino: str, bootstrapper_destino: str) -> None:
     faltando: list[str] = []
     zip_portatil = os.path.join(DISTRIBUTION_DIR, PORTABLE_ZIP_NAME)
-    for caminho in [instalador_destino, bootstrapper_destino, zip_portatil]:
+    apk_distribuicao = os.path.join(ANDROID_APK_PACKAGE_DIR, ANDROID_APK_NAME)
+    for caminho in [instalador_destino, bootstrapper_destino, zip_portatil, apk_distribuicao]:
         if not os.path.exists(caminho):
             faltando.append(caminho)
     if faltando:
@@ -913,17 +1083,25 @@ def build(projeto, versao):
         else:
             print("⚠️  Nenhum arquivo .ico encontrado; executável pode sair com ícone padrão.")
         subprocess.run(cmd_build, check=True)
-        print("✅ Build finalizado com sucesso!")
 
         dist_dir = os.path.join("dist", nome)
         if not os.path.exists(dist_dir):
             raise FileNotFoundError(f"Diretório do bundle não encontrado em {dist_dir}.")
 
+        _validar_assets_bundle_interno(dist_dir)
+        print("✅ Build finalizado com sucesso!")
+
+        _validar_fundo_menu_em_diretorio(dist_dir, "bundle dist")
+
         caminho_bootstrapper = _garantir_bootstrapper_no_bundle(dist_dir)
         print(f"✅ Bootstrapper de atualização garantido no bundle: {caminho_bootstrapper}")
 
+        apk_dist, apk_distribuicao = _build_apk_android(versao)
+        print(f"✅ APK WebView alinhado à versão {versao}: {apk_dist}")
+
         stage_portatil = _montar_stage_portatil(dist_dir, caminho_bootstrapper)
         _validar_stage_portatil(stage_portatil)
+        _validar_fundo_menu_em_diretorio(stage_portatil, "stage portátil")
         print(f"✅ Stage portátil validado em: {stage_portatil}")
 
         zip_portatil, zip_portatil_distribuicao = _gerar_zip_portatil(stage_portatil)
@@ -947,6 +1125,7 @@ def build(projeto, versao):
         _validar_pacote_distribuicao(destino_distribuicao, destino_bootstrapper)
         print(f"📤 Instalador copiado para distribuição: {destino_distribuicao}")
         print(f"📤 Bootstrapper copiado para distribuição: {destino_bootstrapper}")
+        print(f"📤 APK copiado para distribuição: {apk_distribuicao}")
         return instalador, destino_distribuicao
     finally:
         os.chdir(old_cwd)

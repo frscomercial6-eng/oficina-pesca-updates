@@ -47,13 +47,19 @@ class FrmClientes(ctk.CTkToplevel):
         self.txt_nome = self.criar_campo("NOME COMPLETO:", 0, 0)
         self.txt_fone = self.criar_campo("TELEFONE/WHATSAPP:", 1, 0)
         self.txt_email = self.criar_campo("E-MAIL:", 2, 0)
-        
+
         # Campo de CEP com busca automática ao perder o foco
         lbl_cep = ctk.CTkLabel(self.f_dados, text="CEP:", font=("Arial", 12, "bold"), text_color="#ecf0f1")
         lbl_cep.grid(row=6, column=0, padx=20, pady=(20, 5), sticky="w")
         self.txt_cep = ctk.CTkEntry(self.f_dados, width=200)
         self.txt_cep.grid(row=7, column=0, padx=20, pady=(0, 10), sticky="ew")
         self.txt_cep.bind("<FocusOut>", self.buscar_cep)
+
+        # CPF/CNPJ separado do CEP e tratado como identificador único de cliente.
+        lbl_cpf = ctk.CTkLabel(self.f_dados, text="CPF/CNPJ:", font=("Arial", 12, "bold"), text_color="#ecf0f1")
+        lbl_cpf.grid(row=8, column=0, padx=20, pady=(4, 5), sticky="w")
+        self.txt_cpf_cnpj = ctk.CTkEntry(self.f_dados, width=320)
+        self.txt_cpf_cnpj.grid(row=9, column=0, padx=20, pady=(0, 10), sticky="ew")
 
         self.txt_rua = self.criar_campo("LOGRADOURO (Rua/Av):", 0, 1)
         self.txt_num = self.criar_campo("NÚMERO:", 1, 1)
@@ -94,11 +100,34 @@ class FrmClientes(ctk.CTkToplevel):
 
     def limpar_campos(self):
         for campo in [
-            self.txt_nome, self.txt_fone, self.txt_email, self.txt_cep,
+            self.txt_nome, self.txt_fone, self.txt_email, self.txt_cep, self.txt_cpf_cnpj,
             self.txt_rua, self.txt_num, self.txt_bairro, self.txt_cidade, self.txt_estado
         ]:
             campo.delete(0, 'end')
         self.txt_nome.focus_set()
+
+    def _normalizar_cpf_cnpj(self, valor: str) -> str:
+        bruto = str(valor or "").strip()
+        return "".join(ch for ch in bruto.upper() if ch.isalnum())
+
+    def _garantir_schema_identificador(self):
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(clientes)")
+                cols = {str(row[1] or "").lower() for row in cursor.fetchall()}
+                if "cpf_cnpj_normalizado" not in cols:
+                    cursor.execute("ALTER TABLE clientes ADD COLUMN cpf_cnpj_normalizado TEXT")
+                cursor.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_cpf_cnpj_unico
+                    ON clientes(cpf_cnpj_normalizado)
+                    WHERE cpf_cnpj_normalizado IS NOT NULL AND cpf_cnpj_normalizado <> ''
+                    """
+                )
+                conn.commit()
+        except Exception:
+            pass
 
     def criar_campo(self, label, linha, coluna):
         lbl = ctk.CTkLabel(self.f_dados, text=label, font=("Arial", 12, "bold"), text_color="#ecf0f1")
@@ -108,10 +137,21 @@ class FrmClientes(ctk.CTkToplevel):
         return ent
 
     def _preencher_dados_cliente(self, dados_cliente):
-        _id, nome, telefone, email, cep, rua, numero, bairro, cidade, estado = dados_cliente
+        _id = dados_cliente[0] if len(dados_cliente) > 0 else None
+        nome = dados_cliente[1] if len(dados_cliente) > 1 else ""
+        telefone = dados_cliente[2] if len(dados_cliente) > 2 else ""
+        email = dados_cliente[3] if len(dados_cliente) > 3 else ""
+        cpf_cnpj = dados_cliente[4] if len(dados_cliente) > 4 else ""
+        cep = dados_cliente[5] if len(dados_cliente) > 5 else ""
+        rua = dados_cliente[6] if len(dados_cliente) > 6 else ""
+        numero = dados_cliente[7] if len(dados_cliente) > 7 else ""
+        bairro = dados_cliente[8] if len(dados_cliente) > 8 else ""
+        cidade = dados_cliente[9] if len(dados_cliente) > 9 else ""
+        estado = dados_cliente[10] if len(dados_cliente) > 10 else ""
         self.txt_nome.delete(0, 'end'); self.txt_nome.insert(0, str(nome or "").upper())
         self.txt_fone.delete(0, 'end'); self.txt_fone.insert(0, str(telefone or ""))
         self.txt_email.delete(0, 'end'); self.txt_email.insert(0, str(email or ""))
+        self.txt_cpf_cnpj.delete(0, 'end'); self.txt_cpf_cnpj.insert(0, str(cpf_cnpj or ""))
         self.txt_cep.delete(0, 'end'); self.txt_cep.insert(0, str(cep or ""))
         self.txt_rua.delete(0, 'end'); self.txt_rua.insert(0, str(rua or "").upper())
         self.txt_num.delete(0, 'end'); self.txt_num.insert(0, str(numero or ""))
@@ -149,44 +189,68 @@ class FrmClientes(ctk.CTkToplevel):
             threading.Thread(target=_thread_task, daemon=True).start()
 
     def salvar_cliente(self):
-        nome = self.txt_nome.get().upper()
-        if not nome:
-            messagebox.showwarning("Aviso", "O nome é obrigatório!", parent=self)
+        nome = self.txt_nome.get().upper().strip() or "CLIENTE NÃO INFORMADO"
+        cpf_cnpj_bruto = self.txt_cpf_cnpj.get().strip()
+        cpf_cnpj_norm = self._normalizar_cpf_cnpj(cpf_cnpj_bruto)
+
+        if not cpf_cnpj_norm:
+            messagebox.showwarning("Atenção", "Informe o CPF/CNPJ para identificar o cliente.", parent=self)
             return
+
+        self._garantir_schema_identificador()
         
         try:
             with get_db_connection() as conn:
                 cursor = conn.cursor()
-                if self.cliente_id:
+                cursor.execute(
+                    "SELECT id FROM clientes WHERE cpf_cnpj_normalizado = ? LIMIT 1",
+                    (cpf_cnpj_norm,),
+                )
+                row_doc = cursor.fetchone()
+                id_por_doc = int(row_doc[0]) if row_doc and row_doc[0] is not None else None
+
+                if self.cliente_id and id_por_doc and id_por_doc != int(self.cliente_id):
+                    messagebox.showwarning(
+                        "CPF/CNPJ já cadastrado",
+                        "Já existe outro cliente com este CPF/CNPJ. Use o registro existente para editar.",
+                        parent=self,
+                    )
+                    return
+
+                alvo_id = int(self.cliente_id) if self.cliente_id else id_por_doc
+
+                if alvo_id:
                     cursor.execute(
                         """
                         UPDATE clientes
-                        SET nome = ?, telefone = ?, email = ?, cep = ?, rua = ?, numero = ?, bairro = ?, cidade = ?, estado = ?
+                        SET nome = ?, telefone = ?, email = ?, cpf_cnpj = ?, cpf_cnpj_normalizado = ?, cep = ?, rua = ?, numero = ?, bairro = ?, cidade = ?, estado = ?
                         WHERE id = ?
                         """,
                         (
                             nome,
                             self.txt_fone.get(),
                             self.txt_email.get(),
+                            cpf_cnpj_bruto,
+                            cpf_cnpj_norm,
                             self.txt_cep.get(),
                             self.txt_rua.get(),
                             self.txt_num.get(),
                             self.txt_bairro.get(),
                             self.txt_cidade.get(),
                             self.txt_estado.get(),
-                            self.cliente_id,
+                            alvo_id,
                         ),
                     )
                 else:
-                    cursor.execute("""INSERT INTO clientes (nome, telefone, email, cep, rua, numero, bairro, cidade, estado, data_cadastro) 
-                                      VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                                   (nome, self.txt_fone.get(), self.txt_email.get(), self.txt_cep.get(), 
+                    cursor.execute("""INSERT INTO clientes (nome, telefone, email, cpf_cnpj, cpf_cnpj_normalizado, cep, rua, numero, bairro, cidade, estado, data_cadastro) 
+                                      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                   (nome, self.txt_fone.get(), self.txt_email.get(), cpf_cnpj_bruto, cpf_cnpj_norm, self.txt_cep.get(), 
                                     self.txt_rua.get(), self.txt_num.get(), self.txt_bairro.get(), self.txt_cidade.get(), 
                                     self.txt_estado.get(), datetime.now().strftime("%Y-%m-%d")))
                 conn.commit()
             if callable(self.ao_salvar):
                 self.ao_salvar(nome)
-            if self.cliente_id:
+            if alvo_id:
                 messagebox.showinfo("Sucesso", "Cadastro atualizado com sucesso!", parent=self)
             else:
                 messagebox.showinfo("Sucesso", "Pescador cadastrado com sucesso!", parent=self)
@@ -303,7 +367,7 @@ class JanelaListaClientes(ctk.CTkToplevel):
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT id, nome, telefone, email, cep, rua, numero, bairro, cidade, estado
+                    SELECT id, nome, telefone, email, COALESCE(cpf_cnpj, ''), cep, rua, numero, bairro, cidade, estado
                     FROM clientes WHERE id = ?
                     """,
                     (cliente["id"],),

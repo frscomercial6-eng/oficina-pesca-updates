@@ -7,7 +7,7 @@ set "ISCC_EXE=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 set "APP_NAME=Oficina_Pesca"
 set "DIST_DIR=dist\%APP_NAME%"
 set "STAGE_DIR=INSTALADOR_FINAL\%APP_NAME%"
-set "SETUP_NAME=Setup_OficinaPesca_v1.0.27.1.exe"
+set "SETUP_NAME=Setup_OficinaPesca_v1.0.29.exe"
 set "APK_FIXED=apk_celular_distribuicao\oficina_app_signed.apk"
 set "APK_DEBUG=apk_celular_distribuicao\app-debug.apk"
 
@@ -61,6 +61,11 @@ if exist "login.spec" del /q "login.spec"
 if exist "oficina.spec" del /q "oficina.spec"
 if exist "Oficina_Pesca.spec" del /q "Oficina_Pesca.spec"
 if exist "Oficina_Pesca_FRS.spec" del /q "Oficina_Pesca_FRS.spec"
+if exist "logs\oficina_debug.txt" del /q "logs\oficina_debug.txt"
+if exist "logs\log_envio_meta.json" del /q "logs\log_envio_meta.json"
+if exist "logs\ia_relatorios" rmdir /s /q "logs\ia_relatorios"
+if exist "__pycache__" rmdir /s /q "__pycache__"
+if exist ".pytest_cache" rmdir /s /q ".pytest_cache"
 
 echo [4/9] Preparando APK mobile...
 if exist "%APK_FIXED%" (

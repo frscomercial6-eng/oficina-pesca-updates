@@ -4,7 +4,7 @@
 ; ==============================================================
 
 #define AppName "Oficina de Pesca versão {#AppVersion} - Instalador"
-#define AppVersion "1.0.28.1"
+#define AppVersion "1.0.29"
 #define AppPublisher "FRS Solutions"
 #define AppExeName "Oficina_Pesca.exe"
 
@@ -16,7 +16,7 @@ AppPublisher={#AppPublisher}
 DefaultDirName={localappdata}\OficinaPesca
 DefaultGroupName={#AppName}
 OutputDir=Output
-OutputBaseFilename=Instalador_Oficina_Pesca_Oficial_v1.0.28.1
+OutputBaseFilename=Instalador_Oficina_Pesca_Oficial_v1.0.29
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -38,6 +38,8 @@ Source: "dist\Oficina_Pesca\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversi
 
 ; Recursos visuais (logo, icones e assets)
 Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "assets\*"; DestDir: "{app}\_internal\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "assets\fundo_menu.jpeg"; DestDir: "{app}\_internal\assets"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; Imagens de fundo e logo na raiz do app
 Source: "fundomenu.png"; DestDir: "{app}"; Flags: ignoreversion

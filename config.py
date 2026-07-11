@@ -162,6 +162,15 @@ import urllib.request
 import urllib.error
 
 try:
+    import firebase_admin
+    from firebase_admin import credentials as firebase_credentials
+    from firebase_admin import db as firebase_db
+except Exception:
+    firebase_admin = None
+    firebase_credentials = None
+    firebase_db = None
+
+try:
     import google.auth  # type: ignore  # noqa: F401
     import google_auth_oauthlib  # type: ignore  # noqa: F401
     import googleapiclient  # type: ignore  # noqa: F401
@@ -177,11 +186,6 @@ except Exception:
     google_build = None
     MediaFileUpload = None
     MediaIoBaseDownload = None
-
-try:
-    import winreg  # type: ignore
-except Exception:
-    winreg = None
 
 try:
     from dotenv import load_dotenv
@@ -216,8 +220,42 @@ def _obter_diretorio_execucao() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def _obter_diretorio_dados_usuario() -> str:
+    base = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA') or _obter_diretorio_execucao()
+    pasta = os.path.join(base, 'OficinaPesca')
+    os.makedirs(pasta, exist_ok=True)
+    return pasta
+
+
 def _obter_diretorio_dados() -> str:
+    if getattr(sys, 'frozen', False):
+        return _obter_diretorio_dados_usuario()
     return _obter_diretorio_execucao()
+
+
+def _resolver_caminho_banco() -> str:
+    caminho_env = str(os.environ.get('OFP_DB_PATH', '')).strip()
+    if caminho_env:
+        caminho_abs = os.path.abspath(caminho_env)
+        os.makedirs(os.path.dirname(caminho_abs), exist_ok=True)
+        return caminho_abs
+
+    caminho_usuario = os.path.join(_obter_diretorio_dados_usuario(), 'oficina.db')
+    caminho_instalacao = os.path.join(_obter_diretorio_execucao(), 'oficina.db')
+
+    if os.path.exists(caminho_usuario) and os.path.getsize(caminho_usuario) > 0:
+        return caminho_usuario
+
+    if os.path.exists(caminho_instalacao) and os.path.getsize(caminho_instalacao) > 0:
+        try:
+            shutil.copy2(caminho_instalacao, caminho_usuario)
+            return caminho_usuario
+        except Exception:
+            return caminho_instalacao
+
+    if getattr(sys, 'frozen', False):
+        return caminho_usuario
+    return caminho_instalacao
 
 
 if getattr(sys, 'frozen', False):
@@ -230,7 +268,7 @@ else:
 DIRETORIO_DADOS = _obter_diretorio_dados()
 CAMINHO_BANCO_LOCAL = os.path.join(DIRETORIO_DADOS, 'oficina.db')
 CAMINHO_BANCO_INSTALACAO = os.path.join(DIRETORIO_ATUAL, 'oficina.db')
-CAMINHO_BANCO = CAMINHO_BANCO_INSTALACAO if os.path.exists(CAMINHO_BANCO_INSTALACAO) else CAMINHO_BANCO_LOCAL
+CAMINHO_BANCO = _resolver_caminho_banco()
 _DIRETORIO_LOG_BASE = os.environ.get('APPDATA') or os.environ.get('LOCALAPPDATA') or os.environ.get('TEMP') or DIRETORIO_ATUAL
 CAMINHO_LOG = os.path.join(_DIRETORIO_LOG_BASE, 'OficinaDePesca', 'logs', 'oficina_debug.txt')
 
@@ -246,6 +284,24 @@ _CFG = _ler_cfg()
 SERVIDOR_URL = _CFG.get('app', 'servidor_url', fallback='http://localhost:8000')
 URL_APP_CELULAR_PUBLICA = _CFG.get('app', 'url_app_celular_publica', fallback='').strip()
 WHATSAPP_ADMIN_DESTINO = _CFG.get('app', 'whatsapp_admin', fallback='').strip()
+
+
+def _flag_bool(valor, default: bool = False) -> bool:
+    txt = str(valor if valor is not None else "").strip().lower()
+    if not txt:
+        return bool(default)
+    return txt in {"1", "true", "t", "yes", "y", "sim", "on"}
+
+
+_MODO_CLIENTE_FINAL = _flag_bool(
+    os.environ.get("OFP_MODO_CLIENTE_FINAL", ""),
+    default=_CFG.getboolean("licenca", "modo_cliente_final", fallback=bool(getattr(sys, "frozen", False))),
+)
+
+
+def modo_cliente_final_licenciado() -> bool:
+    """Fluxo legado desativado: a licença deve sempre ser validada por arquivo externo."""
+    return False
 
 CENTRAL_SUPORTE_EMAIL = "frs.suporte.oficina@gmail.com"
 CENTRAL_UPDATE_MANIFEST_URL = str(
@@ -333,6 +389,9 @@ LICENCA_SECRET = os.environ.get("OFP_LICENCA_SECRET", "")
 
 _CLOUD_SYNC_THREAD: Optional[threading.Thread] = None
 _CLOUD_SYNC_STARTED = False
+_FIREBASE_LISTENER_THREAD: Optional[threading.Thread] = None
+_FIREBASE_LISTENER_STARTED = False
+_FIREBASE_LAST_REMOTE_EVENT_TS = ""
 _DISCOVERY_CACHE = {"url": "", "ts": 0.0}
 GOOGLE_DRIVE_USER_SCOPES = [
     # Escopo explicitamente definido para permitir acesso a arquivos criados pelo App
@@ -341,6 +400,201 @@ GOOGLE_DRIVE_USER_SCOPES = [
     "openid",
 ]
 GOOGLE_DRIVE_PASTA_APP = "Oficina de Pesca"
+
+
+def _firebase_cfg_get(key: str, default: str = "") -> str:
+    cfg = _ler_cfg()
+    return str(
+        os.environ.get(f"OFP_FIREBASE_{key.upper()}", "")
+        or cfg.get("firebase", key, fallback=default)
+        or ""
+    ).strip()
+
+
+def _firebase_sync_channel() -> str:
+    canal = _firebase_cfg_get("sync_channel", "global")
+    canal = re.sub(r"[^a-zA-Z0-9_-]", "", str(canal or "")).strip()
+    return canal or "global"
+
+
+def obter_firebase_web_config() -> dict:
+    """Retorna config web do Firebase para cliente WebView/PWA."""
+    return {
+        "apiKey": _firebase_cfg_get("api_key"),
+        "authDomain": _firebase_cfg_get("auth_domain"),
+        "databaseURL": _firebase_cfg_get("database_url", "https://oficinapescasystem-default-rtdb.firebaseio.com/"),
+        "projectId": _firebase_cfg_get("project_id"),
+        "storageBucket": _firebase_cfg_get("storage_bucket"),
+        "messagingSenderId": _firebase_cfg_get("messaging_sender_id"),
+        "appId": _firebase_cfg_get("app_id"),
+        "syncChannel": _firebase_sync_channel(),
+    }
+
+
+def _firebase_service_account_path() -> str:
+    """Resolve o caminho da conta de serviço do Firebase (Desktop/Admin SDK)."""
+    candidatos = []
+    env_path = str(os.environ.get("OFP_FIREBASE_SERVICE_ACCOUNT", "") or "").strip()
+    if env_path:
+        candidatos.append(env_path)
+
+    cfg = _ler_cfg()
+    cfg_path = cfg.get("firebase", "service_account_path", fallback="").strip()
+    if cfg_path:
+        candidatos.append(cfg_path)
+
+    candidatos.extend(
+        [
+            os.path.join(DIRETORIO_ATUAL, "google-services.json"),
+            os.path.join(DIRETORIO_RECURSOS, "google-services.json"),
+            os.path.join(DIRETORIO_ATUAL, "firebase-service-account.json"),
+            os.path.join(DIRETORIO_RECURSOS, "firebase-service-account.json"),
+        ]
+    )
+
+    for caminho in candidatos:
+        try:
+            c = os.path.abspath(str(caminho))
+            if os.path.isfile(c):
+                return c
+        except Exception:
+            continue
+    return ""
+
+
+def _inicializar_firebase_admin() -> tuple[bool, str]:
+    if firebase_admin is None or firebase_credentials is None or firebase_db is None:
+        return False, "firebase_admin indisponível no ambiente."
+
+    cfg_web = obter_firebase_web_config()
+    db_url = str(cfg_web.get("databaseURL") or "").strip()
+    if not db_url:
+        return False, "databaseURL do Firebase não configurada."
+
+    if getattr(firebase_admin, "_apps", None):
+        return True, "Firebase Admin já inicializado."
+
+    cred_path = _firebase_service_account_path()
+    if not cred_path:
+        return False, "Conta de serviço Firebase não encontrada."
+
+    try:
+        cred = firebase_credentials.Certificate(cred_path)
+        firebase_admin.initialize_app(cred, {"databaseURL": db_url})
+        return True, "Firebase Admin inicializado."
+    except Exception as e:
+        return False, f"Falha ao inicializar Firebase Admin: {e}"
+
+
+def publicar_heartbeat_firebase() -> tuple[bool, str]:
+    """Publica status da instância Desktop para sincronização bidirecional com clientes Web/APK."""
+    ok_fb, msg_fb = _inicializar_firebase_admin()
+    if not ok_fb:
+        return False, msg_fb
+
+    try:
+        canal = _firebase_sync_channel()
+        status_licenca = obter_status_acesso_centralizado()
+        ref = firebase_db.reference(f"sync_nodes/{canal}/desktop")
+        ref.update(
+            {
+                "last_seen": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                "version": APP_VERSION,
+                "db_mtime": int(os.path.getmtime(CAMINHO_BANCO)) if os.path.exists(CAMINHO_BANCO) else 0,
+                "status": "online",
+                "license": {
+                    "allowed": bool(status_licenca.get("ativa")),
+                    "blocked": bool(status_licenca.get("bloqueada")),
+                    "message": str(status_licenca.get("mensagem") or "").strip(),
+                    "tipo": str(status_licenca.get("tipo") or "").strip(),
+                    "validade": str(status_licenca.get("validade") or "").strip(),
+                },
+            }
+        )
+        return True, "Heartbeat Firebase publicado."
+    except Exception as e:
+        return False, f"Falha ao publicar heartbeat Firebase: {e}"
+
+
+def iniciar_listener_firebase_realtime() -> tuple[bool, str]:
+    """Ativa listener de eventos remotos no Realtime Database (SnapshotListener equivalente)."""
+    global _FIREBASE_LISTENER_THREAD, _FIREBASE_LISTENER_STARTED, _FIREBASE_LAST_REMOTE_EVENT_TS
+
+    if _FIREBASE_LISTENER_STARTED and _FIREBASE_LISTENER_THREAD and _FIREBASE_LISTENER_THREAD.is_alive():
+        return True, "Listener Firebase já está ativo."
+
+    ok_fb, msg_fb = _inicializar_firebase_admin()
+    if not ok_fb:
+        return False, msg_fb
+
+    canal = _firebase_sync_channel()
+    logger_fb = get_logger("firebase-sync")
+
+    def _processar_evento(payload: dict):
+        nonlocal canal
+        global _FIREBASE_LAST_REMOTE_EVENT_TS
+        try:
+            if not isinstance(payload, dict):
+                return
+            acao = str(payload.get("acao") or "").strip().lower()
+            ts = str(payload.get("ts") or "").strip()
+            if ts and ts == _FIREBASE_LAST_REMOTE_EVENT_TS:
+                return
+
+            if acao in {"sync_now", "pull_latest", "refresh"}:
+                ok, msg = sincronizar_hibrido_banco_drive()
+                if ok:
+                    _FIREBASE_LAST_REMOTE_EVENT_TS = ts
+                    logger_fb.info("Evento remoto Firebase processado (%s): %s", acao, msg)
+                    try:
+                        firebase_db.reference(f"sync_nodes/{canal}/desktop").update(
+                            {
+                                "last_sync": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                                "last_action": acao,
+                                "last_result": "ok",
+                            }
+                        )
+                    except Exception:
+                        pass
+                else:
+                    logger_fb.warning("Falha ao processar evento remoto Firebase (%s): %s", acao, msg)
+        except Exception as e:
+            logger_fb.warning("Falha no processamento de evento Firebase: %s", e)
+
+    def _worker_listener():
+        nonlocal canal
+        while True:
+            stream = None
+            try:
+                publicar_heartbeat_firebase()
+
+                # Listener nativo do Realtime Database; em caso de queda, o loop reconecta.
+                ref = firebase_db.reference(f"sync_nodes/{canal}/commands")
+
+                def _on_event(event):
+                    dados = event.data
+                    if isinstance(dados, dict):
+                        _processar_evento(dados)
+
+                stream = ref.listen(_on_event)
+
+                while True:
+                    publicar_heartbeat_firebase()
+                    time.sleep(25)
+            except Exception as e:
+                logger_fb.warning("Listener Firebase desconectado/reconectando: %s", e)
+                time.sleep(8)
+            finally:
+                try:
+                    if stream:
+                        stream.close()
+                except Exception:
+                    pass
+
+    _FIREBASE_LISTENER_THREAD = threading.Thread(target=_worker_listener, daemon=True, name="ofp-firebase-listener")
+    _FIREBASE_LISTENER_THREAD.start()
+    _FIREBASE_LISTENER_STARTED = True
+    return True, "Listener Firebase em tempo real iniciado."
 
 
 class _ErrorForwardHandler(logging.Handler):
@@ -818,13 +1072,46 @@ def obter_info_nova_versao() -> dict:
 
     try:
         import urllib.request
-        req = urllib.request.Request(
-            url_limpa,
-            headers={"User-Agent": f"OficinaPesca/{APP_VERSION}"}
-        )
-        with urllib.request.urlopen(req, timeout=1) as resp:
-            payload = resp.read().decode("utf-8", errors="ignore")
-        return _parse_manifesto(payload)
+
+        urls_tentativa = [url_limpa]
+        url_lower = url_limpa.lower()
+        if url_lower.endswith("versao.txt"):
+            urls_tentativa.extend([
+                url_limpa[:-10] + "version.json",
+                url_limpa[:-10] + "versao.json",
+                url_limpa[:-10] + "update_info.json",
+            ])
+        elif url_lower.endswith("version.txt"):
+            urls_tentativa.extend([
+                url_limpa[:-11] + "version.json",
+                url_limpa[:-11] + "versao.json",
+                url_limpa[:-11] + "update_info.json",
+            ])
+        elif url_lower.endswith("version.json"):
+            urls_tentativa.extend([
+                url_limpa[:-12] + "versao.json",
+                url_limpa[:-12] + "update_info.json",
+                url_limpa[:-12] + "versao.txt",
+            ])
+
+        ultimo_erro = ""
+        for url in urls_tentativa:
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": f"OficinaPesca/{APP_VERSION}"}
+                )
+                with urllib.request.urlopen(req, timeout=2) as resp:
+                    payload = resp.read().decode("utf-8", errors="ignore")
+                info = _parse_manifesto(payload)
+                if info:
+                    return info
+            except Exception as e:
+                ultimo_erro = str(e)
+
+        if ultimo_erro:
+            print(f"❌ ERRO CRÍTICO NA BUSCA DE ATUALIZAÇÃO: {ultimo_erro}")
+        return {}
     except Exception as e:
         print(f"❌ ERRO CRÍTICO NA BUSCA DE ATUALIZAÇÃO: {e}")
         return {}
@@ -1206,6 +1493,152 @@ def garantir_banco_no_drive_usuario() -> tuple[bool, str]:
         return True, "Banco local criado no Google Drive do usuário."
     except Exception as e:
         return False, f"Falha ao sincronizar banco no Google Drive do usuário: {e}"
+
+
+def _obter_ou_criar_pasta_backup_drive_usuario(service, nome_pasta: str = "Oficina_Backup") -> str:
+    nome = str(nome_pasta or "Oficina_Backup").strip() or "Oficina_Backup"
+    nome_esc = nome.replace("'", "\\'")
+    q = (
+        "mimeType='application/vnd.google-apps.folder' and "
+        f"name='{nome_esc}' and trashed=false"
+    )
+    pastas = service.files().list(q=q, fields="files(id,name)", pageSize=1).execute().get("files", [])
+    if pastas:
+        return str(pastas[0]["id"])
+
+    pasta = service.files().create(
+        body={"name": nome, "mimeType": "application/vnd.google-apps.folder"},
+        fields="id",
+    ).execute()
+    return str(pasta["id"])
+
+
+def enviar_backup_banco_para_drive_usuario() -> tuple[bool, str]:
+    """Cria um backup versionado do banco local na pasta Oficina_Backup do Drive do usuário."""
+    if not os.path.exists(CAMINHO_BANCO):
+        return False, "Banco local não encontrado para backup."
+
+    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
+    if not creds:
+        return False, msg
+
+    if google_build is None or MediaFileUpload is None:
+        return False, "Dependências Google Drive ausentes para upload do backup."
+
+    try:
+        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        folder_id = _obter_ou_criar_pasta_backup_drive_usuario(service)
+
+        carimbo = datetime.now().strftime("%Y%m%d_%H%M%S")
+        nome_backup = f"oficina_backup_{carimbo}.db"
+        media = MediaFileUpload(CAMINHO_BANCO, mimetype="application/octet-stream", resumable=False)
+        service.files().create(
+            body={"name": nome_backup, "parents": [folder_id]},
+            media_body=media,
+            fields="id",
+        ).execute()
+        return True, f"Backup enviado para o Drive: {nome_backup}"
+    except Exception as e:
+        return False, f"Falha ao enviar backup para o Drive do usuário: {e}"
+
+
+def listar_backups_banco_drive_usuario(limit: int = 50) -> tuple[bool, list[dict], str]:
+    """Lista backups .db da pasta Oficina_Backup no Drive pessoal autenticado."""
+    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
+    if not creds:
+        return False, [], msg
+
+    if google_build is None:
+        return False, [], "Dependência google-api-python-client não encontrada."
+
+    try:
+        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        folder_id = _obter_ou_criar_pasta_backup_drive_usuario(service)
+        limite = max(1, min(int(limit or 50), 200))
+        q = f"name contains '.db' and trashed=false and '{folder_id}' in parents"
+        arquivos = (
+            service.files()
+            .list(
+                q=q,
+                fields="files(id,name,modifiedTime,size)",
+                orderBy="modifiedTime desc",
+                pageSize=limite,
+            )
+            .execute()
+            .get("files", [])
+        )
+
+        saida: list[dict] = []
+        for item in arquivos:
+            nome = str(item.get("name") or "")
+            if not nome.lower().endswith(".db"):
+                continue
+            mod = str(item.get("modifiedTime") or "")
+            try:
+                dt = datetime.fromisoformat(mod.replace("Z", "+00:00"))
+                mod_fmt = dt.strftime("%d/%m/%Y %H:%M:%S")
+            except Exception:
+                mod_fmt = mod
+            saida.append(
+                {
+                    "id": str(item.get("id") or ""),
+                    "name": nome,
+                    "modified": mod_fmt,
+                    "modified_raw": mod,
+                    "size": str(item.get("size") or "0"),
+                }
+            )
+
+        return True, saida, "OK"
+    except Exception as e:
+        return False, [], f"Falha ao listar backups no Drive do usuário: {e}"
+
+
+def restaurar_backup_banco_drive_usuario(file_id: str, file_name: str = "") -> tuple[bool, str]:
+    """Baixa um backup .db selecionado do Drive e substitui o banco local com segurança."""
+    fid = str(file_id or "").strip()
+    if not fid:
+        return False, "Backup inválido: arquivo não selecionado."
+
+    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
+    if not creds:
+        return False, msg
+
+    if google_build is None or MediaIoBaseDownload is None:
+        return False, "Dependências Google Drive ausentes para restauração."
+
+    try:
+        import io
+
+        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        req = service.files().get_media(fileId=fid)
+
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, req)
+        done = False
+        while not done:
+            _status, done = downloader.next_chunk()
+
+        conteudo = buffer.getvalue()
+        if not conteudo:
+            return False, "Arquivo baixado do Drive está vazio."
+
+        pasta_backup = os.path.join(os.path.dirname(CAMINHO_BANCO), "backup_db")
+        os.makedirs(pasta_backup, exist_ok=True)
+        carimbo = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        if os.path.exists(CAMINHO_BANCO):
+            copia_previa = os.path.join(pasta_backup, f"pre_drive_restore_{carimbo}.db")
+            shutil.copy2(CAMINHO_BANCO, copia_previa)
+
+        with open(CAMINHO_BANCO, "wb") as f:
+            f.write(conteudo)
+
+        inicializar_banco()
+        nome = str(file_name or "backup.db").strip() or "backup.db"
+        return True, f"Backup restaurado com sucesso: {nome}"
+    except Exception as e:
+        return False, f"Falha ao restaurar backup do Drive: {e}"
 
 
 def enviar_arquivo_para_drive_usuario(caminho_local: str, pasta_remota: str = "Oficina de Pesca - Arquivos") -> tuple[bool, str]:
@@ -1817,18 +2250,110 @@ def executar_atualizacao(
     app_executavel: str = "",
     processo_pid: Optional[int] = None,
     silenciosa: bool = True,
+    progresso_cb=None,
 ) -> tuple[bool, str]:
-    """Fluxo de autoatualização desativado para evitar instalação em diretórios temporários."""
+    """Baixa o instalador oficial e inicia a atualização com validação básica de integridade."""
     url = str(url_download or "").strip()
     if not url:
         return False, "URL de download nÃ£o configurada."
 
     if not url.lower().startswith(("http://", "https://")):
         return False, "URL de download invÃ¡lida."
-    return (
-        False,
-        "Autoatualização desativada nesta versão. Use apenas o instalador oficial Instalador_Oficina_Pesca.exe.",
-    )
+
+    log_upd = get_logger("update-download")
+
+    try:
+        import urllib.parse
+
+        base_tmp = os.path.join(
+            os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or tempfile.gettempdir(),
+            "OficinaPesca",
+            "temp_update",
+        )
+        os.makedirs(base_tmp, exist_ok=True)
+
+        nome_url = os.path.basename(urllib.parse.urlsplit(url).path or "").strip()
+        if not nome_url.lower().endswith(".exe"):
+            nome_url = "Setup_OficinaPesca_update.exe"
+
+        destino = os.path.join(base_tmp, nome_url)
+        destino_part = destino + ".part"
+
+        headers = {"User-Agent": f"OficinaPesca/{APP_VERSION}"}
+        req = urllib.request.Request(url, headers=headers)
+
+        log_upd.info("[update] Iniciando download de atualização: %s", url)
+        if callable(progresso_cb):
+            try:
+                progresso_cb(0.0, "Iniciando download da atualização...")
+            except Exception:
+                pass
+        with urllib.request.urlopen(req, timeout=45) as resp, open(destino_part, "wb") as out:
+            content_length = int(resp.headers.get("Content-Length", "0") or "0")
+            sha = hashlib.sha256()
+            total = 0
+            while True:
+                chunk = resp.read(1024 * 128)
+                if not chunk:
+                    break
+                out.write(chunk)
+                sha.update(chunk)
+                total += len(chunk)
+                if callable(progresso_cb) and content_length > 0:
+                    try:
+                        progresso_cb(min(total / float(content_length), 1.0), f"Baixando atualização... {int((total / float(content_length)) * 100)}%")
+                    except Exception:
+                        pass
+
+        if content_length > 0 and total != content_length:
+            log_upd.error("[update] Download inconsistente: esperado=%s recebido=%s", content_length, total)
+            return False, "Falha de integridade no download da atualização (tamanho divergente)."
+
+        if total < 1024 * 1024:
+            log_upd.error("[update] Download inválido: tamanho muito pequeno (%s bytes)", total)
+            return False, "Falha de integridade no download da atualização (arquivo inválido)."
+
+        with open(destino_part, "rb") as fchk:
+            assinatura = fchk.read(2)
+        if assinatura != b"MZ":
+            log_upd.error("[update] Download inválido: assinatura PE ausente em %s", destino_part)
+            return False, "Falha de integridade no download da atualização (executável corrompido)."
+
+        os.replace(destino_part, destino)
+        hash_hex = sha.hexdigest()
+        log_upd.info("[update] Download concluído com integridade: arquivo=%s bytes=%s sha256=%s", destino, total, hash_hex)
+        if callable(progresso_cb):
+            try:
+                progresso_cb(1.0, "Download concluído. Iniciando instalador...")
+            except Exception:
+                pass
+
+        meta = {
+            "url": url,
+            "arquivo": destino,
+            "bytes": total,
+            "sha256": hash_hex,
+            "versao_local": APP_VERSION,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        with open(os.path.join(base_tmp, "update_download_meta.json"), "w", encoding="utf-8") as fmeta:
+            json.dump(meta, fmeta, ensure_ascii=False, indent=2)
+
+        args = [destino]
+        if silenciosa:
+            args.extend(["/VERYSILENT", "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"])
+
+        subprocess.Popen(args, cwd=base_tmp)
+        log_upd.info("[update] Instalador iniciado: %s", " ".join(args))
+        return True, "Atualização iniciada com sucesso."
+    except Exception as e:
+        log_upd.exception("[update] Falha ao executar atualização: %s", e)
+        if callable(progresso_cb):
+            try:
+                progresso_cb(0.0, f"Falha na atualização: {e}")
+            except Exception:
+                pass
+        return False, f"Falha ao atualizar automaticamente: {e}"
 
 
 def hash_password(password: str, salt: Optional[bytes] = None) -> str:
@@ -1919,6 +2444,7 @@ def inicializar_banco():
             nome TEXT,
             telefone TEXT,
             email TEXT,
+            cpf_cnpj TEXT,
             cep TEXT,
             rua TEXT,
             numero TEXT,
@@ -1928,6 +2454,33 @@ def inicializar_banco():
             data_cadastro TEXT
         )
     """)
+
+    cursor.execute("PRAGMA table_info(clientes)")
+    colunas_clientes = [row[1] for row in cursor.fetchall()]
+    if 'cpf_cnpj' not in colunas_clientes:
+        cursor.execute("ALTER TABLE clientes ADD COLUMN cpf_cnpj TEXT")
+    if 'cpf_cnpj_normalizado' not in colunas_clientes:
+        cursor.execute("ALTER TABLE clientes ADD COLUMN cpf_cnpj_normalizado TEXT")
+
+    # Backfill do identificador normalizado para registros antigos.
+    cursor.execute(
+        """
+        UPDATE clientes
+        SET cpf_cnpj_normalizado = UPPER(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cpf_cnpj,''), '.', ''), '-', ''), '/', ''), ' ', ''), '(', ''), ')', '')
+        )
+        WHERE COALESCE(cpf_cnpj,'') <> ''
+          AND (cpf_cnpj_normalizado IS NULL OR cpf_cnpj_normalizado = '')
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_cpf_cnpj_unico
+        ON clientes(cpf_cnpj_normalizado)
+        WHERE cpf_cnpj_normalizado IS NOT NULL AND cpf_cnpj_normalizado <> ''
+        """
+    )
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS produtos (
@@ -2126,37 +2679,9 @@ def _assinar_payload(payload_b64: str) -> str:
 def obter_hardware_id() -> str:
     """Retorna identificador estável da máquina para proteção da licença.
 
-    Prioridades (da mais para a menos estável):
-      1. MachineGuid do registro do Windows — não muda entre reinicializações.
-      2. ID persistido em arquivo em AppData — gerado uma vez e reutilizado.
+    Implementação portátil: não usa Registro do Windows nem grava ID em AppData.
+    Gera um identificador determinístico em memória com dados locais disponíveis.
     """
-    # Prioridade 1: MachineGuid do Windows (altamente estável)
-    if winreg is not None:
-        try:
-            _reg_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography")
-            _machine_guid, _ = winreg.QueryValueEx(_reg_key, "MachineGuid")
-            if _machine_guid:
-                return hashlib.sha256(str(_machine_guid).strip().encode("utf-8")).hexdigest().upper()
-        except Exception:
-            pass
-
-    # Prioridade 2: ID persistido em arquivo (estável entre reinicializações sem depender de rede)
-    _pasta_appdata = (
-        os.environ.get("LOCALAPPDATA")
-        or os.environ.get("APPDATA")
-        or DIRETORIO_ATUAL
-    )
-    _id_file = os.path.join(_pasta_appdata, "OficinaPesca", "hardware_id.txt")
-    try:
-        if os.path.exists(_id_file):
-            with open(_id_file, "r", encoding="utf-8") as _f:
-                _cached = _f.read().strip()
-            if _cached:
-                return _cached
-    except Exception:
-        pass
-
-    # Fallback: gerar a partir de dados disponíveis e persistir para estabilidade futura
     _partes: list[str] = []
     try:
         _partes.append(str(uuid.getnode()))
@@ -2167,14 +2692,61 @@ def obter_hardware_id() -> str:
     except Exception:
         pass
     _base = "|".join([p for p in _partes if p]) or str(uuid.uuid4())
-    _hw_id = hashlib.sha256(_base.encode("utf-8")).hexdigest().upper()
+    return hashlib.sha256(_base.encode("utf-8")).hexdigest().upper()
+
+
+def _caminhos_licenca_externa() -> list[str]:
+    base = DIRETORIO_ATUAL
+    return [
+        os.path.join(base, "licenca.key"),
+        os.path.join(base, "licenca.json"),
+        os.path.join(base, "licencas.json"),
+    ]
+
+
+def _extrair_licenca_de_arquivo() -> tuple[str, str, str, str]:
+    """Lê licença externa da raiz da instalação.
+
+    Retorna (chave, cliente, validade, erro).
+    """
+    candidatos = _caminhos_licenca_externa()
+    existente = ""
+    for caminho in candidatos:
+        if os.path.exists(caminho):
+            existente = caminho
+            break
+
+    if not existente:
+        return "", "", "", "Arquivo de licença ausente na raiz (licenca.key/licenca.json/licencas.json)."
+
     try:
-        os.makedirs(os.path.dirname(_id_file), exist_ok=True)
-        with open(_id_file, "w", encoding="utf-8") as _f:
-            _f.write(_hw_id)
-    except Exception:
-        pass
-    return _hw_id
+        if existente.lower().endswith(".key"):
+            with open(existente, "r", encoding="utf-8") as f:
+                chave = _normalizar_texto_chave_licenca(f.read())
+            if not chave:
+                return "", "", "", "Arquivo licenca.key vazio."
+            return chave, "", "", ""
+
+        with open(existente, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            return "", "", "", "Arquivo JSON de licença inválido."
+
+        chave = _normalizar_texto_chave_licenca(
+            data.get("chave")
+            or data.get("licenca")
+            or data.get("license_key")
+            or ""
+        )
+        cliente = str(data.get("cliente") or data.get("nome") or "").strip()
+        validade = str(data.get("validade") or "").strip()
+
+        if not chave:
+            return "", "", "", "Arquivo JSON sem campo de chave de licença."
+        return chave, cliente, validade, ""
+    except Exception as e:
+        return "", "", "", f"Falha ao ler arquivo de licença: {e}"
 
 
 def obter_chave_instalacao() -> str:
@@ -2405,31 +2977,95 @@ def ativar_licenca(chave: str):
         )
         conn.commit()
 
+    try:
+        caminho_key = os.path.join(DIRETORIO_ATUAL, "licenca.key")
+        with open(caminho_key, "w", encoding="utf-8") as f:
+            f.write(chave_limpa)
+    except Exception as exc:
+        return False, f"Licença validada, mas falhou ao gravar arquivo licenca.key: {exc}"
+
     return True, "Licenca ativada com sucesso."
 
 
 def obter_status_licenca():
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'licenca_chave'")
-        row_chave = cursor.fetchone()
-        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'licenca_cliente'")
-        row_cliente = cursor.fetchone()
-        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'licenca_validade'")
-        row_validade = cursor.fetchone()
-
-    chave = row_chave[0] if row_chave and row_chave[0] else ""
-    cliente = row_cliente[0] if row_cliente and row_cliente[0] else ""
-    validade = row_validade[0] if row_validade and row_validade[0] else "PERMANENTE"
-
+    chave, cliente_arquivo, validade_arquivo, erro = _extrair_licenca_de_arquivo()
     if not chave:
-        return False, "Sem licenca ativa.", "", "PERMANENTE"
+        return False, erro or "Sem licença ativa.", "", "SEM_ARQUIVO"
 
-    valida, msg, _payload = validar_chave_licenca(chave)
+    valida, msg, payload = validar_chave_licenca(chave)
     if not valida:
-        return False, msg, cliente, validade
+        return False, msg, cliente_arquivo, validade_arquivo or "INVALIDA"
 
-    return True, "Licenca ativa.", cliente, validade
+    validade_payload = str((payload or {}).get("val") or "").strip()
+    validade = validade_payload or validade_arquivo or "ATIVA"
+    cliente = cliente_arquivo
+
+    tipo = _normalizar_tipo_licenca(str((payload or {}).get("tipo") or ""), validade)
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_chave', ?)",
+                (chave,)
+            )
+            cursor.execute(
+                "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_cliente', ?)",
+                (cliente,)
+            )
+            cursor.execute(
+                "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_validade', ?)",
+                (validade,)
+            )
+            cursor.execute(
+                "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_tipo', ?)",
+                (tipo,)
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+    return True, "Licença ativa por arquivo.", cliente, validade
+
+
+def obter_status_acesso_centralizado() -> dict:
+    """Avalia acesso usando exatamente o mesmo critério do Desktop."""
+    licenca_ativa, msg_licenca, cliente_licenca, validade_licenca = obter_status_licenca()
+    trial_ativo, dias_trial_restantes, data_limite_trial = obter_status_trial()
+    tipo_licenca = obter_tipo_licenca()
+    chave_ativa = obter_chave_licenca_ativa()
+
+    remoto_ok = True
+    remoto_msg = ""
+    tipo_remoto = ""
+    if URL_CHECK_LICENCAS and chave_ativa:
+        remoto_ok, remoto_msg, tipo_remoto = validar_licenca_remota(URL_CHECK_LICENCAS, chave_ativa)
+        if tipo_remoto:
+            tipo_licenca = tipo_remoto
+
+    if URL_CHECK_LICENCAS and chave_ativa and not remoto_ok:
+        licenca_ativa = False
+        msg_licenca = f"Licença sem liberação online: {remoto_msg}"
+
+    acesso_liberado = bool(licenca_ativa or trial_ativo)
+    bloqueada = not acesso_liberado
+    mensagem = msg_licenca if licenca_ativa else (
+        f"Trial ativo até {data_limite_trial}." if trial_ativo else (msg_licenca or "Licença inválida ou bloqueada.")
+    )
+
+    return {
+        "ativa": acesso_liberado,
+        "bloqueada": bloqueada,
+        "licenca_ativa": bool(licenca_ativa),
+        "trial_ativo": bool(trial_ativo),
+        "mensagem": str(mensagem or "").strip(),
+        "cliente": str(cliente_licenca or "").strip(),
+        "validade": str(validade_licenca or "").strip(),
+        "tipo": str(tipo_licenca or "").strip(),
+        "dias_trial_restantes": int(dias_trial_restantes or 0) if trial_ativo else 0,
+        "data_limite_trial": str(data_limite_trial or "").strip(),
+        "validacao_remota_ok": bool(remoto_ok),
+        "validacao_remota_msg": str(remoto_msg or "").strip(),
+    }
 
 
 def obter_dias_para_vencimento_licenca() -> Optional[int]:
@@ -2475,28 +3111,15 @@ def ja_teve_licenca_ativa() -> bool:
 
 
 def obter_tipo_licenca() -> str:
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'licenca_tipo'")
-        row_tipo = cursor.fetchone()
-        if row_tipo and row_tipo[0]:
-            tipo = str(row_tipo[0]).upper().strip()
-            if tipo in TIPOS_LICENCA_DIAS:
-                return tipo
-
-        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'licenca_validade'")
-        row_validade = cursor.fetchone()
-        validade = str(row_validade[0] if row_validade and row_validade[0] else "").upper().strip()
-
-    return _inferir_tipo_por_validade(validade)
+    ativa, _msg, _cliente, validade = obter_status_licenca()
+    if not ativa:
+        return "INATIVA"
+    return _normalizar_tipo_licenca("", str(validade or ""))
 
 
 def obter_chave_licenca_ativa() -> str:
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'licenca_chave'")
-        row = cursor.fetchone()
-    return str(row[0] if row and row[0] else "").strip()
+    chave, _cliente, _validade, _erro = _extrair_licenca_de_arquivo()
+    return chave
 
 
 def obter_status_trial():

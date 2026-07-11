@@ -397,11 +397,18 @@ async def api_login(form_data: OAuth2PasswordRequestForm = Depends()):
 async def api_versao():
     """Retorna informações da versão atual do servidor.
     Configure url_check no config.cfg dos clientes apontando para este endpoint."""
-    versao_file = os.path.join(BASE_DIR, "versao.json")
+    versao_file = os.path.join(BASE_DIR, "version.json")
+    if not os.path.exists(versao_file):
+        versao_file = os.path.join(BASE_DIR, "versao.json")
     if os.path.exists(versao_file):
         with open(versao_file, encoding="utf-8") as f:
             return json.load(f)
     return {"versao": APP_VERSION, "novidades": ""}
+
+
+@app.get("/version.json", tags=["Sistema"], include_in_schema=False)
+async def version_manifest():
+    return await api_versao()
 
 
 @app.get("/api/discovery", tags=["Sistema"])
@@ -417,6 +424,36 @@ async def api_discovery():
         "login_url": f"http://{ip_lan}:{porta}/web/login",
         "app_url": f"http://{ip_lan}:{porta}/app",
     }
+
+
+@app.get("/api/firebase-config", tags=["Sistema"])
+async def api_firebase_config():
+    """Retorna configuração pública do Firebase usada no app mobile/WebView."""
+    try:
+        from config import obter_firebase_web_config  # Import local para evitar ciclo.
+
+        cfg = obter_firebase_web_config()
+        return {
+            "ok": True,
+            "config": cfg,
+            "syncChannel": str(cfg.get("syncChannel") or os.environ.get("OFP_FIREBASE_SYNC_CHANNEL", "global") or "global"),
+        }
+    except Exception as e:
+        return {"ok": False, "erro": str(e), "config": {}}
+
+
+@app.get("/api/licenca-status", tags=["Sistema"])
+async def api_licenca_status():
+    from config import obter_status_acesso_centralizado
+
+    return obter_status_acesso_centralizado()
+
+
+@app.get("/api/licenca-status", tags=["Sistema"])
+async def api_licenca_status():
+    from config import obter_status_acesso_centralizado
+
+    return obter_status_acesso_centralizado()
 
 
 @app.post("/api/cloud-backup", tags=["Backup"])
@@ -728,7 +765,7 @@ async def api_dashboard(user=Depends(get_user)):
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM clientes")
         total_clientes = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE status='AGUARDANDO'")
+        cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE UPPER(COALESCE(status,'')) IN ('AGUARDANDO','AGUARDANDO ORCAMENTO','AGUARDANDO ORÇAMENTO')")
         os_aguardando = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE status='EM ANDAMENTO'")
         os_andamento = cur.fetchone()[0]
@@ -782,7 +819,31 @@ async def pwa_service_worker():
 
 @app.get("/web/login", response_class=HTMLResponse, include_in_schema=False)
 async def web_login_get(request: Request):
-    return templates.TemplateResponse(request, "login.html", {"erro": ""})
+    return templates.TemplateResponse(request, "login.html", {"erro": "", "versao": APP_VERSION})
+
+
+@app.get("/web/licenca-bloqueada", response_class=HTMLResponse, include_in_schema=False)
+async def web_licenca_bloqueada(request: Request):
+    from config import obter_status_acesso_centralizado
+
+    status_licenca = obter_status_acesso_centralizado()
+    return templates.TemplateResponse(
+        request,
+        "licenca_bloqueada.html",
+        {"versao": APP_VERSION, "mensagem": str(status_licenca.get("mensagem") or "").strip()},
+    )
+
+
+@app.get("/web/licenca-bloqueada", response_class=HTMLResponse, include_in_schema=False)
+async def web_licenca_bloqueada(request: Request):
+    from config import obter_status_acesso_centralizado
+
+    status_licenca = obter_status_acesso_centralizado()
+    return templates.TemplateResponse(
+        request,
+        "licenca_bloqueada.html",
+        {"versao": APP_VERSION, "mensagem": str(status_licenca.get("mensagem") or "").strip()},
+    )
 
 
 @app.get("/app", response_class=HTMLResponse, include_in_schema=False)
@@ -807,7 +868,7 @@ async def web_login_post(
         return templates.TemplateResponse(
             request,
             "login.html",
-            {"erro": "Usuário ou senha incorretos."}
+            {"erro": "Usuário ou senha incorretos.", "versao": APP_VERSION}
         )
     role = str(row[1] or "OPERADOR")
     token = _criar_token(usuario.strip(), role)
@@ -837,7 +898,7 @@ async def web_dashboard(request: Request):
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM clientes")
         total_clientes = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE status='AGUARDANDO'")
+        cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE UPPER(COALESCE(status,'')) IN ('AGUARDANDO','AGUARDANDO ORCAMENTO','AGUARDANDO ORÇAMENTO')")
         os_abertas = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE status='EM ANDAMENTO'")
         os_andamento = cur.fetchone()[0]
@@ -886,6 +947,7 @@ async def web_clientes(request: Request, busca: str = ""):
         "busca": busca,
         "usuario": payload.get("sub", ""),
         "role": payload.get("role", ""),
+        "versao": APP_VERSION,
     })
 
 
@@ -913,6 +975,7 @@ async def web_os(request: Request, status_filtro: str = ""):
         "status_filtro": status_filtro,
         "usuario": payload.get("sub", ""),
         "role": payload.get("role", ""),
+        "versao": APP_VERSION,
     })
 
 
@@ -953,6 +1016,7 @@ async def web_financeiro(request: Request):
         "total_saidas": fmt(total_saidas),
         "usuario": payload.get("sub", ""),
         "role": payload.get("role", ""),
+        "versao": APP_VERSION,
     })
 
 
@@ -1320,11 +1384,18 @@ async def api_login(form_data: OAuth2PasswordRequestForm = Depends()):
 async def api_versao():
     """Retorna informações da versão atual do servidor.
     Configure url_check no config.cfg dos clientes apontando para este endpoint."""
-    versao_file = os.path.join(BASE_DIR, "versao.json")
+    versao_file = os.path.join(BASE_DIR, "version.json")
+    if not os.path.exists(versao_file):
+        versao_file = os.path.join(BASE_DIR, "versao.json")
     if os.path.exists(versao_file):
         with open(versao_file, encoding="utf-8") as f:
             return json.load(f)
     return {"versao": APP_VERSION, "novidades": ""}
+
+
+@app.get("/version.json", tags=["Sistema"], include_in_schema=False)
+async def version_manifest():
+    return await api_versao()
 
 
 @app.get("/api/discovery", tags=["Sistema"])
@@ -1340,6 +1411,22 @@ async def api_discovery():
         "login_url": f"http://{ip_lan}:{porta}/web/login",
         "app_url": f"http://{ip_lan}:{porta}/app",
     }
+
+
+@app.get("/api/firebase-config", tags=["Sistema"])
+async def api_firebase_config():
+    """Retorna configuração pública do Firebase usada no app mobile/WebView."""
+    try:
+        from config import obter_firebase_web_config  # Import local para evitar ciclo.
+
+        cfg = obter_firebase_web_config()
+        return {
+            "ok": True,
+            "config": cfg,
+            "syncChannel": str(cfg.get("syncChannel") or os.environ.get("OFP_FIREBASE_SYNC_CHANNEL", "global") or "global"),
+        }
+    except Exception as e:
+        return {"ok": False, "erro": str(e), "config": {}}
 
 
 @app.post("/api/cloud-backup", tags=["Backup"])
@@ -1651,7 +1738,7 @@ async def api_dashboard(user=Depends(get_user)):
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM clientes")
         total_clientes = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE status='AGUARDANDO'")
+        cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE UPPER(COALESCE(status,'')) IN ('AGUARDANDO','AGUARDANDO ORCAMENTO','AGUARDANDO ORÇAMENTO')")
         os_aguardando = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE status='EM ANDAMENTO'")
         os_andamento = cur.fetchone()[0]
@@ -1705,7 +1792,7 @@ async def pwa_service_worker():
 
 @app.get("/web/login", response_class=HTMLResponse, include_in_schema=False)
 async def web_login_get(request: Request):
-    return templates.TemplateResponse(request, "login.html", {"erro": ""})
+    return templates.TemplateResponse(request, "login.html", {"erro": "", "versao": APP_VERSION})
 
 
 @app.get("/app", response_class=HTMLResponse, include_in_schema=False)
@@ -1730,7 +1817,7 @@ async def web_login_post(
         return templates.TemplateResponse(
             request,
             "login.html",
-            {"erro": "Usuário ou senha incorretos."}
+            {"erro": "Usuário ou senha incorretos.", "versao": APP_VERSION}
         )
     role = str(row[1] or "OPERADOR")
     token = _criar_token(usuario.strip(), role)
@@ -1760,7 +1847,7 @@ async def web_dashboard(request: Request):
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM clientes")
         total_clientes = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE status='AGUARDANDO'")
+        cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE UPPER(COALESCE(status,'')) IN ('AGUARDANDO','AGUARDANDO ORCAMENTO','AGUARDANDO ORÇAMENTO')")
         os_abertas = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM orcamentos_aguardo WHERE status='EM ANDAMENTO'")
         os_andamento = cur.fetchone()[0]
@@ -1809,6 +1896,7 @@ async def web_clientes(request: Request, busca: str = ""):
         "busca": busca,
         "usuario": payload.get("sub", ""),
         "role": payload.get("role", ""),
+        "versao": APP_VERSION,
     })
 
 
@@ -1836,6 +1924,7 @@ async def web_os(request: Request, status_filtro: str = ""):
         "status_filtro": status_filtro,
         "usuario": payload.get("sub", ""),
         "role": payload.get("role", ""),
+        "versao": APP_VERSION,
     })
 
 
@@ -1876,6 +1965,7 @@ async def web_financeiro(request: Request):
         "total_saidas": fmt(total_saidas),
         "usuario": payload.get("sub", ""),
         "role": payload.get("role", ""),
+        "versao": APP_VERSION,
     })
 
 

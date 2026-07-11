@@ -1,4 +1,6 @@
 TERMOS DE USO - OFICINA DE PESCA
+Versao 1.0.29
+Vigencia: julho/2026
 
 1. LICENCA DE USO
 Este software e licenciado para uso interno conforme a licenca adquirida.
@@ -12,7 +14,11 @@ O suporte e fornecido conforme o plano contratado.
 4. RESPONSABILIDADE
 O usuario e responsavel por backups e uso adequado do sistema.
 
-5. ACEITE
+5. INTEGRACAO ACBr MONITOR
+O sistema utiliza o ACBr Monitor em funcionalidades especificas de integracao fiscal.
+O ACBr Monitor e um software de terceiros, sem vinculo direto com a FRS Solutions.
+
+6. ACEITE
 Ao instalar e utilizar o software, o usuario concorda com estes termos.
 
 FRS Solutions

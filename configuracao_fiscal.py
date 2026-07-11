@@ -4,12 +4,230 @@ from __future__ import annotations
 import json
 import os
 import ctypes
+import re
+from datetime import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
+from adaptador_acbr import consultar_status_acbr_monitor
 from config import CAMINHO_BANCO, get_db_connection
 from migracao_fiscal_2027 import executar_migracao_fiscal_2027
+
+
+def _base_runtime_dir() -> str:
+    if os.environ.get("OFP_BASE_RUNTIME_DIR", "").strip():
+        return os.environ.get("OFP_BASE_RUNTIME_DIR", "").strip()
+    return os.path.dirname(CAMINHO_BANCO)
+
+
+def _diretorio_config_fiscal() -> str:
+    return os.path.join(_base_runtime_dir(), "config_fiscal")
+
+
+def _arquivo_config_fiscal_json() -> str:
+    return os.path.join(_diretorio_config_fiscal(), "config_fiscal.json")
+
+
+def _arquivo_setup_monitor_txt() -> str:
+    return os.path.join(_diretorio_config_fiscal(), "acbr_monitor_setup.txt")
+
+
+def _arquivo_log_erros_fiscais() -> str:
+    pasta_logs = os.path.join(_base_runtime_dir(), "logs")
+    os.makedirs(pasta_logs, exist_ok=True)
+    return os.path.join(pasta_logs, "erros_fiscais.log")
+
+
+def _registrar_erro_fiscal(contexto: str, retorno_bruto: dict[str, Any]) -> None:
+    try:
+        linha = {
+            "data_hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "contexto": str(contexto or "fiscal"),
+            "retorno": retorno_bruto,
+        }
+        with open(_arquivo_log_erros_fiscais(), "a", encoding="utf-8") as f:
+            f.write(json.dumps(linha, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _extrair_motivo_bruto(retorno: dict[str, Any]) -> str:
+    monitor = retorno.get("monitor") if isinstance(retorno.get("monitor"), dict) else {}
+    acbr_call = retorno.get("acbr_call") if isinstance(retorno.get("acbr_call"), dict) else {}
+
+    candidatos = [
+        str(retorno.get("motivo") or "").strip(),
+        str(retorno.get("erro") or "").strip(),
+        str(monitor.get("resposta") or "").strip(),
+        str(monitor.get("motivo") or "").strip(),
+        str(acbr_call.get("erro") or "").strip(),
+        str(acbr_call.get("motivo") or "").strip(),
+    ]
+    for item in candidatos:
+        if item:
+            return item
+    return "falha_na_comunicacao_fiscal"
+
+
+def _limpar_codigo_tecnico(motivo_bruto: str) -> str:
+    txt = str(motivo_bruto or "").strip()
+    if not txt:
+        return ""
+    txt = re.sub(r"\berro\s*\d+\b[:\-\s]*", "", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\brejei[cç][aã]o\s*\d+\b[:\-\s]*", "", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt
+
+
+def _mensagem_amigavel_erro_fiscal(retorno: dict[str, Any]) -> str:
+    motivo_bruto = _extrair_motivo_bruto(retorno)
+    motivo_legivel = _limpar_codigo_tecnico(motivo_bruto) or "detalhes técnicos indisponíveis"
+    motivo_low = motivo_bruto.lower()
+
+    if any(chave in motivo_low for chave in ["timeout", "time out", "sem_resposta", "sem resposta", "indispon", "fora do ar", "statusservico"]):
+        return (
+            "Atenção: A SEFAZ está temporariamente fora do ar. "
+            "Verifique sua internet ou tente novamente mais tarde"
+        )
+
+    if "rejei" in motivo_low:
+        return f"Atenção: Nota rejeitada. O motivo é: {motivo_legivel}"
+
+    if any(chave in motivo_low for chave in ["certificado", "a1", "pfx", "p12"]):
+        return (
+            "Atenção: Não foi possível validar o certificado digital. "
+            "Confirme o certificado A1 e tente novamente"
+        )
+
+    return f"Atenção: Não foi possível concluir a operação fiscal. Motivo: {motivo_legivel}"
+
+
+def _normalizar_retorno_fiscal(contexto: str, retorno: dict[str, Any]) -> dict[str, Any]:
+    saida = dict(retorno or {})
+    if bool(saida.get("ok")):
+        return saida
+
+    msg = str(saida.get("mensagem") or "").strip() or _mensagem_amigavel_erro_fiscal(saida)
+    saida["mensagem"] = msg
+    _registrar_erro_fiscal(contexto, retorno)
+    return saida
+
+
+def _garantir_arquivo_ini_acbr(caminho_ini: str, cfg: dict[str, Any]) -> None:
+    if os.path.exists(caminho_ini):
+        return
+    conteudo = (
+        "[ACBrMonitor]\n"
+        f"PastaMonitor={cfg.get('acbr_monitor_path', '')}\n"
+        f"ArquivoENT={cfg.get('acbr_entrada', '')}\n"
+        f"ArquivoSAI={cfg.get('acbr_saida', '')}\n\n"
+        "[Fiscal]\n"
+        f"Modalidade={cfg.get('modalidade_fiscal', 'nfe')}\n"
+        f"CNPJ={cfg.get('emitente_cnpj', '')}\n"
+        f"IE={cfg.get('emitente_ie', '')}\n"
+        f"CertificadoA1={cfg.get('acbr_certificado_a1_path', '')}\n"
+    )
+    with open(caminho_ini, "w", encoding="utf-8") as f:
+        f.write(conteudo)
+
+
+def _garantir_arquivo_setup_txt(cfg: dict[str, Any]) -> None:
+    caminho = _arquivo_setup_monitor_txt()
+    conteudo = (
+        "CONFIGURACAO PADRAO ACBrMonitor\n"
+        "================================\n"
+        f"Pasta monitor: {cfg.get('acbr_monitor_path', '')}\n"
+        f"ENT (entrada): {cfg.get('acbr_entrada', '')}\n"
+        f"SAI (saida): {cfg.get('acbr_saida', '')}\n"
+        f"INI ACBr: {cfg.get('acbr_ini', '')}\n"
+        f"Modalidade fiscal: {cfg.get('modalidade_fiscal', 'nfe')}\n"
+    )
+    with open(caminho, "w", encoding="utf-8") as f:
+        f.write(conteudo)
+
+
+def _garantir_estrutura_fiscal(parametros: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = dict(parametros or {})
+    base = _diretorio_config_fiscal()
+    pasta_acbr = str(cfg.get("acbr_path") or os.path.join(base, "acbr")).strip()
+    pasta_monitor = str(cfg.get("acbr_monitor_path") or os.path.join(base, "acbr_monitor")).strip()
+
+    os.makedirs(base, exist_ok=True)
+    os.makedirs(pasta_acbr, exist_ok=True)
+    os.makedirs(pasta_monitor, exist_ok=True)
+
+    cfg["provedor"] = str(cfg.get("provedor") or "acbr").strip().lower()
+    cfg["acbr_modo"] = str(cfg.get("acbr_modo") or "monitor").strip().lower()
+    cfg["modalidade_fiscal"] = str(cfg.get("modalidade_fiscal") or "nfe").strip().lower()
+    cfg["acbr_path"] = pasta_acbr
+    cfg["acbr_monitor_path"] = pasta_monitor
+    cfg["acbr_entrada"] = str(cfg.get("acbr_entrada") or os.path.join(pasta_monitor, "ENT.txt")).strip()
+    cfg["acbr_saida"] = str(cfg.get("acbr_saida") or os.path.join(pasta_monitor, "SAI.txt")).strip()
+    cfg["acbr_ini"] = str(cfg.get("acbr_ini") or os.path.join(base, "acbrlib.ini")).strip()
+    cfg["acbr_certificado_a1_path"] = str(
+        cfg.get("acbr_certificado_a1_path") or cfg.get("certificado_a1_path") or ""
+    ).strip()
+    cfg["certificado_a1_path"] = str(cfg.get("acbr_certificado_a1_path") or "").strip()
+    cfg["emitente_cnpj"] = str(cfg.get("emitente_cnpj") or "").strip()
+    cfg["emitente_ie"] = str(cfg.get("emitente_ie") or "").strip()
+    cfg["acbr_token"] = str(cfg.get("acbr_token") or "").strip()
+    _garantir_arquivo_ini_acbr(cfg["acbr_ini"], cfg)
+    _garantir_arquivo_setup_txt(cfg)
+    return cfg
+
+
+def _carregar_json_config_fiscal() -> dict[str, Any]:
+    caminho = _arquivo_config_fiscal_json()
+    if not os.path.exists(caminho):
+        return {}
+    try:
+        with open(caminho, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _salvar_json_config_fiscal(payload: dict[str, Any]) -> None:
+    os.makedirs(_diretorio_config_fiscal(), exist_ok=True)
+    caminho = _arquivo_config_fiscal_json()
+    with open(caminho, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def inicializar_motor_fiscal(configuracao: ConfiguracaoFiscal | None = None) -> ConfiguracaoFiscal:
+    cfg = configuracao or carregar_configuracao_fiscal()
+    params = cfg.parametros_gerais if isinstance(cfg.parametros_gerais, dict) else {}
+    cfg.parametros_gerais = _garantir_estrutura_fiscal(params)
+    return cfg
+
+
+def verificar_status_motor_fiscal(configuracao: ConfiguracaoFiscal | None = None) -> dict[str, Any]:
+    cfg = inicializar_motor_fiscal(configuracao or carregar_configuracao_fiscal())
+    params = cfg.parametros_gerais if isinstance(cfg.parametros_gerais, dict) else {}
+    provedor = str(params.get("provedor") or "acbr").strip().lower()
+    if provedor != "acbr":
+        return {
+            "ok": True,
+            "mensagem": "Provedor fiscal não usa ACBrMonitor.",
+            "provedor": provedor,
+            "monitor": None,
+        }
+
+    monitor = consultar_status_acbr_monitor(params)
+    ok = bool(monitor.get("ok"))
+    return {
+        "ok": ok,
+        "mensagem": (
+            "Motor fiscal detectado e ativo."
+            if ok
+            else "Motor fiscal não detectado. Verifique se o ACBrMonitor está aberto"
+        ),
+        "provedor": provedor,
+        "monitor": monitor,
+        "parametros": params,
+    }
 
 
 def _normalizar_ncm(valor: Any) -> str:
@@ -103,6 +321,16 @@ class EmissorFiscalACBr(InterfaceEmissorFiscal):
         except Exception:
             return []
 
+    def _status_monitor(self) -> dict[str, Any]:
+        parametros = self.configuracao.parametros_gerais if isinstance(self.configuracao.parametros_gerais, dict) else {}
+        retorno = consultar_status_acbr_monitor(parametros)
+        return {
+            "ok": bool(retorno.get("ok")),
+            "modo": "acbr_monitor",
+            "acbr_path": self._resolver_pasta_acbr(),
+            "monitor": retorno,
+        }
+
     def _resolver_dll(self, dlls: list[str]) -> str:
         pasta = self._resolver_pasta_acbr()
         mapa = {nome.lower(): nome for nome in dlls}
@@ -173,8 +401,35 @@ class EmissorFiscalACBr(InterfaceEmissorFiscal):
 
     def enviar_venda(self, venda: dict[str, Any]) -> dict[str, Any]:
         payload = montar_payload_nota_fiscal(venda)
+        parametros = self.configuracao.parametros_gerais if isinstance(self.configuracao.parametros_gerais, dict) else {}
+        modo_forcado = str(parametros.get("acbr_modo") or "").strip().lower()
+
+        if modo_forcado == "monitor":
+            status_monitor = self._status_monitor()
+            ok_monitor = bool(status_monitor.get("ok"))
+            return {
+                "ok": ok_monitor,
+                "modo": "acbr_monitor",
+                "status": "monitor_ok" if ok_monitor else "erro",
+                "sale_id": payload.get("sale_id"),
+                "acbr_path": self._resolver_pasta_acbr(),
+                "monitor": status_monitor.get("monitor"),
+                "payload": payload,
+            }
+
         dlls = self._bibliotecas_disponiveis()
         if not dlls:
+            status_monitor = self._status_monitor()
+            if status_monitor.get("ok"):
+                return {
+                    "ok": True,
+                    "modo": "acbr_monitor",
+                    "status": "monitor_ok",
+                    "sale_id": payload.get("sale_id"),
+                    "acbr_path": self._resolver_pasta_acbr(),
+                    "monitor": status_monitor.get("monitor"),
+                    "payload": payload,
+                }
             return {
                 "ok": False,
                 "modo": "acbr",
@@ -182,6 +437,7 @@ class EmissorFiscalACBr(InterfaceEmissorFiscal):
                 "motivo": "bibliotecas_acbr_ausentes",
                 "sale_id": payload.get("sale_id"),
                 "acbr_path": self._resolver_pasta_acbr(),
+                "monitor": status_monitor.get("monitor"),
             }
 
         dll_path = self._resolver_dll(dlls)
@@ -266,6 +522,7 @@ def montar_payload_nota_fiscal(venda: dict[str, Any]) -> dict[str, Any]:
         )
 
     return {
+        "fiscal_tipo": str(venda_fiscal.get("fiscal_tipo") or "nfe").strip().lower(),
         "sale_id": venda_fiscal.get("sale_id"),
         "date": venda_fiscal.get("date"),
         "total": float(venda_fiscal.get("total") or 0),
@@ -290,39 +547,45 @@ def _tabela_configuracao_fiscal_existe() -> bool:
 
 
 def carregar_configuracao_fiscal() -> ConfiguracaoFiscal:
-    if not _tabela_configuracao_fiscal_existe():
-        return ConfiguracaoFiscal()
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT
-                COALESCE(api_key_plugnotas, ''),
-                COALESCE(api_key_focusnfe, ''),
-                COALESCE(ambiente, 'homologacao'),
-                COALESCE(parametros_gerais, '{}')
-            FROM configuracao_fiscal
-            WHERE id = 1
-            """
-        )
-        row = cursor.fetchone() or ("", "", "homologacao", "{}")
+    row = ("", "", "homologacao", "{}")
+    if _tabela_configuracao_fiscal_existe():
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    COALESCE(api_key_plugnotas, ''),
+                    COALESCE(api_key_focusnfe, ''),
+                    COALESCE(ambiente, 'homologacao'),
+                    COALESCE(parametros_gerais, '{}')
+                FROM configuracao_fiscal
+                WHERE id = 1
+                """
+            )
+            row = cursor.fetchone() or row
 
     try:
-        parametros = json.loads(str(row[3] or "{}").strip() or "{}")
-        if not isinstance(parametros, dict):
-            parametros = {}
+        parametros_db = json.loads(str(row[3] or "{}").strip() or "{}")
+        if not isinstance(parametros_db, dict):
+            parametros_db = {}
     except Exception:
-        parametros = {}
+        parametros_db = {}
 
-    return ConfiguracaoFiscal(
+    parametros_json = _carregar_json_config_fiscal()
+    parametros = dict(parametros_db)
+    parametros.update(parametros_json)
+
+    cfg = ConfiguracaoFiscal(
         api_key_plugnotas=str(row[0] or "").strip(),
         api_key_focusnfe=str(row[1] or "").strip(),
         ambiente=str(row[2] or "homologacao").strip().lower() or "homologacao",
         parametros_gerais=parametros,
     )
+    return inicializar_motor_fiscal(cfg)
 
 
 def salvar_configuracao_fiscal(configuracao: ConfiguracaoFiscal) -> None:
+    configuracao = inicializar_motor_fiscal(configuracao)
     executar_migracao_fiscal_2027(CAMINHO_BANCO)
     api_plug, api_focus, ambiente, parametros = configuracao.to_db()
 
@@ -341,6 +604,17 @@ def salvar_configuracao_fiscal(configuracao: ConfiguracaoFiscal) -> None:
         )
         conn.commit()
 
+    try:
+        payload_json = {
+            "api_key_plugnotas": str(configuracao.api_key_plugnotas or "").strip(),
+            "api_key_focusnfe": str(configuracao.api_key_focusnfe or "").strip(),
+            "ambiente": str(configuracao.ambiente or "homologacao").strip().lower(),
+        }
+        payload_json.update(configuracao.parametros_gerais if isinstance(configuracao.parametros_gerais, dict) else {})
+        _salvar_json_config_fiscal(payload_json)
+    except Exception:
+        pass
+
 
 def configuracao_fiscal_esta_pronta(configuracao: ConfiguracaoFiscal | None = None) -> bool:
     cfg = configuracao or carregar_configuracao_fiscal()
@@ -350,7 +624,7 @@ def configuracao_fiscal_esta_pronta(configuracao: ConfiguracaoFiscal | None = No
 
 
 def obter_emissor_fiscal(configuracao: ConfiguracaoFiscal | None = None) -> InterfaceEmissorFiscal:
-    cfg = configuracao or carregar_configuracao_fiscal()
+    cfg = inicializar_motor_fiscal(configuracao or carregar_configuracao_fiscal())
     if _provedor_fiscal(cfg) == "acbr":
         return EmissorFiscalACBr(cfg)
 
@@ -362,16 +636,132 @@ def obter_emissor_fiscal(configuracao: ConfiguracaoFiscal | None = None) -> Inte
     return EmissorFiscalStandalone()
 
 
+def _resultado_motor_inativo() -> dict[str, Any]:
+    return {
+        "ok": False,
+        "modo": "acbr_monitor",
+        "status": "bloqueado_motor_fiscal",
+        "motivo": "motor_fiscal_inativo",
+        "mensagem": "Motor fiscal não detectado. Verifique se o ACBrMonitor está aberto",
+    }
+
+
+def _gate_motor_fiscal() -> dict[str, Any]:
+    status = verificar_status_motor_fiscal()
+    if bool(status.get("ok")):
+        return {"ok": True, "status": status}
+    retorno = _resultado_motor_inativo()
+    retorno["monitor"] = status.get("monitor")
+    return retorno
+
+
 def tentar_enviar_venda(venda: dict[str, Any]) -> dict[str, Any]:
     try:
+        gate = _gate_motor_fiscal()
+        if not bool(gate.get("ok")):
+            bloqueio = dict(gate)
+            bloqueio["sale_id"] = venda.get("sale_id") if isinstance(venda, dict) else None
+            return _normalizar_retorno_fiscal("emitir_nota", bloqueio)
         cfg = carregar_configuracao_fiscal()
         emissor = obter_emissor_fiscal(cfg)
-        return emissor.enviar_venda(venda)
+        retorno = emissor.enviar_venda(venda)
+        return _normalizar_retorno_fiscal("emitir_nota", retorno if isinstance(retorno, dict) else {"ok": False, "motivo": "retorno_fiscal_invalido"})
     except Exception as exc:
-        return {
+        retorno_erro = {
             "ok": False,
             "modo": "standalone",
             "status": "erro",
             "motivo": str(exc),
             "sale_id": venda.get("sale_id") if isinstance(venda, dict) else None,
         }
+        return _normalizar_retorno_fiscal("emitir_nota", retorno_erro)
+
+
+def consultar_nota_fiscal(referencia: str) -> dict[str, Any]:
+    ref = str(referencia or "").strip()
+    if not ref:
+        return {
+            "ok": False,
+            "modo": "standalone",
+            "status": "erro",
+            "motivo": "referencia_vazia",
+            "mensagem": "Informe uma referência de nota para consulta.",
+        }
+    try:
+        gate = _gate_motor_fiscal()
+        if not bool(gate.get("ok")):
+            bloqueio = dict(gate)
+            bloqueio["referencia"] = ref
+            return _normalizar_retorno_fiscal("consultar_nota", bloqueio)
+        cfg = carregar_configuracao_fiscal()
+        emissor = obter_emissor_fiscal(cfg)
+        retorno = emissor.consultar_status(ref)
+        if isinstance(retorno, dict):
+            retorno.setdefault("referencia", ref)
+        retorno = retorno if isinstance(retorno, dict) else {"ok": False, "motivo": "retorno_fiscal_invalido", "referencia": ref}
+        return _normalizar_retorno_fiscal("consultar_nota", retorno)
+    except Exception as exc:
+        retorno_erro = {
+            "ok": False,
+            "modo": "standalone",
+            "status": "erro",
+            "motivo": str(exc),
+            "referencia": ref,
+        }
+        return _normalizar_retorno_fiscal("consultar_nota", retorno_erro)
+
+
+def imprimir_danfe_fiscal(venda: dict[str, Any], pasta_saida: str | None = None) -> dict[str, Any]:
+    try:
+        gate = _gate_motor_fiscal()
+        if not bool(gate.get("ok")):
+            bloqueio = dict(gate)
+            bloqueio["sale_id"] = venda.get("sale_id") if isinstance(venda, dict) else None
+            return _normalizar_retorno_fiscal("imprimir_danfe", bloqueio)
+
+        payload = montar_payload_nota_fiscal(venda)
+        base_saida = pasta_saida or os.path.join(_base_runtime_dir(), "fiscais")
+        os.makedirs(base_saida, exist_ok=True)
+        arquivo = os.path.join(
+            base_saida,
+            f"DANFE_{int(payload.get('sale_id') or 0):05d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+        )
+
+        linhas = [
+            "DANFE SIMPLIFICADO",
+            "=================",
+            f"Tipo Fiscal: {str(payload.get('fiscal_tipo') or 'nfe').upper()}",
+            f"Referência: {payload.get('sale_id')}",
+            f"Data: {payload.get('date')}",
+            f"Total: {float(payload.get('total') or 0):.2f}",
+            "",
+            "Itens:",
+        ]
+        for idx, item in enumerate(payload.get("items") or [], start=1):
+            linhas.append(
+                f"{idx}. {item.get('nome_produto')} | Qtd: {item.get('quantidade')} | "
+                f"Unit: {float(item.get('preco_unitario') or 0):.2f} | "
+                f"Total: {float(item.get('total_item') or 0):.2f} | NCM: {item.get('ncm')}"
+            )
+
+        with open(arquivo, "w", encoding="utf-8") as f:
+            f.write("\n".join(linhas) + "\n")
+
+        return {
+            "ok": True,
+            "modo": "acbr",
+            "status": "danfe_gerado",
+            "sale_id": payload.get("sale_id"),
+            "arquivo": arquivo,
+            "mensagem": "DANFE gerado com sucesso.",
+        }
+    except Exception as exc:
+        retorno_erro = {
+            "ok": False,
+            "modo": "standalone",
+            "status": "erro",
+            "motivo": str(exc),
+            "sale_id": venda.get("sale_id") if isinstance(venda, dict) else None,
+            "mensagem": "Falha ao gerar DANFE.",
+        }
+        return _normalizar_retorno_fiscal("imprimir_danfe", retorno_erro)
