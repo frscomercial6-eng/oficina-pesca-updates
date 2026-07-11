@@ -61,6 +61,31 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install pyinstaller customtkinter pillow bcrypt fastapi uvicorn "python-jose[cryptography]" python-multipart firebase-admin google-api-python-client google-auth-oauthlib google-auth python-dotenv requests fpdf2 reportlab zeroconf
 
+      - name: Garantir client_secret_desktop.json no CI
+        shell: pwsh
+        env:
+          GOOGLE_CLIENT_SECRET_DESKTOP_JSON: ${{ secrets.GOOGLE_CLIENT_SECRET_DESKTOP_JSON }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:GOOGLE_CLIENT_SECRET_DESKTOP_JSON)) {
+            $env:GOOGLE_CLIENT_SECRET_DESKTOP_JSON | Out-File -FilePath "client_secret_desktop.json" -Encoding utf8
+            Write-Host "client_secret_desktop.json criado a partir de secret do GitHub."
+          } else {
+            Write-Warning "Secret GOOGLE_CLIENT_SECRET_DESKTOP_JSON não definido. Gerando placeholder para permitir build." 
+            @'
+{
+  "installed": {
+    "client_id": "placeholder.apps.googleusercontent.com",
+    "project_id": "oficina-pesca-ci",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_secret": "placeholder",
+    "redirect_uris": ["http://localhost"]
+  }
+}
+'@ | Out-File -FilePath "client_secret_desktop.json" -Encoding utf8
+          }
+
       - name: Build completo (exe + instalador + zip portátil + apk)
         shell: pwsh
         run: |
