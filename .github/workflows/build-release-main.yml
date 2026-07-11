@@ -64,7 +64,24 @@ jobs:
       - name: Build completo (exe + instalador + zip portátil + apk)
         shell: pwsh
         run: |
-          python mestre_build.py --auto
+          $env:PYTHONIOENCODING = "utf-8"
+          $env:PYTHONUTF8 = "1"
+          cmd /c "chcp 65001>nul && python mestre_build.py --auto > build_ci.log 2>&1"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Build falhou. Últimas linhas do log:"
+            if (Test-Path "build_ci.log") {
+              Get-Content "build_ci.log" -Tail 250
+            }
+            exit $LASTEXITCODE
+          }
+
+      - name: Upload log de build (sempre)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-ci-log
+          path: build_ci.log
+          if-no-files-found: ignore
 
       - name: Ler versão do projeto
         id: version
