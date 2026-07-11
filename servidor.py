@@ -62,6 +62,9 @@ from config import (
     inicializar_banco,
     APP_VERSION,
     _CFG,
+    gerar_chave_licenca,
+    gerar_hash_publico_licenca,
+    normalizar_chave_instalacao,
 )
 
 logger = get_logger("servidor")
@@ -387,9 +390,83 @@ class CloudBackupIn(BaseModel):
     versao_app: Optional[str] = ""
 
 
+class HubLicencaIn(BaseModel):
+    cliente: str
+    hwid: str
+    programa: str = "Oficina_Pesca"
+    plano: str = "PROMOCIONAL"
+    dias_validade: Optional[int] = None
+    tipo_licenca: Optional[str] = ""
+    transactionId: Optional[str] = ""
+    email: Optional[str] = ""
+    source: Optional[str] = "hub_gas"
+
+
 def _email_cliente_livre(valor: Optional[str]) -> str:
     """Mantem o e-mail do cliente sempre como texto para o app mobile."""
     return str(valor or "").strip()
+
+
+def _hub_api_key_configurada() -> str:
+    return str(
+        os.environ.get("OFP_HUB_API_KEY", "")
+        or _CFG.get("central", "hub_api_key", fallback="")
+    ).strip()
+
+
+def _validar_hub_api_key(request: Request) -> None:
+    key_cfg = _hub_api_key_configurada()
+    key_req = str(request.headers.get("X-OFP-Hub-Key", "")).strip()
+    if not key_cfg:
+        raise HTTPException(status_code=503, detail="HUB API key nao configurada no servidor.")
+    if not key_req or not hmac.compare_digest(key_cfg, key_req):
+        raise HTTPException(status_code=401, detail="Chave tecnica invalida.")
+
+
+def _dias_por_plano(plano: str) -> Optional[int]:
+    mapa = {
+        "PROMOCIONAL": 90,
+        "MENSAL": 30,
+        "TRIMESTRAL": 90,
+        "SEMESTRAL": 180,
+        "ANUAL": 365,
+        "PERMANENTE": None,
+        "VIP": None,
+    }
+    return mapa.get(str(plano or "").strip().upper())
+
+
+def _registrar_licenca_hub_db(chave: str, validade: str, hwid: str) -> None:
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS licencas_geradas (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                chave            TEXT NOT NULL,
+                data_expiracao   TEXT NOT NULL,
+                chave_instalacao TEXT NOT NULL DEFAULT '',
+                data_geracao     TEXT NOT NULL
+            )
+            """
+        )
+        cur.execute("PRAGMA table_info(licencas_geradas)")
+        cols = {row[1] for row in cur.fetchall()}
+        if "chave_instalacao" not in cols:
+            cur.execute("ALTER TABLE licencas_geradas ADD COLUMN chave_instalacao TEXT DEFAULT ''")
+        cur.execute(
+            "INSERT INTO licencas_geradas (chave, data_expiracao, chave_instalacao, data_geracao) VALUES (?, ?, ?, DATE('now'))",
+            (chave, validade, hwid),
+        )
+        conn.commit()
+
+
+def _registrar_licenca_hub_log(payload: dict) -> None:
+    pasta_logs = os.path.join(BASE_DIR, "logs")
+    os.makedirs(pasta_logs, exist_ok=True)
+    caminho = os.path.join(pasta_logs, "hub_licencas_api.log")
+    with open(caminho, "a", encoding="utf-8") as f:
+        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 # ─── HELPERS AUTH ─────────────────────────────────────────────────────────────
@@ -611,6 +688,66 @@ async def api_cloud_backup(
         str(body.versao_app or ""),
     )
     return {"ok": True, "arquivo": nome_final, "email_cliente": email}
+
+
+@app.post("/api/licencas/gerar/oficina", tags=["Licencas"])
+async def api_gerar_licenca_oficina_hub(request: Request, body: HubLicencaIn):
+    """Endpoint do Hub de Automacao para gerar licenca do modulo Oficina_Pesca."""
+    _validar_hub_api_key(request)
+
+    programa = str(body.programa or "Oficina_Pesca").strip()
+    if programa != "Oficina_Pesca":
+        raise HTTPException(status_code=400, detail="Este endpoint gera apenas licenca do modulo Oficina_Pesca.")
+
+    hwid = normalizar_chave_instalacao(str(body.hwid or ""))
+    if not hwid.startswith("OFP-INST-"):
+        raise HTTPException(status_code=400, detail="HWID invalido. Esperado OFP-INST-...")
+
+    dias = body.dias_validade if body.dias_validade is not None else _dias_por_plano(body.plano)
+    if dias is None:
+        validade = "PERMANENTE"
+        tipo = "PERMANENTE"
+    else:
+        if int(dias) <= 0:
+            raise HTTPException(status_code=400, detail="dias_validade deve ser maior que zero.")
+        validade = (datetime.now().date() + timedelta(days=int(dias))).isoformat()
+        tipo = str(body.tipo_licenca or "").strip().upper()
+
+    chave = gerar_chave_licenca(
+        cliente=str(body.cliente or "").strip(),
+        dias_validade=None if validade == "PERMANENTE" else int(dias),
+        tipo_licenca=tipo,
+        chave_instalacao=hwid,
+    )
+    hash_pub = gerar_hash_publico_licenca(chave)
+
+    _registrar_licenca_hub_db(chave, validade, hwid)
+    _registrar_licenca_hub_log(
+        {
+            "ts": datetime.now().isoformat(),
+            "programa": programa,
+            "cliente": str(body.cliente or "").strip(),
+            "hwid": hwid,
+            "plano": str(body.plano or "").strip().upper(),
+            "validade": validade,
+            "transactionId": str(body.transactionId or "").strip(),
+            "email": str(body.email or "").strip(),
+            "source": str(body.source or "hub_gas").strip(),
+            "chave": chave,
+            "hash_publico": hash_pub,
+        }
+    )
+
+    return {
+        "ok": True,
+        "message": "Licenca gerada com sucesso.",
+        "programa": programa,
+        "plano": str(body.plano or "").strip().upper(),
+        "validade": validade,
+        "chave": chave,
+        "license_key": chave,
+        "hash_publico": hash_pub,
+    }
 
 
 @app.get("/api/cloud-backup/latest", tags=["Backup"])

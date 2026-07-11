@@ -1,0 +1,16 @@
+# Cole estas chaves em Apps Script > Project Settings > Script properties
+# Preencha os valores a direita.
+
+LICENSE_ENDPOINT_OFICINA_PESCA=https://SEU_SERVIDOR:8000/api/licencas/gerar/oficina
+LICENSE_TOKEN_OFICINA_PESCA=
+
+LICENSE_ENDPOINT_ATLAS=https://SEU_ENDPOINT_ATLAS/licencas/gerar
+LICENSE_TOKEN_ATLAS=
+
+LICENSE_ENDPOINT_MERCADO=https://SEU_ENDPOINT_MERCADO/licencas/gerar
+LICENSE_TOKEN_MERCADO=
+
+HUB_API_KEY=DEFINA_UMA_CHAVE_FORTE_AQUI
+
+FIREBASE_DATABASE_URL=https://SEU-PROJETO-default-rtdb.firebaseio.com
+FIREBASE_DB_SECRET=SEU_DB_SECRET_OU_TOKEN
