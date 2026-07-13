@@ -384,8 +384,36 @@ VALOR_LICENCA_MENSAL = 149.90
 VALOR_LICENCA_TRIMESTRAL = 249.90
 VALOR_LICENCA_PERMANENTE = 599.90
 # Permite segredo externo para licenciamento sem quebrar instalaÃ§Ãµes antigas.
-# Se a variÃ¡vel de ambiente nÃ£o existir, mantÃ©m fallback compatÃ­vel.
-LICENCA_SECRET = os.environ.get("OFP_LICENCA_SECRET", "")
+# Se a variÃ¡vel de ambiente nÃ£o existir, tenta fallback automÃ¡tico no instalar.iss.
+def _resolver_licenca_secret() -> str:
+    secret_env = str(os.environ.get("OFP_LICENCA_SECRET", "")).strip()
+    if secret_env:
+        return secret_env
+
+    candidatos = [
+        os.path.join(DIRETORIO_ATUAL, "instalar.iss"),
+        os.path.join(DIRETORIO_RECURSOS, "instalar.iss"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "instalar.iss"),
+    ]
+
+    for caminho in candidatos:
+        try:
+            if not os.path.exists(caminho):
+                continue
+            with open(caminho, "r", encoding="utf-8", errors="ignore") as f:
+                conteudo = f.read()
+            match = re.search(r'^#define\s+LicenseSecret\s+"([^"]+)"', conteudo, re.MULTILINE)
+            if match:
+                return str(match.group(1)).strip()
+        except Exception:
+            continue
+
+    return ""
+
+
+LICENCA_SECRET = _resolver_licenca_secret()
+if LICENCA_SECRET:
+    os.environ.setdefault("OFP_LICENCA_SECRET", LICENCA_SECRET)
 
 _CLOUD_SYNC_THREAD: Optional[threading.Thread] = None
 _CLOUD_SYNC_STARTED = False
@@ -1121,12 +1149,11 @@ def obter_info_nova_versao() -> dict:
 def eh_versao_mais_nova(versao_remota: str, versao_local: str) -> bool:
     """Compara versÃµes no formato semÃ¢ntico simples (ex.: 1.2.3)."""
     def _to_tuple(v: str) -> tuple[int, ...]:
-        partes = []
-        for p in str(v or "").strip().split("."):
-            try:
-                partes.append(int(p))
-            except ValueError:
-                partes.append(0)
+        texto = str(v or "").strip().lower()
+        # Aceita formatos como "1.0.30", "v1.0.30" e "versao=1.0.30".
+        partes = [int(x) for x in re.findall(r"\d+", texto)]
+        if not partes:
+            return (0,)
         return tuple(partes)
 
     remota = _to_tuple(versao_remota)

@@ -1,31 +1,7 @@
 # -*- coding: utf-8 -*-
 # -*- coding: utf-8 -*-
-import os
-import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
-
-
-def _resolver_secret_producao() -> str:
-    secret_env = str(os.environ.get("OFP_LICENCA_SECRET", "")).strip()
-    if secret_env:
-        return secret_env
-
-    iss_path = Path(__file__).parent / "instalar.iss"
-    try:
-        conteudo = iss_path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return ""
-
-    match = re.search(r'^#define\s+LicenseSecret\s+"([^"]+)"', conteudo, re.MULTILINE)
-    if match:
-        return match.group(1).strip()
-    return ""
-
-
-_secret_producao = _resolver_secret_producao()
-if _secret_producao:
-    os.environ.setdefault("OFP_LICENCA_SECRET", _secret_producao)
 
 from config import LICENCA_SECRET, gerar_chave_licenca, gerar_hash_publico_licenca, get_db_connection, normalizar_chave_instalacao
 

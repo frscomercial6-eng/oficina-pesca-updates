@@ -76,7 +76,15 @@ class MainActivity : AppCompatActivity() {
             val json = JSONObject(body)
             val bloqueada = json.optBoolean("bloqueada", false)
             val ativa = json.optBoolean("ativa", true)
-            if (bloqueada || !ativa) "$base/web/licenca-bloqueada" else BuildConfig.WEB_APP_URL
+            val trialAtivo = json.optBoolean("trial_ativo", false)
+            val licencaAtiva = json.optBoolean("licenca_ativa", false)
+            if (bloqueada || !ativa) {
+                "$base/web/licenca-bloqueada"
+            } else if (trialAtivo && !licencaAtiva) {
+                trialPlansHtml(base)
+            } else {
+                BuildConfig.WEB_APP_URL
+            }
         } catch (exc: Exception) {
             Log.w("OficinaPesca", "Falha ao validar licença antes do load: ${exc.message}")
             localBlockedHtml()
@@ -118,6 +126,65 @@ class MainActivity : AppCompatActivity() {
             Charsets.UTF_8.name()
         )
     }
+
+        private fun trialPlansHtml(baseUrl: String): String {
+                val html = """
+                        <!DOCTYPE html>
+                        <html lang='pt-BR'>
+                        <head>
+                            <meta charset='UTF-8'>
+                            <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+                            <title>Planos Oficina de Pesca</title>
+                            <style>
+                                body { background:#181a1b; color:#f5f5f5; font-family:Segoe UI, Arial, sans-serif; margin:0; padding:24px; }
+                                .wrap { max-width:1080px; margin:0 auto; }
+                                h1 { color:#f5f5f5; margin:0 0 10px 0; font-size:32px; }
+                                .sub { color:#ff9f43; margin-bottom:20px; font-weight:600; }
+                                .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; }
+                                .card { background:#202325; border:1px solid #3b3b3b; border-radius:18px; padding:18px; box-shadow:0 8px 24px rgba(0,0,0,.24); }
+                                .promo { border:2px solid #00E676; }
+                                .best { border:3px solid #FF9F43; }
+                                .name { font-size:18px; font-weight:700; margin-bottom:10px; }
+                                .price { font-size:24px; font-weight:800; margin-bottom:8px; }
+                                .desc { color:#d5dbe1; min-height:54px; }
+                                .cta { display:inline-block; margin-top:14px; text-decoration:none; background:#2196f3; color:#fff; padding:12px 16px; border-radius:12px; font-weight:700; }
+                                .cta.best { background:#FF9F43; color:#000; }
+                                .footer { margin-top:22px; color:#9fb0bf; font-size:14px; }
+                            </style>
+                        </head>
+                        <body>
+                            <div class='wrap'>
+                                <h1>Escolha o melhor plano para sua oficina</h1>
+                                <div class='sub'>Seu acesso atual está em Trial. A navegação completa será liberada após ativação.</div>
+                                <div class='grid'>
+                                    ${if (BuildConfig.PROMO_ATIVA) "<div class='card promo'><div class='name'>PROMOCIONAL</div><div class='price'>R$ ${BuildConfig.PROMO_VALOR}</div><div class='desc'>${BuildConfig.PROMO_NOME}</div><a class='cta' href='${BuildConfig.PLANO_LINK_PROMO}'>Assinar agora</a></div>" else ""}
+                                    <div class='card'><div class='name'>MENSAL</div><div class='price'>R$ 69,90</div><div class='desc'>Acesso imediato ao sistema.</div><a class='cta' href='${BuildConfig.PLANO_LINK_MENSAL}'>Assinar agora</a></div>
+                                    <div class='card'><div class='name'>TRIMESTRAL</div><div class='price'>R$ 179,90</div><div class='desc'>Ideal para começar.</div><a class='cta' href='${BuildConfig.PLANO_LINK_TRIMESTRAL}'>Assinar agora</a></div>
+                                    <div class='card best'><div class='name'>SEMESTRAL</div><div class='price'>R$ 359,90</div><div class='desc'>Melhor escolha para economia.</div><a class='cta best' href='${BuildConfig.PLANO_LINK_SEMESTRAL}'>Assinar agora</a></div>
+                                    <div class='card'><div class='name'>ANUAL</div><div class='price'>R$ 799,90</div><div class='desc'>Plano profissional de 12 meses.</div><a class='cta' href='${BuildConfig.PLANO_LINK_ANUAL}'>Assinar agora</a></div>
+                                </div>
+                                <div class='footer'>Aguardando confirmação automática do pagamento. Assim que a licença for ativada, o sistema completo será liberado.</div>
+                            </div>
+                            <script>
+                                async function verificarLiberacao() {
+                                    try {
+                                        const resp = await fetch('${baseUrl}/api/licenca-status', { cache: 'no-store' });
+                                        const data = await resp.json();
+                                        const trial = Boolean(data && data.trial_ativo);
+                                        const ativa = Boolean(data && (data.licenca_ativa || data.ativa));
+                                        if (ativa && !trial) {
+                                            window.location.replace('${BuildConfig.WEB_APP_URL}');
+                                        }
+                                    } catch (_) {}
+                                }
+                                setInterval(verificarLiberacao, 8000);
+                            </script>
+                        </body>
+                        </html>
+                """.trimIndent()
+
+                return "data:text/html," + java.net.URLEncoder.encode(html, Charsets.UTF_8.name())
+        }
 
     override fun onBackPressed() {
         if (this::webView.isInitialized && webView.canGoBack()) {

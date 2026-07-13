@@ -3429,35 +3429,8 @@ class FrmMenu(ctk.CTk):
                     "Iniciando download da atualização...",
                     parent=self,
                 )
-
-                def _worker_update():
-                    ok, msg = executar_atualizacao(
-                        url_download,
-                        app_executavel=sys.executable,
-                        processo_pid=os.getpid(),
-                        silenciosa=True,
-                    )
-
-                    def _finalizar():
-                        if ok:
-                            messagebox.showinfo(
-                                "Atualizações",
-                                "Download concluído e instalador iniciado com sucesso.",
-                                parent=self,
-                            )
-                        else:
-                            messagebox.showerror(
-                                "Atualizações",
-                                f"Falha ao atualizar: {msg}",
-                                parent=self,
-                            )
-
-                    try:
-                        self.after(0, _finalizar)
-                    except Exception:
-                        _finalizar()
-
-                threading.Thread(target=_worker_update, daemon=True, name="ofp-update-manual").start()
+                # Chamada explícita do fluxo de atualização após o aviso informativo.
+                self.after(10, lambda: self._iniciar_download_atualizacao(url_download))
                 return
 
             if versao_remota:
@@ -3475,6 +3448,36 @@ class FrmMenu(ctk.CTk):
             )
         except Exception as e:
             messagebox.showerror("Atualizações", f"Erro ao buscar atualizações: {e}", parent=self)
+
+    def _iniciar_download_atualizacao(self, url_download: str):
+        def _worker_update():
+            ok, msg = executar_atualizacao(
+                url_download,
+                app_executavel=sys.executable,
+                processo_pid=os.getpid(),
+                silenciosa=True,
+            )
+
+            def _finalizar():
+                if ok:
+                    messagebox.showinfo(
+                        "Atualizações",
+                        "Download concluído e instalador iniciado com sucesso.",
+                        parent=self,
+                    )
+                else:
+                    messagebox.showerror(
+                        "Atualizações",
+                        f"Falha ao atualizar: {msg}",
+                        parent=self,
+                    )
+
+            try:
+                self.after(0, _finalizar)
+            except Exception:
+                _finalizar()
+
+        threading.Thread(target=_worker_update, daemon=True, name="ofp-update-manual").start()
 
     def abrir_produtos(self):
         FrmProdutos(self)

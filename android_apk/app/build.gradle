@@ -10,6 +10,12 @@ while (versionParts.size() < 3) {
     versionParts << 0
 }
 def appVersionCode = (versionParts[0] * 10000) + (versionParts[1] * 100) + versionParts[2]
+def rootCfgText = file('../../config.cfg').exists() ? file('../../config.cfg').getText('UTF-8') : ''
+def cfgValue = { key, fallback ->
+    def pattern = java.util.regex.Pattern.compile('(?m)^\\s*' + java.util.regex.Pattern.quote(key) + '\\s*=\\s*(.+?)\\s*$')
+    def matcher = pattern.matcher(rootCfgText)
+    matcher.find() ? matcher.group(1).trim() : fallback
+}
 
 android {
     namespace 'com.oficinapesca.mobile'
@@ -33,6 +39,14 @@ android {
         buildConfigField "String", "FIREBASE_MESSAGING_SENDER_ID", "\"${System.getenv('OFP_FIREBASE_MESSAGING_SENDER_ID') ?: ''}\""
         buildConfigField "String", "FIREBASE_APP_ID", "\"${System.getenv('OFP_FIREBASE_APP_ID') ?: ''}\""
         buildConfigField "String", "FIREBASE_SYNC_CHANNEL", "\"${System.getenv('OFP_FIREBASE_SYNC_CHANNEL') ?: 'global'}\""
+        buildConfigField "String", "PLANO_LINK_PROMO", "\"${cfgValue('infinitepay_link_promo_lancamento', 'https://checkout.infinitepay.io/frsoficinadepesca/7O04uAqkj')}\""
+        buildConfigField "String", "PLANO_LINK_MENSAL", "\"${cfgValue('infinitepay_link_mensal', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/7n8vLUjOnD')}\""
+        buildConfigField "String", "PLANO_LINK_TRIMESTRAL", "\"${cfgValue('infinitepay_link_trimestral', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/2arDagkoGn')}\""
+        buildConfigField "String", "PLANO_LINK_SEMESTRAL", "\"${cfgValue('infinitepay_link_semestral', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/1CYUQRLzf')}\""
+        buildConfigField "String", "PLANO_LINK_ANUAL", "\"${cfgValue('infinitepay_link_anual', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/7l0Qu7fjmN')}\""
+        buildConfigField "boolean", "PROMO_ATIVA", "${cfgValue('promo_lancamento_ativo', '1') in ['1','true','True','TRUE','sim','SIM']}"
+        buildConfigField "String", "PROMO_NOME", "\"${cfgValue('promo_lancamento_nome', 'Oferta Lançamento - 2 meses')}\""
+        buildConfigField "String", "PROMO_VALOR", "\"${cfgValue('promo_lancamento_valor', '99.90')}\""
     }
 
     buildTypes {
