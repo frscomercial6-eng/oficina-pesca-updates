@@ -111,6 +111,8 @@ from config import (
     listar_backups_banco_drive_usuario,
     restaurar_backup_banco_drive_usuario,
     iniciar_sincronizacao_hibrida_nuvem,
+    eh_versao_mais_nova,
+    executar_atualizacao,
 )
 from core.modulos import obter_modulos_habilitados
 from shutdown_utils import fechar_sistema
@@ -2287,6 +2289,11 @@ class FrmMenu(ctk.CTk):
         self.dashboard_content = None
         self._debug_fundo_dashboard_emitido = False
         self._menu_pronto_exibido = False
+        self._status_fiscal_dashboard = {
+            "texto": "Status Fiscal: verificando...",
+            "cor": "#f1c40f",
+            "ativo": None,
+        }
 
         # Adia a criação da UI para garantir root estável
         self.after(250, self.setup_ui)
@@ -2495,17 +2502,36 @@ class FrmMenu(ctk.CTk):
         self.after(450, self._checar_motor_fiscal_na_abertura)
 
     def _checar_motor_fiscal_na_abertura(self):
-        if self._encerrando_aplicacao or self._aviso_motor_fiscal_inicio_exibido or not self.winfo_exists():
+        if self._encerrando_aplicacao or not self.winfo_exists():
             return
+        self._atualizar_status_fiscal_dashboard(forcar_dashboard=True)
+
+    def _obter_status_fiscal_dashboard(self) -> dict:
         try:
             status_motor = verificar_status_motor_fiscal()
-            if not bool(status_motor.get("ok")):
-                self._aviso_motor_fiscal_inicio_exibido = True
-                messagebox.showwarning(
-                    "Status Fiscal",
-                    "Motor fiscal inativo. A emissão de notas estará bloqueada até que o ACBrMonitor seja iniciado",
-                    parent=self,
-                )
+            ativo = bool(status_motor.get("ok"))
+            if ativo:
+                return {"texto": "Status Fiscal: Ativo", "cor": "#2ecc71", "ativo": True}
+            return {"texto": "Status Fiscal: Inativo", "cor": "#e74c3c", "ativo": False}
+        except Exception:
+            return {"texto": "Status Fiscal: Inativo", "cor": "#e74c3c", "ativo": False}
+
+    def _atualizar_status_fiscal_dashboard(self, forcar_dashboard: bool = False):
+        status = self._obter_status_fiscal_dashboard()
+        anterior = bool(self._status_fiscal_dashboard.get("ativo")) if isinstance(self._status_fiscal_dashboard, dict) else None
+        self._status_fiscal_dashboard = status
+
+        if not status.get("ativo") and not self._aviso_motor_fiscal_inicio_exibido:
+            self._aviso_motor_fiscal_inicio_exibido = True
+            logger.warning("Motor fiscal inativo na abertura. Notificação exibida apenas no dashboard.")
+
+        mudou = anterior is None or anterior != bool(status.get("ativo"))
+        if (forcar_dashboard or mudou) and hasattr(self, "dashboard_frame") and self.dashboard_frame.winfo_exists():
+            self._criar_dashboard_modular()
+
+        try:
+            # Sem popup modal para não bloquear a operação na abertura.
+            pass
         except Exception as exc:
             logger.info("Falha ao verificar status fiscal na abertura: %s", exc)
 
@@ -2792,6 +2818,14 @@ class FrmMenu(ctk.CTk):
             text="Painel automático em tempo real (sem ações manuais).",
             font=("Arial", 11),
             text_color="#9fb3c8",
+        ).pack(anchor="w", pady=(0, 10))
+
+        self._status_fiscal_dashboard = self._obter_status_fiscal_dashboard()
+        ctk.CTkLabel(
+            parent_dash,
+            text=str(self._status_fiscal_dashboard.get("texto", "Status Fiscal: Inativo")),
+            font=("Arial", 12, "bold"),
+            text_color=str(self._status_fiscal_dashboard.get("cor", "#e74c3c")),
         ).pack(anchor="w", pady=(0, 10))
 
         # Sem seletor/manual: o dashboard abre pronto pelo perfil do usuário.
@@ -3363,13 +3397,67 @@ class FrmMenu(ctk.CTk):
         try:
             info_versao = obter_info_nova_versao() or {}
             versao_remota = str(info_versao.get("versao", "")).strip()
+            url_download = str(
+                info_versao.get("url_download")
+                or info_versao.get("download")
+                or info_versao.get("download_url")
+                or ""
+            ).strip()
 
             if versao_remota and self._eh_versao_mais_nova(versao_remota, APP_VERSION):
-                messagebox.showinfo(
+                if not url_download:
+                    messagebox.showwarning(
+                        "Atualizações",
+                        f"Nova versão disponível: {versao_remota}, mas sem URL de download configurada.",
+                        parent=self,
+                    )
+                    return
+
+                confirmar = messagebox.askyesno(
                     "Atualizações",
-                    f"Nova versão disponível: {versao_remota}\nVersão atual: {APP_VERSION}",
+                    f"Nova versão disponível: {versao_remota}\n"
+                    f"Versão atual: {APP_VERSION}\n\n"
+                    "Deseja baixar e instalar agora?\n"
+                    "O sistema pode ser fechado para concluir a atualização.",
                     parent=self,
                 )
+                if not confirmar:
+                    return
+
+                messagebox.showinfo(
+                    "Atualizações",
+                    "Iniciando download da atualização...",
+                    parent=self,
+                )
+
+                def _worker_update():
+                    ok, msg = executar_atualizacao(
+                        url_download,
+                        app_executavel=sys.executable,
+                        processo_pid=os.getpid(),
+                        silenciosa=True,
+                    )
+
+                    def _finalizar():
+                        if ok:
+                            messagebox.showinfo(
+                                "Atualizações",
+                                "Download concluído e instalador iniciado com sucesso.",
+                                parent=self,
+                            )
+                        else:
+                            messagebox.showerror(
+                                "Atualizações",
+                                f"Falha ao atualizar: {msg}",
+                                parent=self,
+                            )
+
+                    try:
+                        self.after(0, _finalizar)
+                    except Exception:
+                        _finalizar()
+
+                threading.Thread(target=_worker_update, daemon=True, name="ofp-update-manual").start()
                 return
 
             if versao_remota:
@@ -3576,11 +3664,10 @@ class FrmMenu(ctk.CTk):
             return {}
 
     def _eh_versao_mais_nova(self, versao_remota: str, versao_local: str) -> bool:
-        def _to_tuple(v: str) -> tuple[int, ...]:
-            return tuple(map(int, (v or "0").split('.')))
-        remota = _to_tuple(versao_remota)
-        local = _to_tuple(versao_local)
-        return remota > local
+        try:
+            return bool(eh_versao_mais_nova(versao_remota, versao_local))
+        except Exception:
+            return False
 
     def _detectar_ip_local(self) -> str:
         try:
