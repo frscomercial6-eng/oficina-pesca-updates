@@ -107,6 +107,16 @@ jobs:
           path: build_ci.log
           if-no-files-found: ignore
 
+      - name: Upload artefatos finais da run (exe + zip + apk)
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-final-artifacts
+          path: |
+            PACOTE_ENVIO/Oficina_Pesca_Instalador.exe
+            PACOTE_ENVIO/Oficina_Pesca_Portatil.zip
+            PACOTE_ENVIO/apk_celular/Oficina_Pesca_WebView.apk
+          if-no-files-found: error
+
       - name: Ler versão do projeto
         id: version
         shell: pwsh
