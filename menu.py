@@ -860,6 +860,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
         self._encerrando_aplicacao = False
+        self._status_motor_fiscal_ativo = None
         self.title("Dados da Oficina")
         self.geometry("980x760")
         self.resizable(True, True)
@@ -1195,26 +1196,34 @@ class FrmDadosOficina(ctk.CTkToplevel):
             font=("Arial", 10),
         ).grid(row=0, column=1, sticky="ew")
 
-        self._alerta_motor_fiscal_exibido = False
-        try:
-            inicializar_motor_fiscal(carregar_configuracao_fiscal())
-            status_motor = verificar_status_motor_fiscal()
-            if not bool(status_motor.get("ok")):
-                self._alerta_motor_fiscal_exibido = True
-                self.after(
-                    350,
-                    lambda: self.winfo_exists() and messagebox.showwarning(
-                        "Configuração Fiscal",
-                        str(status_motor.get("mensagem") or "Motor fiscal não detectado. Verifique se o ACBrMonitor está aberto"),
-                        parent=self,
-                    ),
-                )
-        except Exception as exc:
-            logger.warning("Falha ao inicializar estrutura fiscal padrão: %s", exc)
+        self._inicializar_status_fiscal_em_background()
 
         # Adia a carga de dados para garantir estabilidade da renderização
         self.after(250, self.carregar)
         self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def _inicializar_status_fiscal_em_background(self):
+        def _worker_fiscal():
+            ativo = False
+            try:
+                inicializar_motor_fiscal(carregar_configuracao_fiscal())
+                status_motor = verificar_status_motor_fiscal()
+                ativo = bool(status_motor.get("ok"))
+            except Exception as exc:
+                logger.info("ACBrMonitor indisponível na tela Dados da Oficina: %s", exc)
+                ativo = False
+
+            def _aplicar_status():
+                if not self.winfo_exists():
+                    return
+                self._status_motor_fiscal_ativo = ativo
+
+            try:
+                self.after(0, _aplicar_status)
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker_fiscal, daemon=True, name="ofp-dados-oficina-fiscal").start()
 
     def destroy(self):
         self._encerrando_aplicacao = True
@@ -2450,14 +2459,25 @@ class FrmMenu(ctk.CTk):
         self._atualizar_status_nuvem()
 
     def _atualizar_status_nuvem(self):
-        try:
-            online = checar_status_firebase()
-            status = "Drive: online" if online else "Drive: offline"
-            cor = "#2ecc71" if online else "#e74c3c"
-            if self.winfo_exists(): #
-                self.lbl_status_nuvem.configure(text=status, text_color=cor)
-        except Exception:
-            self.lbl_status_nuvem.configure(text="Drive: offline", text_color="#e74c3c")
+        def _worker_nuvem():
+            try:
+                online = checar_status_firebase()
+                status = "Drive: online" if online else "Drive: offline"
+                cor = "#2ecc71" if online else "#e74c3c"
+            except Exception:
+                status = "Drive: offline"
+                cor = "#e74c3c"
+
+            def _aplicar():
+                if self.winfo_exists() and hasattr(self, "lbl_status_nuvem"):
+                    self.lbl_status_nuvem.configure(text=status, text_color=cor)
+
+            try:
+                self.after(0, _aplicar)
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker_nuvem, daemon=True, name="ofp-status-nuvem").start()
         # Polling automático de rede removido.
     def _verificar_e_exibir_painel_pendencias(self):
         try:
@@ -2517,23 +2537,29 @@ class FrmMenu(ctk.CTk):
             return {"texto": "Status Fiscal: Inativo", "cor": "#e74c3c", "ativo": False}
 
     def _atualizar_status_fiscal_dashboard(self, forcar_dashboard: bool = False):
-        status = self._obter_status_fiscal_dashboard()
-        anterior = bool(self._status_fiscal_dashboard.get("ativo")) if isinstance(self._status_fiscal_dashboard, dict) else None
-        self._status_fiscal_dashboard = status
+        def _worker_fiscal_dashboard():
+            status = self._obter_status_fiscal_dashboard()
 
-        if not status.get("ativo") and not self._aviso_motor_fiscal_inicio_exibido:
-            self._aviso_motor_fiscal_inicio_exibido = True
-            logger.warning("Motor fiscal inativo na abertura. Notificação exibida apenas no dashboard.")
+            def _aplicar():
+                if self._encerrando_aplicacao or not self.winfo_exists():
+                    return
+                anterior = bool(self._status_fiscal_dashboard.get("ativo")) if isinstance(self._status_fiscal_dashboard, dict) else None
+                self._status_fiscal_dashboard = status
 
-        mudou = anterior is None or anterior != bool(status.get("ativo"))
-        if (forcar_dashboard or mudou) and hasattr(self, "dashboard_frame") and self.dashboard_frame.winfo_exists():
-            self._criar_dashboard_modular()
+                if not status.get("ativo") and not self._aviso_motor_fiscal_inicio_exibido:
+                    self._aviso_motor_fiscal_inicio_exibido = True
+                    logger.warning("Motor fiscal inativo na abertura. Notificação exibida apenas no dashboard.")
 
-        try:
-            # Sem popup modal para não bloquear a operação na abertura.
-            pass
-        except Exception as exc:
-            logger.info("Falha ao verificar status fiscal na abertura: %s", exc)
+                mudou = anterior is None or anterior != bool(status.get("ativo"))
+                if (forcar_dashboard or mudou) and hasattr(self, "dashboard_frame") and self.dashboard_frame.winfo_exists():
+                    self._criar_dashboard_modular()
+
+            try:
+                self.after(0, _aplicar)
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker_fiscal_dashboard, daemon=True, name="ofp-dashboard-fiscal").start()
 
     def _obter_modulos_usuario(self):
         try:
@@ -2820,7 +2846,6 @@ class FrmMenu(ctk.CTk):
             text_color="#9fb3c8",
         ).pack(anchor="w", pady=(0, 10))
 
-        self._status_fiscal_dashboard = self._obter_status_fiscal_dashboard()
         ctk.CTkLabel(
             parent_dash,
             text=str(self._status_fiscal_dashboard.get("texto", "Status Fiscal: Inativo")),
