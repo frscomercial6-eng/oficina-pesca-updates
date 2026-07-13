@@ -1,5 +1,6 @@
 package com.oficinapesca.mobile
 
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.webkit.JavascriptInterface
@@ -7,14 +8,39 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
+import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
+import java.util.Locale
+import org.json.JSONArray
 import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
+    private val licenseFileNames = listOf("licenca.key", "licenca.json", "licencas.json")
+    private val driveScope = "https://www.googleapis.com/auth/drive.readonly"
+    private val signInLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        try {
+            val account = task.result
+            if (account != null) {
+                validarLicencaNoDrive(account)
+            } else {
+                exibirBloqueioSemDrive("Não foi possível autenticar no Google Drive.")
+            }
+        } catch (exc: Exception) {
+            Log.w("OficinaPesca", "Falha no login Google: ${exc.message}")
+            exibirBloqueioSemDrive("Falha ao autenticar no Google Drive. Tente novamente.")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,44 +77,193 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        verificarLicencaECarregar()
+        iniciarFluxoMobileIndependente()
     }
 
-    private fun verificarLicencaECarregar() {
+    private fun iniciarFluxoMobileIndependente() {
+        webView.loadUrl(
+            "data:text/html," + URLEncoder.encode(
+                """
+                <!DOCTYPE html>
+                <html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1.0'>
+                <title>Oficina de Pesca</title>
+                <style>
+                    body{margin:0;background:#0f1923;color:#ecf0f1;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+                    .box{max-width:520px;background:#1a2535;border-radius:16px;padding:26px;text-align:center}
+                    h2{margin-top:0;color:#93c5fd}
+                </style></head>
+                <body><div class='box'><h2>Conectando ao Google Drive...</h2><p>Validando licença mobile de forma independente do Desktop.</p><p>v${BuildConfig.VERSION_NAME}</p></div></body></html>
+                """.trimIndent(),
+                Charsets.UTF_8.name()
+            )
+        )
+
+        val account = GoogleSignIn.getLastSignedInAccount(this)
+        if (account != null && possuiEscopoDrive(account)) {
+            validarLicencaNoDrive(account)
+        } else {
+            solicitarLoginGoogle()
+        }
+    }
+
+    private fun solicitarLoginGoogle() {
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope(driveScope))
+            .build()
+        val client = GoogleSignIn.getClient(this, gso)
+        signInLauncher.launch(client.signInIntent)
+    }
+
+    private fun possuiEscopoDrive(account: GoogleSignInAccount): Boolean {
+        return GoogleSignIn.hasPermissions(account, Scope(driveScope))
+    }
+
+    private fun validarLicencaNoDrive(account: GoogleSignInAccount) {
         Thread {
-            val alvo = resolverDestinoInicial()
+            val email = (account.email ?: "").trim()
+            val resultado = try {
+                val conta = account.account
+                if (conta == null) {
+                    false
+                } else {
+                    val token = GoogleAuthUtil.getToken(this, conta, "oauth2:$driveScope")
+                    val folders = localizarPastasEmpresa(email, token)
+                    val fileId = localizarArquivoLicenca(folders, token)
+                    fileId != null
+                }
+            } catch (exc: Exception) {
+                Log.w("OficinaPesca", "Falha ao validar licença no Drive: ${exc.message}")
+                false
+            }
+
             runOnUiThread {
-                webView.loadUrl(alvo)
+                if (resultado) {
+                    // Independência total do Desktop: não valida hardware local nem endpoint do PC.
+                    webView.loadUrl(BuildConfig.WEB_APP_URL)
+                } else {
+                    exibirBloqueioSemDrive(
+                        "Licença não encontrada no Google Drive para o e-mail ${if (email.isNotBlank()) email else "informado"}."
+                    )
+                }
             }
         }.start()
     }
 
-    private fun resolverDestinoInicial(): String {
+    private fun localizarPastasEmpresa(email: String, token: String): List<String> {
+        val localPart = email.substringBefore("@").trim().lowercase(Locale.ROOT)
+        val termos = mutableListOf("oficina", "pesca")
+        if (localPart.isNotBlank()) {
+            termos.add(localPart)
+        }
+        val q = termsToContainsQuery(termos)
+        val query = "mimeType='application/vnd.google-apps.folder' and trashed=false and ($q)"
+        val files = executarConsultaDrive(query, token)
+        if (files == null) {
+            return emptyList()
+        }
+        val ids = mutableListOf<String>()
+        for (i in 0 until files.length()) {
+            val f = files.optJSONObject(i) ?: continue
+            val id = f.optString("id", "").trim()
+            if (id.isNotBlank()) {
+                ids.add(id)
+            }
+        }
+        return ids
+    }
+
+    private fun termsToContainsQuery(terms: List<String>): String {
+        return terms.filter { it.isNotBlank() }
+            .distinct()
+            .joinToString(" or ") { "name contains '${it.replace("'", "")}'" }
+            .ifBlank { "name contains 'oficina'" }
+    }
+
+    private fun localizarArquivoLicenca(folderIds: List<String>, token: String): String? {
+        val nameQuery = licenseFileNames.joinToString(" or ") { "name='${it}'" }
+
+        for (folderId in folderIds) {
+            val query = "trashed=false and ($nameQuery) and '$folderId' in parents"
+            val files = executarConsultaDrive(query, token)
+            if (files != null && files.length() > 0) {
+                val file = files.optJSONObject(0)
+                val id = file?.optString("id", "") ?: ""
+                if (id.isNotBlank()) {
+                    return id
+                }
+            }
+        }
+
+        val globalQuery = "trashed=false and ($nameQuery)"
+        val globalFiles = executarConsultaDrive(globalQuery, token)
+        if (globalFiles != null && globalFiles.length() > 0) {
+            val file = globalFiles.optJSONObject(0)
+            val id = file?.optString("id", "") ?: ""
+            if (id.isNotBlank()) {
+                return id
+            }
+        }
+        return null
+    }
+
+    private fun executarConsultaDrive(query: String, token: String): JSONArray? {
         return try {
-            val base = baseUrl()
-            val conn = URL("$base/api/licenca-status").openConnection() as HttpURLConnection
+            val encodedQ = URLEncoder.encode(query, Charsets.UTF_8.name())
+            val url = URL("https://www.googleapis.com/drive/v3/files?q=$encodedQ&fields=files(id,name,parents)&pageSize=20")
+            val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
-            conn.connectTimeout = 4000
-            conn.readTimeout = 4000
+            conn.connectTimeout = 7000
+            conn.readTimeout = 7000
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.setRequestProperty("Accept", "application/json")
             conn.setRequestProperty("User-Agent", "OficinaPescaWebView/${BuildConfig.VERSION_NAME}")
 
-            val body = conn.inputStream.bufferedReader().use { it.readText() }
-            val json = JSONObject(body)
-            val bloqueada = json.optBoolean("bloqueada", false)
-            val ativa = json.optBoolean("ativa", true)
-            val trialAtivo = json.optBoolean("trial_ativo", false)
-            val licencaAtiva = json.optBoolean("licenca_ativa", false)
-            if (bloqueada || !ativa) {
-                "$base/web/licenca-bloqueada"
-            } else if (trialAtivo && !licencaAtiva) {
-                trialPlansHtml(base)
-            } else {
-                BuildConfig.WEB_APP_URL
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            if (conn.responseCode !in 200..299) {
+                Log.w("OficinaPesca", "Drive API erro HTTP ${conn.responseCode}: $body")
+                return null
             }
+
+            val json = JSONObject(body)
+            json.optJSONArray("files")
         } catch (exc: Exception) {
-            Log.w("OficinaPesca", "Falha ao validar licença antes do load: ${exc.message}")
-            localBlockedHtml()
+            Log.w("OficinaPesca", "Falha na consulta ao Drive API: ${exc.message}")
+            null
         }
+    }
+
+    private fun exibirBloqueioSemDrive(mensagem: String) {
+        webView.loadUrl(
+            "data:text/html," + URLEncoder.encode(
+                """
+                <!DOCTYPE html>
+                <html lang='pt-BR'>
+                <head>
+                  <meta charset='UTF-8'>
+                  <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+                  <title>Acesso Bloqueado</title>
+                  <style>
+                    body { background:#0f1923; color:#ecf0f1; display:flex; align-items:center; justify-content:center; min-height:100vh; font-family:Arial,sans-serif; margin:0; }
+                    .box { max-width:540px; background:#1a2535; border-radius:20px; padding:32px 24px; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,.45); }
+                    h1 { color:#f39c12; margin-top:0; }
+                    p { color:#d0d6dc; }
+                  </style>
+                </head>
+                <body>
+                  <div class='box'>
+                    <h1>Acesso Bloqueado</h1>
+                    <p>${mensagem.replace("<", "&lt;").replace(">", "&gt;")}</p>
+                    <p>Este APK valida a licença direto no Google Drive, sem depender do Desktop.</p>
+                    <p>v${BuildConfig.VERSION_NAME}</p>
+                  </div>
+                </body>
+                </html>
+                """.trimIndent(),
+                Charsets.UTF_8.name()
+            )
+        )
     }
 
     private fun baseUrl(): String {
