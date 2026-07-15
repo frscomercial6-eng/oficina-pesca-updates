@@ -307,7 +307,11 @@ def modo_cliente_final_licenciado() -> bool:
 CENTRAL_SUPORTE_EMAIL = "frs.suporte.oficina@gmail.com"
 CENTRAL_UPDATE_MANIFEST_URL = str(
     os.environ.get('OFP_CENTRAL_UPDATE_MANIFEST_URL', '')
-    or _CFG.get('central', 'update_manifest_url', fallback='https://raw.githubusercontent.com/frscomercial6-eng/oficina-pesca-updates/main/versao.txt')
+    or _CFG.get('central', 'update_manifest_url', fallback='https://raw.githubusercontent.com/frscomercial6-eng/oficina-pesca-updates/main/config.json')
+).split('#')[0].split(';')[0].strip().replace('\n', '').replace('\r', '')
+CENTRAL_UPDATE_DOWNLOAD_URL = str(
+    os.environ.get('OFP_CENTRAL_UPDATE_DOWNLOAD_URL', '')
+    or _CFG.get('central', 'update_download_url', fallback='https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe')
 ).split('#')[0].split(';')[0].strip().replace('\n', '').replace('\r', '')
 CENTRAL_COMPAT_JSON_URL = str(
     os.environ.get('OFP_CENTRAL_COMPAT_JSON_URL', '')
@@ -1058,7 +1062,28 @@ def obter_info_nova_versao() -> dict:
         try:
             data_json = json.loads(bruto)
             if isinstance(data_json, dict):
-                return data_json
+                update_block = data_json.get("update")
+                if isinstance(update_block, dict):
+                    merged = dict(data_json)
+                    merged.update(update_block)
+                    data_json = merged
+
+                versao = data_json.get("versao") or data_json.get("version") or data_json.get("tag") or data_json.get("latest_version") or ""
+                novidades = data_json.get("novidades") or data_json.get("changelog") or data_json.get("notes") or data_json.get("descricao") or ""
+                url_download = (
+                    data_json.get("url_download")
+                    or data_json.get("download_url")
+                    or data_json.get("download")
+                    or data_json.get("latest_download")
+                    or CENTRAL_UPDATE_DOWNLOAD_URL
+                )
+
+                saida = {
+                    "versao": str(versao).strip(),
+                    "novidades": str(novidades).strip(),
+                    "url_download": str(url_download).strip(),
+                }
+                return {k: v for k, v in saida.items() if v}
         except Exception:
             pass
 
@@ -1095,6 +1120,7 @@ def obter_info_nova_versao() -> dict:
             or data_txt.get("download")
             or data_txt.get("url")
             or data_txt.get("download_url")
+            or CENTRAL_UPDATE_DOWNLOAD_URL
             or ""
         )
 

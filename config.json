@@ -2,5 +2,10 @@
   "modulos": {
     "oficina": true,
     "pdv": false
+  },
+  "update": {
+    "versao": "1.0.37",
+    "novidades": "Fluxo de atualização automática com aviso amigável, contagem regressiva e interface limpa.",
+    "download_url": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe"
   }
 }
