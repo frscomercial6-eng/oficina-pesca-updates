@@ -82,6 +82,7 @@ from config import (
     enviar_log_automatico_quinzenal,
     obter_chave_instalacao,
     diagnosticar_chave_licenca,
+    validar_chave_licenca,
     iniciar_sincronizacao_hibrida_nuvem,
     iniciar_listener_firebase_realtime,
     obter_status_acesso_centralizado,
@@ -126,6 +127,29 @@ def _trial_ativo_prioritario() -> tuple[bool, int, str]:
     except Exception as exc:
         logger.warning("[startup] Falha ao consultar trial prioritário: %s", exc)
         return False, 0, ""
+
+
+def _licenca_local_ativa_prioritaria() -> tuple[bool, str, str, str]:
+    """Prioriza licença local/token para liberar uso sem depender do contador de trial."""
+    try:
+        lic_ativa, msg, cliente, validade = obter_status_licenca()
+        if lic_ativa:
+            return True, str(msg or ""), str(cliente or ""), str(validade or "")
+    except Exception:
+        pass
+
+    try:
+        chave = obter_chave_licenca_ativa()
+        if chave:
+            ok, _msg, payload = validar_chave_licenca(chave)
+            if ok:
+                cliente = str((payload or {}).get("cliente") or "").strip() if isinstance(payload, dict) else ""
+                validade = str((payload or {}).get("val") or "PERMANENTE").strip() if isinstance(payload, dict) else "PERMANENTE"
+                return True, "Licença ativa (chave local).", cliente, validade
+    except Exception:
+        pass
+
+    return False, "Licença expirada ou inválida", "", ""
 
 class SafeCTk(ctk.CTk):
     """Custom CTk class with a safe destroy method."""
@@ -1068,22 +1092,26 @@ def verificar_login():
                 messagebox.showerror("Erro de Acesso", "Usuário ou senha inválidos.")
                 return
 
-            trial_ativo, dias_trial, data_limite_trial = _trial_ativo_prioritario()
-            if trial_ativo:
-                logger.info(
-                    "[startup] Login liberado por trial (%s dia(s) restante(s) até %s).",
-                    dias_trial,
-                    data_limite_trial,
-                )
+            lic_local_ativa, msg_lic_local, _cli_local, _val_local = _licenca_local_ativa_prioritaria()
+            if lic_local_ativa:
+                logger.info("[startup] Login liberado por licença ativa local/token.")
             else:
-                status_acesso = obter_status_acesso_centralizado()
-                if not bool(status_acesso.get("ativa")):
-                    label_status.configure(
-                        text=str(status_acesso.get("mensagem") or "Licença expirada ou inválida."),
-                        text_color="red",
+                trial_ativo, dias_trial, data_limite_trial = _trial_ativo_prioritario()
+                if trial_ativo:
+                    logger.info(
+                        "[startup] Login liberado por trial (%s dia(s) restante(s) até %s).",
+                        dias_trial,
+                        data_limite_trial,
                     )
-                    logger.warning("[startup] Login bloqueado por token/Drive/Firebase: %s", status_acesso)
-                    return
+                else:
+                    status_acesso = obter_status_acesso_centralizado()
+                    if not bool(status_acesso.get("ativa")):
+                        label_status.configure(
+                            text=str(msg_lic_local or status_acesso.get("mensagem") or "Licença expirada ou inválida."),
+                            text_color="red",
+                        )
+                        logger.warning("[startup] Login bloqueado por token/Drive/Firebase: %s", status_acesso)
+                        return
 
             print("Log: Autenticação bem-sucedida.")
             role = resultado[3] if len(resultado) > 3 else "OPERADOR"
@@ -1158,13 +1186,13 @@ def abrir_tela_ativacao():
 
     dialog = ctk.CTkToplevel(janela_login)
     dialog.title("Ativar Licença")
-    dialog.geometry("460x300")
+    dialog.geometry("460x260")
     dialog.resizable(False, False)
     dialog.grab_set()
     dialog.focus_force()
     x = janela_login.winfo_x() + (janela_login.winfo_width() // 2) - 230
     y = janela_login.winfo_y() + (janela_login.winfo_height() // 2) - 150
-    dialog.geometry(f"460x300+{x}+{y}")
+    dialog.geometry(f"460x260+{x}+{y}")
 
     ctk.CTkLabel(dialog, text="Chave de instalação deste PC:", text_color="#bdc3c7").pack(pady=(18, 4))
 
@@ -1192,13 +1220,24 @@ def abrir_tela_ativacao():
             messagebox.showwarning("Ativação", "Informe a contra-senha de ativação.", parent=dialog)
             return
 
+        btn_confirmar.configure(state="disabled", text="ATIVANDO...")
         ok, msg = ativar_licenca(chave)
         if ok:
-            messagebox.showinfo("Ativação", msg, parent=dialog)
-            # Transição segura após ativação
-            dialog.update_idletasks()
-            dialog.after(200, lambda: dialog.destroy())
+            def _publicar_drive_background() -> None:
+                try:
+                    publicar_licenca_drive(chave)
+                except Exception as exc:
+                    logger.warning("Falha silenciosa ao publicar licença no Drive após ativação: %s", exc)
+
+            threading.Thread(
+                target=_publicar_drive_background,
+                daemon=True,
+                name="ofp-licenca-drive-auto",
+            ).start()
+
+            label_status.configure(text="Licença ativada com sucesso.", text_color="#2ecc71")
             atualizar_status_trial_tela()
+            dialog.after(80, dialog.destroy)
             return
 
         try:
@@ -1208,27 +1247,8 @@ def abrir_tela_ativacao():
                 msg = f"{msg}\n\nDiagnóstico: {detalhe}"
         except Exception:
             pass
+        btn_confirmar.configure(state="normal", text="ATIVAR AGORA")
         messagebox.showerror("Ativação", msg, parent=dialog)
-
-    def _push_para_drive():
-        chave = entry_chave.get().strip()
-        if not chave:
-            messagebox.showwarning("Drive", "Informe a chave antes de enviar para o Drive.", parent=dialog)
-            return
-
-        ok, msg = publicar_licenca_drive(chave)
-        if ok:
-            messagebox.showinfo("Drive", msg, parent=dialog)
-            return
-
-        try:
-            diag = diagnosticar_chave_licenca(chave)
-            detalhe = str(diag.get("motivo") or "").strip()
-            if detalhe:
-                msg = f"{msg}\n\nDiagnóstico: {detalhe}"
-        except Exception:
-            pass
-        messagebox.showerror("Drive", msg, parent=dialog)
 
     frame_acoes = ctk.CTkFrame(dialog, fg_color="transparent")
     frame_acoes.pack(pady=(0, 10))
@@ -1237,23 +1257,12 @@ def abrir_tela_ativacao():
         frame_acoes,
         text="ATIVAR AGORA",
         command=_confirmar_ativacao,
-        width=180,
+        width=320,
         height=36,
         fg_color="#27ae60",
         hover_color="#2ecc71",
     )
-    btn_confirmar.grid(row=0, column=0, padx=(0, 8))
-
-    btn_push_drive = ctk.CTkButton(
-        frame_acoes,
-        text="PUSH PARA O DRIVE",
-        command=_push_para_drive,
-        width=180,
-        height=36,
-        fg_color="#1a73e8",
-        hover_color="#1558b0",
-    )
-    btn_push_drive.grid(row=0, column=1)
+    btn_confirmar.grid(row=0, column=0)
     entry_chave.bind("<Return>", lambda _e: _confirmar_ativacao())
 
 ctk.set_appearance_mode("dark")
@@ -1343,6 +1352,22 @@ label_trial.pack(pady=(0, 6))
 
 label_status = ctk.CTkLabel(main_frame, text="", text_color="red")
 label_status.pack(pady=(8, 12))
+
+
+def _mostrar_botao_ativar() -> None:
+    try:
+        if not btn_ativar.winfo_manager():
+            btn_ativar.pack(pady=(0, 10), before=btn_pagamento)
+    except Exception:
+        pass
+
+
+def _ocultar_botao_ativar() -> None:
+    try:
+        if btn_ativar.winfo_manager():
+            btn_ativar.pack_forget()
+    except Exception:
+        pass
 
 progress_update = ctk.CTkProgressBar(main_frame, width=320)
 progress_update.set(0)
@@ -1491,7 +1516,7 @@ btn_atualizar.pack(pady=(0, 8))
 
 def atualizar_status_trial_tela():
     global _PAGAMENTO_EXPIRADO_JA_EXIBIDO
-    lic_ativa, _msg_lic, cliente_lic, validade_lic = obter_status_licenca()
+    lic_ativa, _msg_lic, cliente_lic, validade_lic = _licenca_local_ativa_prioritaria()
     if lic_ativa:
         _PAGAMENTO_EXPIRADO_JA_EXIBIDO = False
         texto_validade = "ATIVA (arquivo local)" if str(validade_lic).upper() == "PERMANENTE" else str(validade_lic)
@@ -1502,14 +1527,8 @@ def atualizar_status_trial_tela():
         entry_user.configure(state="normal")
         entry_pass.configure(state="normal")
         btn_entrar.configure(state="normal", fg_color="#27ae60", hover_color="#2ecc71")
-        btn_ativar.configure(
-            state="disabled",
-            text="LICENCA ATIVA",
-            width=180,
-            height=32,
-            fg_color="#1f7a45",
-            hover_color="#1f7a45"
-        )
+        _ocultar_botao_ativar()
+        label_status.configure(text="Licenciamento ativo.", text_color="#2ecc71")
         return
 
     ativo, dias_restantes, data_limite = obter_status_trial()
@@ -1522,6 +1541,7 @@ def atualizar_status_trial_tela():
         entry_user.configure(state="normal")
         entry_pass.configure(state="normal")
         btn_entrar.configure(state="normal", fg_color="#27ae60", hover_color="#2ecc71")
+        _mostrar_botao_ativar()
         btn_ativar.configure(
             state="normal",
             text="ATIVAR LICENCA",
@@ -1540,6 +1560,7 @@ def atualizar_status_trial_tela():
     entry_user.configure(state="normal")
     entry_pass.configure(state="normal")
     btn_entrar.configure(state="normal", fg_color="#27ae60", hover_color="#2ecc71")
+    _mostrar_botao_ativar()
     btn_ativar.configure(
         state="normal",
         text="ATIVAR LICENCA",

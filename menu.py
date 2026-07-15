@@ -98,6 +98,7 @@ from config import (
     dados_oficina_sao_padrao,
     obter_status_licenca,
     obter_status_trial,
+    obter_status_acesso_centralizado,
     obter_tipo_licenca,
     obter_modo_operacao,
     URL_APP_CELULAR_PUBLICA,
@@ -111,6 +112,7 @@ from config import (
     listar_backups_banco_drive_usuario,
     restaurar_backup_banco_drive_usuario,
     iniciar_sincronizacao_hibrida_nuvem,
+    renovar_token_acesso_drive_se_necessario,
     eh_versao_mais_nova,
     executar_atualizacao,
 )
@@ -2464,6 +2466,14 @@ class FrmMenu(ctk.CTk):
                 online = checar_status_firebase()
                 status = "Drive: online" if online else "Drive: offline"
                 cor = "#2ecc71" if online else "#e74c3c"
+                try:
+                    ok_token, msg_token = renovar_token_acesso_drive_se_necessario(force=False)
+                    if ok_token:
+                        logger.info("Token de acesso validado/renovado: %s", msg_token)
+                    else:
+                        logger.warning("Token de acesso não renovado: %s", msg_token)
+                except Exception as exc_token:
+                    logger.warning("Falha ao atualizar token de acesso: %s", exc_token)
             except Exception:
                 status = "Drive: offline"
                 cor = "#e74c3c"
@@ -2528,6 +2538,10 @@ class FrmMenu(ctk.CTk):
 
     def _obter_status_fiscal_dashboard(self) -> dict:
         try:
+            acesso = obter_status_acesso_centralizado()
+            if bool(acesso.get("ativa")):
+                return {"texto": "Status Fiscal: Ativo", "cor": "#2ecc71", "ativo": True}
+
             status_motor = verificar_status_motor_fiscal()
             ativo = bool(status_motor.get("ok"))
             if ativo:

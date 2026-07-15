@@ -15,7 +15,10 @@ Defina as variáveis do arquivo `.env.example` no ambiente antes do build.
 No PowerShell:
 
 ```powershell
-$env:OFP_WEB_APP_URL = "https://seu-endereco/web/login"
+$env:OFP_WEB_APP_URL = "https://seu-endereco/app"
+$env:OFP_DRIVE_TOKEN_FOLDER_ID = "opcional-id-da-pasta-de-token"
+$env:OFP_TOKEN_SECRET = "segredo-igual-ao-usado-no-desktop"
+$env:OFP_TOKEN_FILE_NAME = "acesso.token"
 $env:OFP_FIREBASE_API_KEY = "..."
 $env:OFP_FIREBASE_AUTH_DOMAIN = "..."
 $env:OFP_FIREBASE_DATABASE_URL = "https://oficinapescasystem-default-rtdb.firebaseio.com/"

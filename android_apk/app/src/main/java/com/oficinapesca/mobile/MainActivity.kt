@@ -1,6 +1,7 @@
 package com.oficinapesca.mobile
 
 import android.content.Intent
+import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import android.webkit.JavascriptInterface
@@ -16,17 +17,27 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
+import java.text.SimpleDateFormat
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.ArrayDeque
+import java.util.Base64
+import java.util.Date
 import java.util.Locale
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import org.json.JSONArray
 import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
-    private val licenseFileNames = listOf("licenca.key", "licenca.json", "licencas.json")
+    private val tokenFileNames = listOf(BuildConfig.TOKEN_FILE_NAME.trim().ifBlank { "acesso.token" })
     private val driveScope = "https://www.googleapis.com/auth/drive.readonly"
+    private val driveTokenFolderId = BuildConfig.DRIVE_TOKEN_FOLDER_ID.trim()
+    private val tokenSecret = BuildConfig.TOKEN_SECRET.trim()
+    private val authPrefs by lazy { getSharedPreferences("oficina_pesca_google_auth", Context.MODE_PRIVATE) }
+    private var lastDriveDebugMessage: String = ""
     private val signInLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
         try {
@@ -101,9 +112,30 @@ class MainActivity : AppCompatActivity() {
         val account = GoogleSignIn.getLastSignedInAccount(this)
         if (account != null && possuiEscopoDrive(account)) {
             validarLicencaNoDrive(account)
-        } else {
-            solicitarLoginGoogle()
+            return
         }
+
+        tentarLoginSilencioso()
+    }
+
+    private fun tentarLoginSilencioso() {
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope(driveScope))
+            .build()
+        val client = GoogleSignIn.getClient(this, gso)
+
+        client.silentSignIn()
+            .addOnSuccessListener { account ->
+                if (account != null) {
+                    onLoginGoogleConcluido(account)
+                } else {
+                    solicitarLoginGoogle()
+                }
+            }
+            .addOnFailureListener {
+                solicitarLoginGoogle()
+            }
     }
 
     private fun solicitarLoginGoogle() {
@@ -121,96 +153,280 @@ class MainActivity : AppCompatActivity() {
 
     private fun validarLicencaNoDrive(account: GoogleSignInAccount) {
         Thread {
-            val email = (account.email ?: "").trim()
             val resultado = try {
                 val conta = account.account
                 if (conta == null) {
+                    lastDriveDebugMessage = "Conta Google indisponível para gerar token."
                     false
                 } else {
-                    val token = GoogleAuthUtil.getToken(this, conta, "oauth2:$driveScope")
-                    val folders = localizarPastasEmpresa(email, token)
-                    val fileId = localizarArquivoLicenca(folders, token)
-                    fileId != null
+                    val emailLogado = (account.email ?: "").trim().lowercase(Locale.ROOT)
+                    if (emailLogado.isBlank()) {
+                        lastDriveDebugMessage = "E-mail da conta Google não disponível para validar o token."
+                        false
+                    } else {
+                        val token = GoogleAuthUtil.getToken(this, conta, "oauth2:$driveScope")
+                        val arquivo = localizarArquivoToken(token)
+                        if (arquivo == null) {
+                            lastDriveDebugMessage = if (lastDriveDebugMessage.isNotBlank()) lastDriveDebugMessage else "Arquivo de token não encontrado no Drive."
+                            false
+                        } else {
+                            val conteudo = baixarConteudoArquivoDrive(arquivo.fileId, token)
+                            if (conteudo == null) {
+                                false
+                            } else {
+                                validarConteudoToken(conteudo, emailLogado).also { valido ->
+                                    if (valido) {
+                                        lastDriveDebugMessage = ""
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             } catch (exc: Exception) {
                 Log.w("OficinaPesca", "Falha ao validar licença no Drive: ${exc.message}")
+                lastDriveDebugMessage = interpretarErroDrive(exc)
                 false
             }
 
             runOnUiThread {
                 if (resultado) {
-                    // Independência total do Desktop: não valida hardware local nem endpoint do PC.
+                    persistirSessaoGoogle(account)
+                    // Independência total do Desktop: a licença é lida do Drive e validada localmente.
                     webView.loadUrl(BuildConfig.WEB_APP_URL)
                 } else {
+                    val debug = if (lastDriveDebugMessage.isNotBlank()) lastDriveDebugMessage else "Falha ao autenticar no Google Drive."
                     exibirBloqueioSemDrive(
-                        "Licença não encontrada no Google Drive para o e-mail ${if (email.isNotBlank()) email else "informado"}."
+                        if (debug.contains("não encontrado", ignoreCase = true)) "Arquivo de token não encontrado no Drive." else "Licença expirada ou inválida",
+                        debug
                     )
                 }
             }
         }.start()
     }
 
-    private fun localizarPastasEmpresa(email: String, token: String): List<String> {
-        val localPart = email.substringBefore("@").trim().lowercase(Locale.ROOT)
-        val termos = mutableListOf("oficina", "pesca")
-        if (localPart.isNotBlank()) {
-            termos.add(localPart)
+    private fun onLoginGoogleConcluido(account: GoogleSignInAccount) {
+        if (possuiEscopoDrive(account)) {
+            validarLicencaNoDrive(account)
+        } else {
+            solicitarLoginGoogle()
         }
-        val q = termsToContainsQuery(termos)
-        val query = "mimeType='application/vnd.google-apps.folder' and trashed=false and ($q)"
-        val files = executarConsultaDrive(query, token)
-        if (files == null) {
-            return emptyList()
+    }
+
+    private fun persistirSessaoGoogle(account: GoogleSignInAccount) {
+        val email = (account.email ?: "").trim()
+        if (email.isBlank()) {
+            return
         }
-        val ids = mutableListOf<String>()
-        for (i in 0 until files.length()) {
-            val f = files.optJSONObject(i) ?: continue
-            val id = f.optString("id", "").trim()
-            if (id.isNotBlank()) {
-                ids.add(id)
+        authPrefs.edit()
+            .putString("last_google_email", email)
+            .putBoolean("last_google_drive_ok", true)
+            .apply()
+    }
+
+    private data class DriveTokenFile(val fileId: String, val fileName: String)
+
+    private fun localizarArquivoToken(token: String): DriveTokenFile? {
+        val folderId = driveTokenFolderId
+        if (folderId.isNotBlank()) {
+            val file = localizarArquivoEmSubarvore(folderId, token)
+            if (file != null) {
+                lastDriveDebugMessage = ""
+                return file
             }
+            lastDriveDebugMessage = "Arquivo de token não encontrado na pasta configurada nem em subpastas."
+            return null
         }
-        return ids
-    }
 
-    private fun termsToContainsQuery(terms: List<String>): String {
-        return terms.filter { it.isNotBlank() }
-            .distinct()
-            .joinToString(" or ") { "name contains '${it.replace("'", "")}'" }
-            .ifBlank { "name contains 'oficina'" }
-    }
-
-    private fun localizarArquivoLicenca(folderIds: List<String>, token: String): String? {
-        val nameQuery = licenseFileNames.joinToString(" or ") { "name='${it}'" }
-
-        for (folderId in folderIds) {
-            val query = "trashed=false and ($nameQuery) and '$folderId' in parents"
-            val files = executarConsultaDrive(query, token)
-            if (files != null && files.length() > 0) {
-                val file = files.optJSONObject(0)
-                val id = file?.optString("id", "") ?: ""
+        val nameQuery = tokenFileNames.joinToString(" or ") { "name='${it}'" }
+        val globalQuery = "trashed=false and ($nameQuery)"
+        val globalFiles = executarConsultaDrive(globalQuery, token)
+        if (globalFiles != null && globalFiles.length() > 0) {
+            for (i in 0 until globalFiles.length()) {
+                val file = globalFiles.optJSONObject(i) ?: continue
+                val id = file.optString("id", "").trim()
+                val name = file.optString("name", "").trim()
                 if (id.isNotBlank()) {
-                    return id
+                    lastDriveDebugMessage = ""
+                    return DriveTokenFile(id, name)
                 }
             }
         }
 
-        val globalQuery = "trashed=false and ($nameQuery)"
-        val globalFiles = executarConsultaDrive(globalQuery, token)
-        if (globalFiles != null && globalFiles.length() > 0) {
-            val file = globalFiles.optJSONObject(0)
-            val id = file?.optString("id", "") ?: ""
-            if (id.isNotBlank()) {
-                return id
+        lastDriveDebugMessage = "Arquivo de token não encontrado no Drive."
+        return null
+    }
+
+    private fun localizarArquivoEmSubarvore(folderId: String, token: String): DriveTokenFile? {
+        val fila = ArrayDeque<String>()
+        val visitados = mutableSetOf<String>()
+        fila.add(folderId)
+
+        while (fila.isNotEmpty()) {
+            val pastaAtual = fila.removeFirst()
+            if (!visitados.add(pastaAtual)) {
+                continue
+            }
+
+            val nameQuery = tokenFileNames.joinToString(" or ") { "name='${it}'" }
+            val fileQuery = "trashed=false and '$pastaAtual' in parents and ($nameQuery)"
+            val files = executarConsultaDrive(fileQuery, token)
+            if (files != null && files.length() > 0) {
+                for (i in 0 until files.length()) {
+                    val file = files.optJSONObject(i) ?: continue
+                    val id = file.optString("id", "").trim()
+                    val name = file.optString("name", "").trim()
+                    if (id.isNotBlank()) {
+                        return DriveTokenFile(id, name)
+                    }
+                }
+            }
+
+            val folderQuery = "trashed=false and mimeType='application/vnd.google-apps.folder' and '$pastaAtual' in parents"
+            val folders = executarConsultaDrive(folderQuery, token)
+            if (folders == null || folders.length() == 0) {
+                continue
+            }
+
+            for (i in 0 until folders.length()) {
+                val folder = folders.optJSONObject(i) ?: continue
+                val id = folder.optString("id", "").trim()
+                if (id.isNotBlank() && !visitados.contains(id)) {
+                    fila.add(id)
+                }
             }
         }
+
         return null
+    }
+
+    private fun baixarConteudoArquivoDrive(fileId: String, token: String): String? {
+        return try {
+            val encodedId = URLEncoder.encode(fileId, Charsets.UTF_8.name())
+            val url = URL("https://www.googleapis.com/drive/v3/files/$encodedId?alt=media&supportsAllDrives=true")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 7000
+            conn.readTimeout = 7000
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.setRequestProperty("Accept", "text/plain,application/json")
+            conn.setRequestProperty("User-Agent", "OficinaPescaWebView/${BuildConfig.VERSION_NAME}")
+
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            if (conn.responseCode !in 200..299) {
+                lastDriveDebugMessage = interpretarHttpDrive(conn.responseCode, body)
+                Log.w("OficinaPesca", "Drive download erro HTTP ${conn.responseCode}: $body")
+                return null
+            }
+
+            body
+        } catch (exc: Exception) {
+            lastDriveDebugMessage = interpretarErroDrive(exc)
+            Log.w("OficinaPesca", "Falha ao baixar licença do Drive: ${exc.message}")
+            null
+        }
+    }
+
+    private data class TokenValidacao(val valida: Boolean, val mensagem: String)
+
+    private fun validarConteudoToken(conteudoBruto: String, emailLogado: String): Boolean {
+        val conteudo = normalizarConteudoToken(conteudoBruto)
+        val validacao = validarTokenAcesso(conteudo, emailLogado)
+        if (!validacao.valida) {
+            lastDriveDebugMessage = validacao.mensagem
+            return false
+        }
+        return true
+    }
+
+    private fun normalizarConteudoToken(conteudo: String): String {
+        val texto = conteudo.trim()
+        if (texto.startsWith("{")) {
+            return try {
+                val json = JSONObject(texto)
+                listOf(
+                    json.optString("token", ""),
+                    json.optString("access_token", ""),
+                    json.optString("chave", "")
+                ).firstOrNull { it.isNotBlank() }?.trim() ?: texto
+            } catch (_: Exception) {
+                texto
+            }
+        }
+        return texto.replace("\r", "").trim()
+    }
+
+    private fun validarTokenAcesso(tokenBruto: String, emailLogado: String): TokenValidacao {
+        val token = tokenBruto.replace("\n", "").replace("\r", "").trim()
+        if (token.isBlank()) {
+            return TokenValidacao(false, "Arquivo de token vazio no Drive.")
+        }
+        if (tokenSecret.isBlank()) {
+            return TokenValidacao(false, "Segredo de token não configurado no APK.")
+        }
+        if (!token.startsWith("OFP-TKN-")) {
+            return TokenValidacao(false, "Formato de token inválido no arquivo do Drive.")
+        }
+
+        val partes = token.split("-", limit = 4)
+        if (partes.size != 4) {
+            return TokenValidacao(false, "Arquivo de token incompleto no Drive.")
+        }
+
+        val payloadB64 = partes[2]
+        val assinaturaRecebida = partes[3].trim().uppercase(Locale.ROOT)
+        val assinaturaEsperada = assinarPayloadToken(payloadB64)
+        if (!assinaturaEsperada.equals(assinaturaRecebida, ignoreCase = true)) {
+            return TokenValidacao(false, "Assinatura do token inválida.")
+        }
+
+        val payloadJson = try {
+            val padding = "=".repeat((4 - payloadB64.length % 4) % 4)
+            val bytes = Base64.getUrlDecoder().decode(payloadB64 + padding)
+            String(bytes, Charsets.UTF_8)
+        } catch (exc: Exception) {
+            return TokenValidacao(false, "Conteúdo do token inválido: ${exc.message}")
+        }
+
+        val payload = try {
+            JSONObject(payloadJson)
+        } catch (exc: Exception) {
+            return TokenValidacao(false, "Payload JSON do token inválido: ${exc.message}")
+        }
+
+        val uid = payload.optString("uid", "").trim()
+        if (uid.isBlank()) {
+            return TokenValidacao(false, "Campo uid ausente no token.")
+        }
+        if (!uid.equals(emailLogado.trim().lowercase(Locale.ROOT), ignoreCase = true)) {
+            return TokenValidacao(false, "Token não pertence ao e-mail autenticado: $emailLogado")
+        }
+
+        val validade = payload.optString("exp", "").trim()
+        if (!Regex("^\\d{4}-\\d{2}-\\d{2}$").matches(validade)) {
+            return TokenValidacao(false, "Data de expiração inválida no token.")
+        }
+        val hoje = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date())
+        if (validade < hoje) {
+            return TokenValidacao(false, "Token expirado em ${validade}.")
+        }
+
+        return TokenValidacao(true, "Token válido.")
+    }
+
+    private fun assinarPayloadToken(payloadB64: String): String {
+        val mac = Mac.getInstance("HmacSHA256")
+        val keySpec = SecretKeySpec(tokenSecret.toByteArray(Charsets.UTF_8), "HmacSHA256")
+        mac.init(keySpec)
+        val assinatura = mac.doFinal(payloadB64.toByteArray(Charsets.UTF_8))
+        return assinatura.joinToString("") { byte -> "%02X".format(byte) }.take(20)
     }
 
     private fun executarConsultaDrive(query: String, token: String): JSONArray? {
         return try {
             val encodedQ = URLEncoder.encode(query, Charsets.UTF_8.name())
-            val url = URL("https://www.googleapis.com/drive/v3/files?q=$encodedQ&fields=files(id,name,parents)&pageSize=20")
+            val url = URL("https://www.googleapis.com/drive/v3/files?q=$encodedQ&fields=files(id,name,mimeType,parents)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true")
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
             conn.connectTimeout = 7000
@@ -222,19 +438,49 @@ class MainActivity : AppCompatActivity() {
             val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
             val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
             if (conn.responseCode !in 200..299) {
+                lastDriveDebugMessage = interpretarHttpDrive(conn.responseCode, body)
                 Log.w("OficinaPesca", "Drive API erro HTTP ${conn.responseCode}: $body")
                 return null
             }
 
+            lastDriveDebugMessage = ""
             val json = JSONObject(body)
             json.optJSONArray("files")
         } catch (exc: Exception) {
+            lastDriveDebugMessage = interpretarErroDrive(exc)
             Log.w("OficinaPesca", "Falha na consulta ao Drive API: ${exc.message}")
             null
         }
     }
 
-    private fun exibirBloqueioSemDrive(mensagem: String) {
+    private fun interpretarHttpDrive(codigo: Int, corpo: String): String {
+        val resumo = when (codigo) {
+            400 -> "400 Bad Request"
+            401 -> "401 Unauthorized"
+            403 -> "403 Forbidden"
+            404 -> "404 Not Found"
+            429 -> "429 Too Many Requests"
+            in 500..599 -> "$codigo Server Error"
+            else -> "$codigo HTTP Error"
+        }
+        return if (corpo.isNotBlank()) {
+            "$resumo - ${corpo.take(180)}"
+        } else {
+            resumo
+        }
+    }
+
+    private fun interpretarErroDrive(exc: Exception): String {
+        return when {
+            exc is SecurityException -> "403 Forbidden - ${exc.message ?: "acesso negado"}"
+            exc.message?.contains("403", ignoreCase = true) == true -> "403 Forbidden - ${exc.message}"
+            exc.message?.contains("404", ignoreCase = true) == true -> "404 Not Found - ${exc.message}"
+            exc.message?.contains("401", ignoreCase = true) == true -> "401 Unauthorized - ${exc.message}"
+            else -> exc.message ?: "Falha desconhecida no Google Drive"
+        }
+    }
+
+    private fun exibirBloqueioSemDrive(mensagem: String, debug: String = "") {
         webView.loadUrl(
             "data:text/html," + URLEncoder.encode(
                 """
@@ -256,6 +502,7 @@ class MainActivity : AppCompatActivity() {
                     <h1>Acesso Bloqueado</h1>
                     <p>${mensagem.replace("<", "&lt;").replace(">", "&gt;")}</p>
                     <p>Este APK valida a licença direto no Google Drive, sem depender do Desktop.</p>
+                                        <p style='margin-top:14px;font-size:12px;color:#9fb0bf;'>${debug.replace("<", "&lt;").replace(">", "&gt;")}</p>
                     <p>v${BuildConfig.VERSION_NAME}</p>
                   </div>
                 </body>

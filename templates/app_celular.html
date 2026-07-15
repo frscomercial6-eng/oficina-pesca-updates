@@ -1,67 +1,270 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#0f1923">
     <title>Oficina Pesca - App Celular</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: radial-gradient(circle at top, #1f2937, #0b1220 60%, #04070f);
-            margin: 0;
-            padding: 0;
-            color: #f3f4f6;
+        :root {
+            --bg: #0f1923;
+            --surface: #1a2535;
+            --surface-2: #223149;
+            --line: rgba(255,255,255,.08);
+            --text: #f3f4f6;
+            --muted: #b8c0cc;
+            --accent: #f39c12;
+            --accent-2: #27ae60;
+            --accent-3: #3b82f6;
         }
-        .container {
-            max-width: 420px;
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--text);
+            font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(243,156,18,.18), transparent 22%),
+                radial-gradient(circle at top right, rgba(59,130,246,.16), transparent 30%),
+                linear-gradient(180deg, #0a111a 0%, #0f1923 42%, #0c1420 100%);
+        }
+        .shell {
+            width: min(940px, 100%);
             margin: 0 auto;
-            padding: 24px 12px 48px 12px;
+            padding: 24px 16px 40px;
+        }
+        .hero {
+            background: linear-gradient(135deg, rgba(26,37,53,.98), rgba(15,25,35,.9));
+            border: 1px solid var(--line);
+            border-radius: 28px;
+            padding: 24px;
+            box-shadow: 0 24px 60px rgba(0,0,0,.38);
+            overflow: hidden;
+            position: relative;
+        }
+        .hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -80px -90px auto;
+            width: 180px;
+            height: 180px;
+            background: radial-gradient(circle, rgba(243,156,18,.25), transparent 68%);
+            pointer-events: none;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+        .brand img {
+            width: 72px;
+            height: 72px;
+            object-fit: contain;
+            border-radius: 18px;
+            background: rgba(255,255,255,.05);
+            padding: 8px;
+            border: 1px solid var(--line);
+            box-shadow: 0 10px 30px rgba(0,0,0,.25);
+        }
+        .eyebrow {
+            font-size: .8rem;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin: 0 0 6px;
         }
         h1 {
-            color: #93c5fd;
-            font-size: 2rem;
-            margin-bottom: 12px;
+            margin: 0;
+            font-size: clamp(1.7rem, 5vw, 2.6rem);
+            line-height: 1.05;
         }
-        .logo {
-            width: 120px;
-            margin: 0 auto 18px auto;
-            display: block;
+        .subtitle {
+            margin: 10px 0 0;
+            color: var(--muted);
+            max-width: 58ch;
+            line-height: 1.5;
+        }
+        .status-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 18px;
+        }
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: rgba(255,255,255,.04);
+            color: var(--text);
+            font-size: .92rem;
+            text-decoration: none;
+        }
+        .chip strong { color: #fff; }
+        .chip--primary { background: rgba(243,156,18,.14); border-color: rgba(243,156,18,.28); }
+        .chip--success { background: rgba(39,174,96,.14); border-color: rgba(39,174,96,.28); }
+        .chip--info { background: rgba(59,130,246,.14); border-color: rgba(59,130,246,.28); }
+        .actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 18px;
         }
         .btn {
-            display: block;
-            width: 100%;
-            background: #1d4ed8;
-            color: #fff;
+            appearance: none;
             border: none;
-            border-radius: 6px;
-            padding: 16px;
-            font-size: 1.2rem;
-            margin: 18px 0 0 0;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .btn:hover {
-            background: #1e40af;
-        }
-        .info {
-            margin-top: 18px;
-            color: #cbd5e1;
+            border-radius: 16px;
+            padding: 15px 16px;
+            min-height: 58px;
+            font-weight: 700;
             font-size: 1rem;
+            color: #fff;
+            background: linear-gradient(135deg, var(--accent-3), #2563eb);
+            box-shadow: 0 12px 24px rgba(37,99,235,.24);
+            cursor: pointer;
+            transition: transform .18s ease, filter .18s ease;
+        }
+        .btn:hover { transform: translateY(-1px); filter: brightness(1.06); }
+        .btn--ghost {
+            background: rgba(255,255,255,.06);
+            box-shadow: none;
+            border: 1px solid var(--line);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 18px;
+        }
+        .card {
+            display: block;
+            text-decoration: none;
+            color: var(--text);
+            background: rgba(26,37,53,.94);
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            padding: 16px;
+            min-height: 130px;
+            box-shadow: 0 10px 30px rgba(0,0,0,.18);
+            transition: transform .18s ease, border-color .18s ease, background .18s ease;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(243,156,18,.35);
+            background: rgba(34,49,73,.96);
+        }
+        .card .icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 14px;
+            display: grid;
+            place-items: center;
+            margin-bottom: 10px;
+            font-size: 1.15rem;
+            background: rgba(255,255,255,.06);
+        }
+        .card h2 {
+            margin: 0 0 6px;
+            font-size: 1rem;
+        }
+        .card p {
+            margin: 0;
+            color: var(--muted);
+            font-size: .92rem;
+            line-height: 1.45;
+        }
+        .footer-note {
+            margin-top: 18px;
+            color: var(--muted);
+            font-size: .92rem;
+            line-height: 1.5;
             text-align: center;
+        }
+        @media (max-width: 640px) {
+            .shell { padding: 14px 12px 28px; }
+            .hero { padding: 18px; border-radius: 22px; }
+            .actions, .grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <img src="/static/logo.png" alt="Logo Oficina" class="logo" onerror="this.style.display='none'">
-        <h1>Oficina Pesca</h1>
-        <button class="btn" onclick="window.location.href='/web/login'">Acessar Sistema</button>
-        <button class="btn" style="background:#0ea5e9; margin-top:10px;" onclick="localizarOficinaNaRede(this)">Localizar Oficina na Rede</button>
-        <div class="info">
-            <p>Bem-vindo ao app da Oficina Pesca!<br>Use o botão acima para acessar o sistema pelo celular.</p>
-        </div>
-    </div>
+    <main class="shell">
+        <section class="hero">
+            <div class="brand">
+                <img src="/static/logo.png" alt="Logo Oficina Pesca" onerror="this.style.display='none'">
+                <div>
+                    <p class="eyebrow">Oficina de Pesca</p>
+                    <h1>App celular com layout espelhado do sistema</h1>
+                    <p class="subtitle">
+                        A tela inicial do APK agora abre o portal mobile com os mesmos blocos de operação do Desktop,
+                        validação independente no Drive e navegação rápida para o sistema.
+                    </p>
+                </div>
+            </div>
+
+            <div class="status-row">
+                <span class="chip chip--primary"><strong>Drive:</strong> ativo</span>
+                <span class="chip chip--success"><strong>Licença:</strong> validação direta no Google</span>
+                <span class="chip chip--info"><strong>Layout:</strong> mobile espelhado</span>
+            </div>
+
+            <div class="actions">
+                <button class="btn" onclick="window.location.href='/web/login'">Acessar Sistema</button>
+                <button class="btn btn--ghost" onclick="localizarOficinaNaRede(this)">Localizar Oficina na Rede</button>
+            </div>
+        </section>
+
+        <section class="grid" aria-label="Atalhos do sistema">
+            <a class="card" href="/web/clientes">
+                <div class="icon">👤</div>
+                <h2>Cadastro do Cliente</h2>
+                <p>Entrada rápida para localizar, cadastrar e revisar o histórico da assistência.</p>
+            </a>
+            <a class="card" href="/web/os">
+                <div class="icon">🧾</div>
+                <h2>Orçamento e O.S.</h2>
+                <p>Fluxo principal de atendimento com orçamento, ordem de serviço e acompanhamento.</p>
+            </a>
+            <a class="card" href="/web/os">
+                <div class="icon">📷</div>
+                <h2>Foto + IA Vision</h2>
+                <p>Suporte visual para análise de peças, registros e apoio ao diagnóstico.</p>
+            </a>
+            <a class="card" href="/web/financeiro">
+                <div class="icon">🧩</div>
+                <h2>Peças e Compatibilidade</h2>
+                <p>Consulta operacional para fechar peça correta, valor e compatibilidade.</p>
+            </a>
+            <a class="card" href="/web/financeiro">
+                <div class="icon">💳</div>
+                <h2>Fechamento</h2>
+                <p>Resumo final do atendimento, pagamento e baixa de serviço.</p>
+            </a>
+            <a class="card" href="/api/docs" target="_blank" rel="noopener noreferrer">
+                <div class="icon">🗺️</div>
+                <h2>Busca de Diagramas</h2>
+                <p>Atalho técnico para recursos e integrações da API do sistema.</p>
+            </a>
+            <a class="card" href="/web/login">
+                <div class="icon">🌐</div>
+                <h2>Configurações de Rede</h2>
+                <p>Localização automática da oficina e retorno para a área de acesso.</p>
+            </a>
+            <a class="card" href="/web/dashboard">
+                <div class="icon">📊</div>
+                <h2>Painel do Desktop</h2>
+                <p>Abertura do dashboard principal depois do login do sistema.</p>
+            </a>
+        </section>
+
+        <p class="footer-note">
+            O app celular mantém a independência do Desktop para validação de licença e usa o mesmo visual operacional na entrada.
+        </p>
+    </main>
 
     <script>
         async function localizarOficinaNaRede(btn) {

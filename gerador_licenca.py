@@ -3,80 +3,62 @@
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from config import LICENCA_SECRET, gerar_chave_licenca, gerar_hash_publico_licenca, get_db_connection, normalizar_chave_instalacao
+from config import (
+    gerar_token_acesso,
+    get_db_connection,
+    publicar_token_acesso_drive,
+    validar_email_basico,
+)
 
-# Usa exatamente o mesmo segredo ativo na aplicação em produção.
-
-# ─── Tabela de planos ─────────────────────────────────────────────────────────
-#  chave → (nome exibido, dias até expirar ou None, tipo lógico do plano)
-DIAS_PROMOCIONAL = timedelta(days=90).days
-PLANOS: dict[str, tuple[str, int | None, str]] = {
-    "1": ("Promocional",        DIAS_PROMOCIONAL, "PROMOCIONAL"),
-    "2": ("Mensal Padrão",      30,   "MENSAL"),
-    "3": ("Trimestral",         90,   "TRIMESTRAL"),
-    "4": ("Semestral",          180,  "SEMESTRAL"),
-    "5": ("Anual",              365,  "ANUAL"),
-    "6": ("VIP / Permanente",   None, "PERMANENTE"),
-}
+TOKEN_VALIDADE_DIAS = 30
 
 LOG_TXT = Path(__file__).parent / "licencas_geradas.txt"
 
 
 # ─── Lógica de geração ────────────────────────────────────────────────────────
 
-def _calcular_validade(dias: int | None) -> str:
-    if dias is None:
-        return "PERMANENTE"
-    return (date.today() + timedelta(days=dias)).isoformat()
-
-
-def _gerar_chave(hw: str, validade: str) -> str:
-    """Delega ao mesmo gerador usado pela aplicação em produção."""
-    dias_validade = None if validade == "PERMANENTE" else (date.fromisoformat(validade) - date.today()).days
-    tipo_licenca = "PERMANENTE" if validade == "PERMANENTE" else ""
-    return gerar_chave_licenca(
-        cliente="",
-        dias_validade=dias_validade,
-        tipo_licenca=tipo_licenca,
-        chave_instalacao=hw,
-    )
+def _gerar_token_temporario(user_id: str, dias_validade: int = TOKEN_VALIDADE_DIAS) -> str:
+    """Gera token temporário assinado para Desktop/APK sem expor chave mestre."""
+    return gerar_token_acesso(user_id=user_id, dias_validade=dias_validade)
 
 
 # ─── Persistência ─────────────────────────────────────────────────────────────
 
-def _salvar_txt(cliente: str, hw: str, plano_nome: str, validade: str, chave: str) -> None:
+def _salvar_txt(cliente: str, user_id: str, validade: str, token: str) -> None:
     agora = datetime.now().strftime("%Y-%m-%d %H:%M")
-    linha = f"{agora} | {cliente} | {hw} | {plano_nome} | {validade} | {chave}\n"
+    token_preview = f"{token[:24]}..." if token else ""
+    linha = f"{agora} | {cliente} | {user_id} | {validade} | {token_preview}\n"
     LOG_TXT.parent.mkdir(parents=True, exist_ok=True)
     with LOG_TXT.open("a", encoding="utf-8") as f:
         f.write(linha)
 
 
-def _salvar_db(chave: str, validade: str, hw: str) -> None:
+def _salvar_db(token: str, validade: str, user_id: str) -> None:
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS licencas_geradas (
+                CREATE TABLE IF NOT EXISTS token_acesso_gerados (
                     id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                    chave            TEXT NOT NULL,
+                    token            TEXT NOT NULL,
+                    user_id          TEXT NOT NULL,
                     data_expiracao   TEXT NOT NULL,
-                    chave_instalacao TEXT NOT NULL DEFAULT '',
+                    origem           TEXT NOT NULL DEFAULT 'desktop_manual',
                     data_geracao     TEXT NOT NULL
                 )
                 """
             )
-            cursor.execute("PRAGMA table_info(licencas_geradas)")
+            cursor.execute("PRAGMA table_info(token_acesso_gerados)")
             cols = {row[1] for row in cursor.fetchall()}
-            if "chave_instalacao" not in cols:
+            if "origem" not in cols:
                 cursor.execute(
-                    "ALTER TABLE licencas_geradas ADD COLUMN chave_instalacao TEXT DEFAULT ''"
+                    "ALTER TABLE token_acesso_gerados ADD COLUMN origem TEXT DEFAULT 'desktop_manual'"
                 )
             cursor.execute(
-                "INSERT INTO licencas_geradas (chave, data_expiracao, chave_instalacao, data_geracao)"
-                " VALUES (?, ?, ?, DATE('now'))",
-                (chave, validade, hw),
+                "INSERT INTO token_acesso_gerados (token, user_id, data_expiracao, origem, data_geracao)"
+                " VALUES (?, ?, ?, 'desktop_manual', DATE('now'))",
+                (token, user_id, validade),
             )
             conn.commit()
     except Exception as exc:
@@ -88,8 +70,9 @@ def _salvar_db(chave: str, validade: str, hw: str) -> None:
 def main() -> None:
     SEP = "=" * 54
     print(SEP)
-    print("    GERADOR DE LICENÇA — OFICINA DE PESCA")
+    print("    GERADOR DE TOKEN DE ACESSO — OFICINA DE PESCA")
     print(SEP)
+    print(f"Validade padrão: {TOKEN_VALIDADE_DIAS} dias")
 
     # 1. Nome do cliente
     cliente = input("\nNome do cliente: ").strip().upper()
@@ -97,51 +80,45 @@ def main() -> None:
         print("ERRO: nome do cliente obrigatório.")
         return
 
-    # 2. Hardware ID (campo 'hw' no payload — deve ser OFP-INST-XXXX da máquina do cliente)
-    hw_raw = input("Hardware ID do cliente (OFP-INST-XXXXXXXXXXXXXXXXXXXXXXXX): ").strip()
-    hw = normalizar_chave_instalacao(hw_raw)
-    if not hw.startswith("OFP-INST-"):
-        print("ERRO: o Hardware ID deve estar no formato OFP-INST-XXXXXXXXXXXXXXXXXXXXXXXX.")
-        print("      Peça ao cliente o código exibido na tela de ativação do software.")
+    # 2. User ID do token (e-mail usado no login Google do APK)
+    user_id = input("E-mail do cliente (user_id do token): ").strip().lower()
+    if not validar_email_basico(user_id):
+        print("ERRO: informe um e-mail válido do cliente para vincular o token.")
         return
 
-    # 3. Plano
-    print("\nPlanos disponíveis:")
-    for k, (nome, dias, _) in PLANOS.items():
-        expira = f"{dias} dias" if dias else "Sem expiração"
-        print(f"  {k} - {nome}  ({expira})")
-    opcao = input("\nEscolha o plano (1-6): ").strip()
-    if opcao not in PLANOS:
-        print("ERRO: escolha uma opção entre 1 e 6.")
-        return
-
-    plano_nome, dias, _ = PLANOS[opcao]
-    validade = _calcular_validade(dias)
-
-    # Gerar — hw entra no payload; cliente é só para log
-    chave = _gerar_chave(hw, validade)
-    hash_pub = gerar_hash_publico_licenca(chave)
+    validade = (date.today() + timedelta(days=TOKEN_VALIDADE_DIAS)).isoformat()
+    token = _gerar_token_temporario(user_id=user_id, dias_validade=TOKEN_VALIDADE_DIAS)
 
     # Salvar
-    _salvar_txt(cliente, hw, plano_nome, validade, chave)
-    _salvar_db(chave, validade, hw)
+    _salvar_txt(cliente, user_id, validade, token)
+    _salvar_db(token, validade, user_id)
+    caminho_token = Path(__file__).parent / "acesso.token"
+    caminho_token.write_text(token, encoding="utf-8")
 
     # Resultado
     print()
     print(SEP)
-    print("  LICENÇA GERADA COM SUCESSO")
+    print("  TOKEN DE ACESSO GERADO COM SUCESSO")
     print(SEP)
-    print(f"  Cliente  : {cliente}")
-    print(f"  HW ID    : {hw}")
-    print(f"  Plano    : {plano_nome}")
-    print(f"  Validade : {validade}")
+    print(f"  Cliente       : {cliente}")
+    print(f"  User ID       : {user_id}")
+    print(f"  Validade      : {validade}")
+    print(f"  Arquivo token : {caminho_token}")
     print(SEP)
     print()
-    print(chave)
-    print()
-    print(f"HASH PÚBLICO (GitHost): {hash_pub}")
+    print(token)
     print()
     print(f"Registrado em: {LOG_TXT}")
+
+    try:
+        publicar_drive = input("Publicar token no Google Drive agora? (s/N): ").strip().lower() == "s"
+    except Exception:
+        publicar_drive = False
+
+    if publicar_drive:
+        ok, msg = publicar_token_acesso_drive(user_id=user_id, dias_validade=TOKEN_VALIDADE_DIAS)
+        print(msg if ok else f"[erro] {msg}")
+
     print(SEP)
 
 
