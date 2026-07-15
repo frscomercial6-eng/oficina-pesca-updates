@@ -8,6 +8,7 @@ from datetime import datetime
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from version_info import VERSION
 from core.financeiro.calculos import formatar_monetario, parse_monetario
+from reforma_tributaria import garantir_estrutura_reforma_tributaria, ler_config_reforma_tributaria, salvar_config_reforma_tributaria
 
 from config import CAMINHO_BANCO, inicializar_banco, verify_password, get_db_connection
 
@@ -115,6 +116,15 @@ class FrmFinanceiro(ctk.CTkToplevel):
         self.lbl_cartao = ctk.CTkLabel(self.frame_pagamento, text="CARTAO\nR$ 0.00", font=("Arial", 13, "bold"), text_color="#000000", fg_color="#f2d5ff", corner_radius=8, width=220, height=56)
         self.lbl_cartao.pack(side="left", padx=10, pady=12)
 
+        self.btn_reforma = ctk.CTkButton(
+            self.frame_botoes,
+            text="IBS/CBS",
+            fg_color="#566573",
+            width=130,
+            command=self.abrir_config_reforma_tributaria,
+        )
+        self.btn_reforma.pack(side="right", padx=8, pady=15)
+
         self.carregar_dados()
 
     def _aplicar_maximizacao(self):
@@ -159,6 +169,77 @@ class FrmFinanceiro(ctk.CTkToplevel):
         usuario = simpledialog.askstring("Autorizacao Admin", f"Usuario ADMIN para {acao}:", parent=self)
         if not usuario:
             return False
+
+    def abrir_config_reforma_tributaria(self):
+        dialogo = ctk.CTkToplevel(self)
+        dialogo.title("Reforma Tributaria (latente)")
+        dialogo.geometry("620x360")
+        dialogo.resizable(False, False)
+        dialogo.configure(fg_color="#161b22")
+        dialogo.grab_set()
+        dialogo.focus_force()
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            garantir_estrutura_reforma_tributaria(cursor)
+            cfg = ler_config_reforma_tributaria(cursor)
+
+        ctk.CTkLabel(dialogo, text="CONFIGURACAO LATENTE DE IBS/CBS", font=("Arial", 18, "bold"), text_color="orange").pack(pady=(18, 8))
+        ctk.CTkLabel(dialogo, text="Nada aqui altera o fluxo atual. Esta tela apenas prepara o mapeamento futuro.", font=("Arial", 12), text_color="#d5d8dc", wraplength=560).pack(pady=(0, 12))
+
+        frame = ctk.CTkFrame(dialogo, fg_color="#1f2a38", corner_radius=18)
+        frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        ent_regime = ctk.CTkEntry(frame, width=220)
+        ent_regime.insert(0, str(cfg.get("regime") or "latente"))
+        ent_regime.grid(row=0, column=0, padx=12, pady=10, sticky="ew")
+        ent_aliq_ibs = ctk.CTkEntry(frame, width=220)
+        ent_aliq_ibs.insert(0, f"{float(cfg.get('aliquota_ibs_padrao') or 0):.2f}")
+        ent_aliq_ibs.grid(row=0, column=1, padx=12, pady=10, sticky="ew")
+        ent_aliq_cbs = ctk.CTkEntry(frame, width=220)
+        ent_aliq_cbs.insert(0, f"{float(cfg.get('aliquota_cbs_padrao') or 0):.2f}")
+        ent_aliq_cbs.grid(row=1, column=0, padx=12, pady=10, sticky="ew")
+        ent_vigencia = ctk.CTkEntry(frame, width=220)
+        ent_vigencia.insert(0, str(cfg.get("vigencia_inicio") or ""))
+        ent_vigencia.grid(row=1, column=1, padx=12, pady=10, sticky="ew")
+        ent_split = ctk.CTkSwitch(frame, text="Split payment padrao")
+        if int(cfg.get("split_payment_padrao") or 0):
+            ent_split.select()
+        ent_split.grid(row=2, column=0, padx=12, pady=10, sticky="w")
+        ent_obs = ctk.CTkEntry(frame, width=460, placeholder_text="Observacoes opcionais")
+        ent_obs.insert(0, str(cfg.get("observacoes") or ""))
+        ent_obs.grid(row=2, column=1, padx=12, pady=10, sticky="ew")
+
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_columnconfigure(1, weight=1)
+
+        def salvar():
+            try:
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    garantir_estrutura_reforma_tributaria(cursor)
+                    salvar_config_reforma_tributaria(
+                        cursor,
+                        {
+                            "regime": ent_regime.get().strip() or "latente",
+                            "ativo": 0,
+                            "vigencia_inicio": ent_vigencia.get().strip(),
+                            "aliquota_ibs_padrao": float(ent_aliq_ibs.get().replace(",", ".") or 0),
+                            "aliquota_cbs_padrao": float(ent_aliq_cbs.get().replace(",", ".") or 0),
+                            "split_payment_padrao": 1 if ent_split.get() else 0,
+                            "observacoes": ent_obs.get().strip(),
+                        },
+                    )
+                    conn.commit()
+                messagebox.showinfo("Sucesso", "Configuracao latente salva com sucesso.", parent=dialogo)
+                dialogo.destroy()
+            except Exception as exc:
+                messagebox.showerror("Erro", f"Nao foi possivel salvar a configuracao: {exc}", parent=dialogo)
+
+        ctk.CTkButton(dialogo, text="SALVAR", fg_color="green", width=150, command=salvar).pack(side="left", padx=20, pady=16)
+        ctk.CTkButton(dialogo, text="FECHAR", fg_color="#7f8c8d", width=150, command=dialogo.destroy).pack(side="right", padx=20, pady=16)
+
+        dialogo.wait_window()
         senha = simpledialog.askstring("Autorizacao Admin", "Senha ADMIN:", show="*", parent=self)
         if not senha:
             return False

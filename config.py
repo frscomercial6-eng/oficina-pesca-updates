@@ -2624,6 +2624,9 @@ def inicializar_banco():
     if 'categoria' not in colunas_fluxo:
         cursor.execute("ALTER TABLE fluxo_caixa ADD COLUMN categoria TEXT")
 
+    from reforma_tributaria import garantir_estrutura_reforma_tributaria
+    garantir_estrutura_reforma_tributaria(cursor)
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS dados_oficina (
             id INTEGER PRIMARY KEY CHECK (id = 1),

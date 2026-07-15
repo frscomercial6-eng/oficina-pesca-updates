@@ -279,6 +279,7 @@ def _garantir_colunas_orcamentos_aguardo():
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
+            from reforma_tributaria import garantir_estrutura_reforma_tributaria
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS status_orcamento (
@@ -315,6 +316,7 @@ def _garantir_colunas_orcamentos_aguardo():
                 cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN data_finalizacao TEXT")
             if "data_entrega" not in cols:
                 cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN data_entrega TEXT")
+            garantir_estrutura_reforma_tributaria(cursor)
             cursor.execute(
                 """
                 UPDATE orcamentos_aguardo

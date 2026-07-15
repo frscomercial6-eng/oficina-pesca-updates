@@ -1281,15 +1281,15 @@ except Exception:
 
 # Centralizar
 x = (janela_login.winfo_screenwidth() // 2) - 200
-y = (janela_login.winfo_screenheight() // 2) - 260
-janela_login.geometry(f"400x520+{x}+{y}")
+y = (janela_login.winfo_screenheight() // 2) - 340
+janela_login.geometry(f"400x680+{x}+{y}")
 
 main_frame = ctk.CTkFrame(janela_login, corner_radius=20, fg_color="#252525")
-main_frame.pack(expand=True, fill="both", padx=18, pady=18)
+main_frame.pack(expand=True, fill="both", padx=16, pady=12)
 
 ctk.CTkLabel(main_frame, text="OFICINA DE PESCA", font=("Segoe UI Semibold", 18), text_color="orange").pack(pady=(16, 4))
 ctk.CTkLabel(main_frame, text=f"v{VERSION}", text_color="#f6b26b", font=("Segoe UI", 11)).pack(pady=(0, 10))
-ctk.CTkLabel(main_frame, text="Preencha usuário e senha para entrar no sistema.", text_color="#95a5a6").pack(pady=(0, 18))
+ctk.CTkLabel(main_frame, text="Preencha usuário e senha para entrar no sistema.", text_color="#95a5a6").pack(pady=(0, 14))
 
 ctk.CTkLabel(main_frame, text="Usuário de acesso", text_color="#dfe6e9", anchor="w").pack(padx=50, pady=(0, 4), fill="x")
 entry_user = ctk.CTkEntry(main_frame, placeholder_text="Usuário", width=320, height=44)
@@ -1320,19 +1320,19 @@ def _solicitar_foco_login():
         pass
 
 btn_entrar = ctk.CTkButton(main_frame, text="ENTRAR", command=verificar_login, width=320, height=48, fg_color="#27ae60", hover_color="#2ecc71")
-btn_entrar.pack(pady=(20, 15))
+btn_entrar.pack(pady=(18, 12))
 print("Log: Interface de Login montada e botão vinculado.")
 
 btn_ativar = ctk.CTkButton(
     main_frame,
-    text="LICENÇA ATIVA",
+    text="ATIVAR LICENÇA",
     command=abrir_tela_ativacao,
     width=320,
-    height=40,
+    height=42,
     fg_color="#2980b9",
     hover_color="#3498db"
 )
-btn_ativar.pack(pady=(0, 10))
+btn_ativar.pack(pady=(0, 8))
 
 btn_pagamento = ctk.CTkButton(
     main_frame,
@@ -1345,7 +1345,7 @@ btn_pagamento = ctk.CTkButton(
 )
 btn_pagamento.pack(pady=(0, 10))
 
-ctk.CTkLabel(main_frame, text="Cadastro de usuários disponível apenas no menu do ADMIN.", text_color="#95a5a6", wraplength=300, justify="center").pack(pady=(0, 10))
+ctk.CTkLabel(main_frame, text="Cadastro de usuários disponível apenas no menu do ADMIN.", text_color="#95a5a6", wraplength=360, justify="center", font=("Segoe UI", 10)).pack(pady=(2, 14))
 
 label_trial = ctk.CTkLabel(main_frame, text="", text_color="#f1c40f", wraplength=320, justify="center")
 label_trial.pack(pady=(0, 6))

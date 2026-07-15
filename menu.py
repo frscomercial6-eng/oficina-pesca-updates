@@ -116,6 +116,7 @@ from config import (
     eh_versao_mais_nova,
     executar_atualizacao,
 )
+from reforma_tributaria import garantir_estrutura_reforma_tributaria
 from core.modulos import obter_modulos_habilitados
 from shutdown_utils import fechar_sistema
 from status_os import STATUS_AGUARDANDO_ORCAMENTO, STATUS_ORCAMENTO
@@ -179,6 +180,7 @@ def verificar_e_criar_tabelas():
                     quantidade_minima INTEGER DEFAULT 3
                 )
             """)
+            garantir_estrutura_reforma_tributaria(cursor)
             # Não altera schema existente do cliente em runtime.
             # Apenas garante criação inicial quando não há tabela.
             conn.commit()
@@ -257,9 +259,41 @@ class FrmProdutos(ctk.CTkToplevel):
         self.ent_qtd_min.grid(row=0, column=7, padx=5, pady=5)
         self.ent_qtd_min.insert(0, "3")
 
+        self.btn_reforma = ctk.CTkButton(
+            f_inputs,
+            text="IBS/CBS",
+            fg_color="#566573",
+            width=100,
+            command=self._alternar_painel_reforma_tributaria,
+        )
+        self.btn_reforma.grid(row=0, column=8, padx=5)
+
         # BOTÕES
-        ctk.CTkButton(f_inputs, text="Salvar", fg_color="green", width=100, command=self.salvar_produto).grid(row=0, column=8, padx=5)
-        ctk.CTkButton(f_inputs, text="Excluir", fg_color="red", width=100, command=self.excluir_produto).grid(row=0, column=9, padx=5)
+        ctk.CTkButton(f_inputs, text="Salvar", fg_color="green", width=100, command=self.salvar_produto).grid(row=0, column=9, padx=5)
+        ctk.CTkButton(f_inputs, text="Excluir", fg_color="red", width=100, command=self.excluir_produto).grid(row=0, column=10, padx=5)
+
+        self.frame_reforma = ctk.CTkFrame(self, fg_color="#1f2a38", corner_radius=16)
+        self.frame_reforma.pack(fill="x", padx=20, pady=(0, 8))
+        self._reforma_visivel = False
+        self.frame_reforma.pack_forget()
+
+        ctk.CTkLabel(
+            self.frame_reforma,
+            text="Reforma Tributária latente - campos opcionais para IBS/CBS",
+            font=("Arial", 12, "bold"),
+            text_color="#f1c40f",
+        ).grid(row=0, column=0, columnspan=6, sticky="w", padx=12, pady=(12, 4))
+
+        self.ent_aliquota_ibs = ctk.CTkEntry(self.frame_reforma, placeholder_text="Aliquota IBS %", width=130)
+        self.ent_aliquota_ibs.grid(row=1, column=0, padx=8, pady=8)
+        self.ent_aliquota_cbs = ctk.CTkEntry(self.frame_reforma, placeholder_text="Aliquota CBS %", width=130)
+        self.ent_aliquota_cbs.grid(row=1, column=1, padx=8, pady=8)
+        self.ent_valor_ibs = ctk.CTkEntry(self.frame_reforma, placeholder_text="Valor IBS", width=130)
+        self.ent_valor_ibs.grid(row=1, column=2, padx=8, pady=8)
+        self.ent_valor_cbs = ctk.CTkEntry(self.frame_reforma, placeholder_text="Valor CBS", width=130)
+        self.ent_valor_cbs.grid(row=1, column=3, padx=8, pady=8)
+        self.ent_reforma_json = ctk.CTkEntry(self.frame_reforma, placeholder_text="JSON futuro opcional", width=360)
+        self.ent_reforma_json.grid(row=1, column=4, padx=8, pady=8, columnspan=2, sticky="ew")
 
         # --- TABELA ---
         self.tabela = ttk.Treeview(
@@ -337,6 +371,13 @@ class FrmProdutos(ctk.CTkToplevel):
         cursor.execute("PRAGMA table_info(produtos)")
         return {str(row[1] or "").lower() for row in cursor.fetchall()}
 
+    def _alternar_painel_reforma_tributaria(self):
+        self._reforma_visivel = not getattr(self, "_reforma_visivel", False)
+        if self._reforma_visivel:
+            self.frame_reforma.pack(fill="x", padx=20, pady=(0, 8))
+        else:
+            self.frame_reforma.pack_forget()
+
     def salvar_produto(self):
         # 1. Pega o nome e remove espaços extras
         nome = self.ent_nome.get().upper().strip()
@@ -354,6 +395,11 @@ class FrmProdutos(ctk.CTkToplevel):
             ncm = "".join(ch for ch in self.ent_ncm.get().strip() if ch.isdigit())[:8]
             compat = self.ent_compat.get().strip().upper()
             qtd_min_txt = self.ent_qtd_min.get().strip()
+            aliquota_ibs_txt = self.ent_aliquota_ibs.get().strip().replace(",", ".") if hasattr(self, "ent_aliquota_ibs") else ""
+            aliquota_cbs_txt = self.ent_aliquota_cbs.get().strip().replace(",", ".") if hasattr(self, "ent_aliquota_cbs") else ""
+            valor_ibs_txt = self.ent_valor_ibs.get().strip().replace(",", ".") if hasattr(self, "ent_valor_ibs") else ""
+            valor_cbs_txt = self.ent_valor_cbs.get().strip().replace(",", ".") if hasattr(self, "ent_valor_cbs") else ""
+            reforma_json = self.ent_reforma_json.get().strip() if hasattr(self, "ent_reforma_json") else ""
 
             # 3. Se o campo estiver vazio, vira 0.0 (evita o erro de valor inválido)
             c = float(custo_txt) if custo_txt else 0.0
@@ -361,6 +407,10 @@ class FrmProdutos(ctk.CTkToplevel):
             v = float(venda_txt) if venda_txt else 0.0
             q = int(qtd_txt) if qtd_txt else 0
             q_min = int(qtd_min_txt) if qtd_min_txt else 3
+            aliq_ibs = float(aliquota_ibs_txt) if aliquota_ibs_txt else 0.0
+            aliq_cbs = float(aliquota_cbs_txt) if aliquota_cbs_txt else 0.0
+            val_ibs = float(valor_ibs_txt) if valor_ibs_txt else 0.0
+            val_cbs = float(valor_cbs_txt) if valor_cbs_txt else 0.0
 
             # 4. Lógica: Se você digitou a Margem mas não a Venda, ele calcula agora
             if v == 0 and m > 0 and c > 0:
@@ -369,6 +419,7 @@ class FrmProdutos(ctk.CTkToplevel):
             # 5. Salva no Banco de Dados
             with get_db_connection() as conn:
                 cursor = conn.cursor()
+                garantir_estrutura_reforma_tributaria(cursor)
                 colunas = self._colunas_produtos(cursor)
                 campos = ["nome", "preco_custo", "preco_venda", "estoque"]
                 valores = [nome, c, v, q]
@@ -382,6 +433,21 @@ class FrmProdutos(ctk.CTkToplevel):
                 if "quantidade_minima" in colunas:
                     campos.append("quantidade_minima")
                     valores.append(q_min)
+                if "aliquota_ibs" in colunas:
+                    campos.append("aliquota_ibs")
+                    valores.append(aliq_ibs)
+                if "aliquota_cbs" in colunas:
+                    campos.append("aliquota_cbs")
+                    valores.append(aliq_cbs)
+                if "valor_ibs" in colunas:
+                    campos.append("valor_ibs")
+                    valores.append(val_ibs)
+                if "valor_cbs" in colunas:
+                    campos.append("valor_cbs")
+                    valores.append(val_cbs)
+                if "reforma_tributaria_json" in colunas:
+                    campos.append("reforma_tributaria_json")
+                    valores.append(reforma_json or "{}")
 
                 placeholders = ", ".join(["?"] * len(campos))
                 cursor.execute(
@@ -392,9 +458,11 @@ class FrmProdutos(ctk.CTkToplevel):
             
             # 6. Atualiza a lista e limpa os campos
             self.carregar_dados()
-            for e in [self.ent_nome, self.ent_compat, self.ent_ncm, self.ent_custo, self.ent_margem, self.ent_venda, self.ent_qtd, self.ent_qtd_min]:
+            for e in [self.ent_nome, self.ent_compat, self.ent_ncm, self.ent_custo, self.ent_margem, self.ent_venda, self.ent_qtd, self.ent_qtd_min, self.ent_aliquota_ibs, self.ent_aliquota_cbs, self.ent_valor_ibs, self.ent_valor_cbs, self.ent_reforma_json]:
                 e.delete(0, 'end')
             self.ent_qtd_min.insert(0, "3")
+            if getattr(self, "_reforma_visivel", False):
+                self._alternar_painel_reforma_tributaria()
             
             messagebox.showinfo("Sucesso", "Produto guardado com sucesso!")
 

@@ -765,3 +765,10 @@ def imprimir_danfe_fiscal(venda: dict[str, Any], pasta_saida: str | None = None)
             "mensagem": "Falha ao gerar DANFE.",
         }
         return _normalizar_retorno_fiscal("imprimir_danfe", retorno_erro)
+
+
+def montar_mapeamento_reforma_tributaria(produto: dict[str, Any] | None, quantidade: float = 1.0, total_item: float | None = None) -> dict[str, Any]:
+    """Prepara o payload futuro de IBS/CBS sem interferir na emissão atual."""
+    from reforma_tributaria import montar_mapeamento_xml_futuro
+
+    return montar_mapeamento_xml_futuro(produto, quantidade=quantidade, total_item=total_item)

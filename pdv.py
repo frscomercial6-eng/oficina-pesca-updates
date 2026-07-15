@@ -232,6 +232,7 @@ class FrmPDV(ctk.CTkToplevel):
     def _garantir_tabelas_pdv(self):
         with get_db_connection() as conn:
             cur = conn.cursor()
+            from reforma_tributaria import garantir_estrutura_reforma_tributaria
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS pdv_vendas (
@@ -277,6 +278,8 @@ class FrmPDV(ctk.CTkToplevel):
             if "fiscal_atualizado_em" not in cols_pdv_vendas:
                 cur.execute("ALTER TABLE pdv_vendas ADD COLUMN fiscal_atualizado_em TEXT")
 
+            garantir_estrutura_reforma_tributaria(cur)
+
             # Compatibilidade com versão antiga: aproveita colunas existentes.
             if "data_hora" in cols_pdv_vendas:
                 cur.execute(
@@ -317,6 +320,16 @@ class FrmPDV(ctk.CTkToplevel):
             cols_financeiro = {str(row[1]).lower() for row in cur.fetchall()}
             if "descricao" not in cols_financeiro:
                 cur.execute("ALTER TABLE financeiro_geral ADD COLUMN descricao TEXT")
+            if "aliquota_ibs" not in cols_financeiro:
+                cur.execute("ALTER TABLE financeiro_geral ADD COLUMN aliquota_ibs REAL DEFAULT 0")
+            if "aliquota_cbs" not in cols_financeiro:
+                cur.execute("ALTER TABLE financeiro_geral ADD COLUMN aliquota_cbs REAL DEFAULT 0")
+            if "valor_ibs" not in cols_financeiro:
+                cur.execute("ALTER TABLE financeiro_geral ADD COLUMN valor_ibs REAL DEFAULT 0")
+            if "valor_cbs" not in cols_financeiro:
+                cur.execute("ALTER TABLE financeiro_geral ADD COLUMN valor_cbs REAL DEFAULT 0")
+            if "split_payment_json" not in cols_financeiro:
+                cur.execute("ALTER TABLE financeiro_geral ADD COLUMN split_payment_json TEXT DEFAULT '{}'" )
             conn.commit()
 
     def _persistir_retorno_fiscal(self, venda_id, retorno_fiscal):
