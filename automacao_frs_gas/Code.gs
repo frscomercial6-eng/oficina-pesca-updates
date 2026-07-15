@@ -33,6 +33,11 @@ const TOKEN_CONFIG = {
   daysValid: 30,
   signaturePrefix: 'OFP-TKN'
 };
+
+const INFINITEPAY_API = {
+  checkoutLinksUrl: 'https://api.checkout.infinitepay.io/links',
+  paymentCheckUrl: 'https://api.checkout.infinitepay.io/payment_check'
+};
 /**
  * Registro de adaptadores por programa.
  * Cada modulo aponta para o proprio endpoint de geracao.
@@ -56,6 +61,8 @@ function runHubMonitor() {
   }
 
   try {
+    validarConfiguracaoInfinitePay_();
+
     const structure = ensureDriveStructure_();
     const sheet = getOrCreateMasterSheet_(structure.rootFolderId);
     ensureMasterHeader_(sheet);
@@ -101,6 +108,7 @@ function processSale_(sale, msg, sheet, structure) {
   const programa = normalizeProgram_(sale.programa);
   const hwid = (sale.hwid || '').trim();
   const userId = normalizeUserId_(sale);
+  const paymentCheck = confirmarPagamentoInfinitePay_(sale);
 
   const baseRow = {
     data: now,
@@ -175,10 +183,93 @@ function processSale_(sale, msg, sheet, structure) {
     tokenPreview: tokenRes.tokenPreview || '',
     tokenFolderId: tokenRes.folderId || '',
     saleFileId: saleFileMeta.id,
+    paymentCheckStatus: paymentCheck.status,
+    paymentCheckChecked: paymentCheck.checked,
+    paymentCheckApproved: paymentCheck.approved,
+    paymentCheckHttp: paymentCheck.http,
     firebaseOk: firebaseRes.ok,
     firebaseStatus: firebaseRes.status,
     hubMensagem: tokenRes.message
   });
+}
+
+function validarConfiguracaoInfinitePay_() {
+  const props = PropertiesService.getScriptProperties();
+  const checkoutUrl = String(props.getProperty('INFINITEPAY_CHECKOUT_LINKS_URL') || INFINITEPAY_API.checkoutLinksUrl).trim();
+  const paymentCheckUrl = String(props.getProperty('INFINITEPAY_PAYMENT_CHECK_URL') || INFINITEPAY_API.paymentCheckUrl).trim();
+
+  if (/^https:\/\/api\.infinitepay\.io\//i.test(checkoutUrl)) {
+    Logger.log('ATENCAO: INFINITEPAY_CHECKOUT_LINKS_URL ainda usa endpoint legado. Atualize para ' + INFINITEPAY_API.checkoutLinksUrl);
+  }
+
+  if (/^https:\/\/api\.infinitepay\.io\//i.test(paymentCheckUrl)) {
+    Logger.log('ATENCAO: INFINITEPAY_PAYMENT_CHECK_URL ainda usa endpoint legado. Atualize para ' + INFINITEPAY_API.paymentCheckUrl);
+  }
+}
+
+function confirmarPagamentoInfinitePay_(sale) {
+  const tx = String(sale.transactionId || '').trim();
+  if (!tx) {
+    return { checked: false, approved: true, status: 'SKIPPED_NO_TX', http: 0 };
+  }
+
+  const props = PropertiesService.getScriptProperties();
+  const endpoint = String(props.getProperty('INFINITEPAY_PAYMENT_CHECK_URL') || INFINITEPAY_API.paymentCheckUrl).trim();
+  const token = String(props.getProperty('INFINITEPAY_API_TOKEN') || '').trim();
+
+  if (!endpoint) {
+    return { checked: false, approved: true, status: 'SKIPPED_NO_ENDPOINT', http: 0 };
+  }
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers.Authorization = 'Bearer ' + token;
+  }
+
+  // Mantém payload enxuto e sem dependência de campos opcionais do e-mail.
+  const payload = JSON.stringify({ transaction_id: tx });
+  const req = {
+    method: 'post',
+    contentType: 'application/json',
+    muteHttpExceptions: true,
+    payload: payload,
+    headers: headers
+  };
+
+  try {
+    const res = UrlFetchApp.fetch(endpoint, req);
+    const status = Number(res.getResponseCode() || 0);
+    const body = String(res.getContentText() || '').trim();
+
+    let parsed = {};
+    try {
+      parsed = body ? JSON.parse(body) : {};
+    } catch (_err) {
+      parsed = {};
+    }
+
+    const statusTxt = String(
+      parsed.status || parsed.payment_status || parsed.state || parsed.result || ''
+    ).toLowerCase();
+
+    const approvedByFlag = parsed.approved === true || parsed.paid === true || parsed.success === true;
+    const approvedByStatus = /approved|paid|success|confirmed|aprovado|pago/.test(statusTxt);
+    const approved = approvedByFlag || approvedByStatus || (status >= 200 && status < 300 && !statusTxt);
+
+    return {
+      checked: true,
+      approved: approved,
+      status: approved ? 'APPROVED' : ('NOT_APPROVED_' + statusTxt.toUpperCase()),
+      http: status
+    };
+  } catch (err) {
+    return {
+      checked: false,
+      approved: true,
+      status: 'CHECK_ERROR_' + String(err),
+      http: 0
+    };
+  }
 }
 
 function normalizeUserId_(sale) {

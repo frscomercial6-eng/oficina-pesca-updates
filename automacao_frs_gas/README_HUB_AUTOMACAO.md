@@ -18,13 +18,16 @@ Este pacote inicia o Hub para monitorar e-mails da InfinitePay e registrar venda
 - Cliente
 - HWID
 - Programa
-- Status da Licenca
-- Chave Gerada
+- Status do Token
+- Token Gerado (preview)
 - Transacao
 - Email Comprador
 - Origem Email ID
-4. Chama o endpoint de geracao de licenca de cada modulo, preservando a logica de negocio separada.
-5. Salva log JSONL no Drive e replica o resultado no Firebase Realtime Database.
+4. Gera Token de Acesso temporario assinado (30 dias) por venda confirmada.
+5. Publica o acesso.token no Drive do cliente (por pasta compartilhada/ID mapeado).
+6. Valida os endpoints da InfinitePay (checkout links e payment_check) em cada execucao.
+7. Executa checagem opcional de payment_check por transacao (nao bloqueante).
+8. Salva log JSONL no Drive e replica o resultado no Firebase Realtime Database.
 
 ## 2) Arquivo principal
 
@@ -41,11 +44,21 @@ Configure em Apps Script > Project Settings > Script properties:
 - LICENSE_ENDPOINT_MERCADO
 - LICENSE_TOKEN_MERCADO
 - HUB_API_KEY
+- TOKEN_SECRET
+- DRIVE_CLIENT_FOLDER_MAP_JSON
 - FIREBASE_DATABASE_URL
 - FIREBASE_DB_SECRET (ou FIREBASE_AUTH)
+- INFINITEPAY_CHECKOUT_LINKS_URL
+- INFINITEPAY_PAYMENT_CHECK_URL
+- INFINITEPAY_API_TOKEN
 
 Observacoes:
-- Os tokens de modulo sao opcionais, mas recomendados.
+- TOKEN_SECRET deve ser o mesmo segredo criptografico usado no Desktop/APK.
+- DRIVE_CLIENT_FOLDER_MAP_JSON mapeia e-mail do comprador para ID da pasta de token no Drive do cliente.
+- Endpoints novos da InfinitePay:
+  - INFINITEPAY_CHECKOUT_LINKS_URL=https://api.checkout.infinitepay.io/links
+  - INFINITEPAY_PAYMENT_CHECK_URL=https://api.checkout.infinitepay.io/payment_check
+- Os tokens de modulo sao opcionais, mantidos para retrocompatibilidade.
 - HUB_API_KEY protege o endpoint FastAPI de geracao de licenca para uso exclusivo do Hub.
 - Se FIREBASE_DB_SECRET nao for usado, ajuste a regra do seu Firebase para aceitar o metodo escolhido.
 
@@ -59,14 +72,14 @@ Observacoes:
 - Gmail (leitura)
 - Drive (criar pastas/arquivos)
 - Sheets (escrita na planilha)
-- UrlFetch (chamar endpoint de modulo e Firebase REST)
+- UrlFetch (chamar endpoint de modulo, payment_check e Firebase REST)
 - Triggers (execucao agendada)
 
 ## 5) Boas praticas de seguranca
 
 - Nunca gravar tokens no codigo-fonte.
 - Guardar segredo apenas em Script Properties.
-- Restringir os endpoints de geracao para aceitar somente origem autenticada (Bearer + allowlist por IP/proxy quando possivel).
+- Restringir endpoints para aceitar somente origem autenticada (Bearer + allowlist por IP/proxy quando possivel).
 - Usar conta dedicada de automacao (frs.suporte.oficina@gmail.com) sem credenciais compartilhadas.
 - Revisar periodicamente a lista de escopos e revogar apps nao usados em https://myaccount.google.com/permissions.
 - Ativar verificacao em duas etapas na conta.
@@ -80,5 +93,5 @@ Observacoes:
 ## 7) Ajustes necessarios no seu ambiente
 
 - Regex de parse do e-mail da InfinitePay pode variar por template. Ajuste parseInfinitePayMessage_ conforme seu e-mail real.
-- Se o HWID nao vier no e-mail, o script grava AGUARDANDO_HWID e nao gera licenca.
+- Se o HWID nao vier no e-mail, o script grava AGUARDANDO_HWID e nao gera token.
 - Para gerar automaticamente sem HWID no e-mail, inclua esse campo no checkout/comprovante da InfinitePay.
