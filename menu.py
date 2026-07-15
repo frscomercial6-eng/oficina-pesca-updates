@@ -1209,7 +1209,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         self.lbl_versao = ctk.CTkLabel(form, text="Versão: carregando...", anchor="w", text_color="#7f8c8d", font=("Arial", 11))
         self.lbl_versao.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2))
         linha += 1
-        self.lbl_licenca = ctk.CTkLabel(form, text="Licença: carregando...", anchor="w", text_color="#7f8c8d", font=("Arial", 11))
+        self.lbl_licenca = ctk.CTkLabel(form, text="", anchor="w", text_color="#7f8c8d", font=("Arial", 11))
         self.lbl_licenca.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
         linha += 1
 
@@ -1415,17 +1415,8 @@ class FrmDadosOficina(ctk.CTkToplevel):
                 return
             self.lbl_versao.configure(text=f"Versão do sistema: {APP_VERSION}")
 
-            lic_ativa, _msg, _cli, validade = obter_status_licenca()
-            if lic_ativa:
-                tipo = obter_tipo_licenca()
-                val_txt = "ATIVA (arquivo local)" if str(validade).upper() == "PERMANENTE" else f"válida até {validade}"
-                self.lbl_licenca.configure(text=f"Licença: {tipo} — {val_txt}", text_color="#2ecc71")
-            else:
-                trial_ativo, dias, data_lim = obter_status_trial()
-                if trial_ativo:
-                    self.lbl_licenca.configure(text=f"Trial ativo: {dias} dia(s) restante(s) (até {data_lim})", text_color="#f1c40f")
-                else:
-                    self.lbl_licenca.configure(text=f"Trial expirado (em {data_lim})", text_color="#e74c3c")
+            tipo = obter_tipo_licenca()
+            self.lbl_licenca.configure(text="", text_color="#2ecc71")
         except Exception as lic_err:
             logger.warning("Erro ao configurar labels de licença: %s", lic_err)
 
@@ -3233,25 +3224,7 @@ class FrmMenu(ctk.CTk):
 
     def _atualizar_contador_licenca(self):
         try:
-            lic_ativa, _msg_lic, _cliente_lic, validade_lic = obter_status_licenca()
-            if lic_ativa:
-                validade_txt = str(validade_lic or "").strip().upper()
-                if validade_txt == "PERMANENTE":
-                    texto = "🔒 Licença ativa (arquivo local)"
-                    cor = "#2ecc71"
-                else:
-                    texto = f"🔒 Licença ativa até: {validade_lic}"
-                    cor = "#2ecc71"
-            else:
-                trial_ativo, dias_restantes, data_limite = obter_status_trial()
-                if trial_ativo:
-                    texto = f"⏳ Trial: {dias_restantes} dia(s)\nAté {data_limite}"
-                    cor = "#f1c40f"
-                else:
-                    texto = f"❌ Trial expirado\nEm {data_limite}"
-                    cor = "#e74c3c"
-
-            self.lbl_contador_licenca.configure(text=texto, text_color=cor)
+            self.lbl_contador_licenca.configure(text="", text_color="#2ecc71")
         except Exception as e:
             logger.exception("Erro ao atualizar contador de licença/trial: %s", e)
             self.lbl_contador_licenca.configure(text="", text_color="#f1c40f")

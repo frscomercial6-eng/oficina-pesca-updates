@@ -1325,12 +1325,12 @@ print("Log: Interface de Login montada e botão vinculado.")
 
 btn_ativar = ctk.CTkButton(
     main_frame,
-    text="ATIVAR LICENÇA",
+    text="Ativar Licença",
     command=abrir_tela_ativacao,
     width=320,
-    height=42,
-    fg_color="#2980b9",
-    hover_color="#3498db"
+    height=38,
+    fg_color="#34495e",
+    hover_color="#3c5a71"
 )
 btn_ativar.pack(pady=(0, 8))
 
@@ -1348,10 +1348,10 @@ btn_pagamento.pack(pady=(0, 10))
 ctk.CTkLabel(main_frame, text="Cadastro de usuários disponível apenas no menu do ADMIN.", text_color="#95a5a6", wraplength=360, justify="center", font=("Segoe UI", 10)).pack(pady=(2, 14))
 
 label_trial = ctk.CTkLabel(main_frame, text="", text_color="#f1c40f", wraplength=320, justify="center")
-label_trial.pack(pady=(0, 6))
+label_trial.pack_forget()
 
 label_status = ctk.CTkLabel(main_frame, text="", text_color="red")
-label_status.pack(pady=(8, 12))
+label_status.pack_forget()
 
 
 def _mostrar_botao_ativar() -> None:
@@ -1381,6 +1381,212 @@ _auto_update_liberado = False
 _mensagem_politica_update = ""
 _popup_update_exibido = False
 _auto_update_disparada = False
+_janela_update = None
+_label_update = None
+_barra_update = None
+_janela_aviso_update = None
+_label_aviso_update = None
+_label_timer_update = None
+_btn_agora_update = None
+_btn_adiar_update = None
+_update_contagem_regressiva = 0
+_update_contagem_expirada = False
+_update_versao_detectada = ""
+_update_novidades_detectadas = ""
+
+
+def _fechar_popup_atualizacao():
+    global _janela_update, _label_update, _barra_update
+    try:
+        if _janela_update and _janela_update.winfo_exists():
+            _janela_update.destroy()
+    except Exception:
+        pass
+    _janela_update = None
+    _label_update = None
+    _barra_update = None
+
+
+def _fechar_aviso_atualizacao():
+    global _janela_aviso_update, _label_aviso_update, _label_timer_update, _btn_agora_update, _btn_adiar_update
+    try:
+        if _janela_aviso_update and _janela_aviso_update.winfo_exists():
+            _janela_aviso_update.destroy()
+    except Exception:
+        pass
+    _janela_aviso_update = None
+    _label_aviso_update = None
+    _label_timer_update = None
+    _btn_agora_update = None
+    _btn_adiar_update = None
+
+
+def _abrir_popup_aviso_atualizacao(versao: str, novidades: str = ""):
+    global _janela_aviso_update, _label_aviso_update, _label_timer_update, _btn_agora_update, _btn_adiar_update
+    global _update_contagem_regressiva, _update_contagem_expirada, _update_versao_detectada, _update_novidades_detectadas
+
+    if not janela_login.winfo_exists():
+        return
+
+    _update_versao_detectada = str(versao or "").strip()
+    _update_novidades_detectadas = str(novidades or "").strip()
+    _update_contagem_regressiva = 30
+    _update_contagem_expirada = False
+
+    def _iniciar_instalacao():
+        _fechar_aviso_atualizacao()
+        _mostrar_popup_atualizacao("Preparando atualização...", 0.0)
+        _executar_instalacao_update(confirmar_usuario=False)
+
+    def _adiar():
+        _fechar_aviso_atualizacao()
+
+    def _tick_contagem():
+        global _update_contagem_regressiva, _update_contagem_expirada
+        if not _janela_aviso_update or not _janela_aviso_update.winfo_exists():
+            return
+
+        if _update_contagem_regressiva > 0:
+            if _label_timer_update and _label_timer_update.winfo_exists():
+                _label_timer_update.configure(text=f"Esta janela fecha sozinha em {_update_contagem_regressiva} segundos.")
+            _update_contagem_regressiva -= 1
+            _janela_aviso_update.after(1000, _tick_contagem)
+            return
+
+        if _update_contagem_expirada:
+            return
+
+        _update_contagem_expirada = True
+        if _label_aviso_update and _label_aviso_update.winfo_exists():
+            _label_aviso_update.configure(
+                text="Sem resposta. Deseja adiar ou instalar agora?",
+                text_color="#f1c40f",
+            )
+        if _label_timer_update and _label_timer_update.winfo_exists():
+            _label_timer_update.configure(text="")
+        if _btn_agora_update and _btn_agora_update.winfo_exists():
+            _btn_agora_update.configure(text="Instalar agora", command=_iniciar_instalacao)
+        if _btn_adiar_update and _btn_adiar_update.winfo_exists():
+            _btn_adiar_update.configure(text="Adiar", command=_adiar)
+
+    if _janela_aviso_update and _janela_aviso_update.winfo_exists():
+        try:
+            _janela_aviso_update.lift()
+            _janela_aviso_update.focus_force()
+        except Exception:
+            pass
+        return
+
+    _janela_aviso_update = ctk.CTkToplevel(janela_login)
+    _janela_aviso_update.title("Nova atualização disponível")
+    _janela_aviso_update.geometry("560x260")
+    _janela_aviso_update.resizable(False, False)
+    _janela_aviso_update.transient(janela_login)
+    _janela_aviso_update.grab_set()
+    _janela_aviso_update.configure(fg_color="#111827")
+    _janela_aviso_update.protocol("WM_DELETE_WINDOW", _adiar)
+
+    frame = ctk.CTkFrame(_janela_aviso_update, fg_color="#1f2937", corner_radius=20)
+    frame.pack(fill="both", expand=True, padx=18, pady=18)
+
+    _label_aviso_update = ctk.CTkLabel(
+        frame,
+        text="Uma nova atualização da FRS Solutions está disponível. Deseja atualizar agora?",
+        wraplength=480,
+        justify="center",
+        font=("Segoe UI", 16, "bold"),
+        text_color="#f8fafc",
+    )
+    _label_aviso_update.pack(pady=(20, 12), padx=18)
+
+    detalhes = f"Versão detectada: {_update_versao_detectada}"
+    if _update_novidades_detectadas:
+        detalhes = f"{detalhes}\n{_update_novidades_detectadas}"
+    ctk.CTkLabel(
+        frame,
+        text=detalhes,
+        wraplength=480,
+        justify="center",
+        font=("Segoe UI", 11),
+        text_color="#9ca3af",
+    ).pack(pady=(0, 10), padx=18)
+
+    _label_timer_update = ctk.CTkLabel(
+        frame,
+        text="Esta janela fecha sozinha em 30 segundos.",
+        font=("Segoe UI", 12, "bold"),
+        text_color="#f1c40f",
+    )
+    _label_timer_update.pack(pady=(0, 10))
+
+    botoes = ctk.CTkFrame(frame, fg_color="transparent")
+    botoes.pack(pady=(8, 0))
+
+    _btn_adiar_update = ctk.CTkButton(
+        botoes,
+        text="Adiar",
+        width=160,
+        height=40,
+        fg_color="#374151",
+        hover_color="#4b5563",
+        command=_adiar,
+    )
+    _btn_adiar_update.grid(row=0, column=0, padx=10)
+
+    _btn_agora_update = ctk.CTkButton(
+        botoes,
+        text="Agora",
+        width=160,
+        height=40,
+        fg_color="#16a34a",
+        hover_color="#15803d",
+        command=_iniciar_instalacao,
+    )
+    _btn_agora_update.grid(row=0, column=1, padx=10)
+
+    janela_login.after(1000, _tick_contagem)
+
+
+def _mostrar_popup_atualizacao(mensagem: str, progresso: float | None = None):
+    global _janela_update, _label_update, _barra_update
+    if not janela_login.winfo_exists():
+        return
+
+    def _interno():
+        nonlocal progresso, mensagem
+        global _janela_update, _label_update, _barra_update
+        if _janela_update is None or not _janela_update.winfo_exists():
+            _janela_update = ctk.CTkToplevel(janela_login)
+            _janela_update.title("Atualização em andamento")
+            _janela_update.geometry("460x180")
+            _janela_update.resizable(False, False)
+            _janela_update.transient(janela_login)
+            _janela_update.grab_set()
+            _janela_update.configure(fg_color="#161b22")
+            try:
+                _janela_update.lift()
+                _janela_update.focus_force()
+            except Exception:
+                pass
+
+            frame = ctk.CTkFrame(_janela_update, fg_color="#1f2a38", corner_radius=18)
+            frame.pack(fill="both", expand=True, padx=18, pady=18)
+            _label_update = ctk.CTkLabel(frame, text=mensagem, font=("Segoe UI", 14, "bold"), wraplength=380, justify="center", text_color="#f1c40f")
+            _label_update.pack(pady=(14, 12), padx=16)
+            _barra_update = ctk.CTkProgressBar(frame, width=360)
+            _barra_update.set(0.0)
+            _barra_update.pack(pady=(0, 10))
+        else:
+            if _label_update and _label_update.winfo_exists():
+                _label_update.configure(text=mensagem)
+            if _barra_update and _barra_update.winfo_exists() and progresso is not None:
+                _barra_update.set(max(0.0, min(float(progresso or 0.0), 1.0)))
+
+    janela_login.after(0, _interno)
+
+
+def _atualizar_popup_atualizacao(mensagem: str, progresso: float | None = None):
+    _mostrar_popup_atualizacao(mensagem, progresso)
 
 
 def _executar_instalacao_update(confirmar_usuario: bool = True):
@@ -1408,25 +1614,18 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
         if not confirmado_risco:
             return
 
-    messagebox.showinfo(
-        "Atualização",
-        "Preparando atualização, o sistema será fechado...",
-        parent=janela_login,
-    )
-
-    btn_atualizar.configure(state="disabled")
-    progress_update.set(0)
-    progress_update.pack(pady=(0, 8))
-    label_status.configure(text="Iniciando atualização...", text_color="#f1c40f")
+    _mostrar_popup_atualizacao("Verificando atualizações...", 0.05)
 
     def _worker_update():
         def _progresso(valor: float, mensagem: str = ""):
             try:
                 janela_login.after(
                     0,
-                    lambda: (
-                        progress_update.set(max(0.0, min(float(valor or 0.0), 1.0))),
-                        label_status.configure(text=str(mensagem or ""), text_color="#f1c40f")
+                    lambda: _atualizar_popup_atualizacao(
+                        "Baixando nova versão..." if str(mensagem or "").lower().startswith("baixando") else (
+                            "Instalando..." if str(mensagem or "").lower().startswith("download concluído") else (str(mensagem or "") or "Atualizando...")
+                        ),
+                        float(valor or 0.0),
                     )
                 )
             except Exception:
@@ -1442,11 +1641,11 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
 
         def _finalizar():
             if ok:
-                label_status.configure(text="Atualização baixada. Reiniciando sistema...", text_color="#2ecc71")
-                progress_update.set(1.0)
+                _atualizar_popup_atualizacao("Instalando...", 1.0)
                 # Ordem profissional: fecha app principal para o Atualizador assumir o processo.
                 try:
-                    janela_login.after(100, janela_login.destroy)
+                    _fechar_aviso_atualizacao()
+                    janela_login.after(250, janela_login.destroy)
                 except Exception:
                     pass
                 try:
@@ -1454,9 +1653,8 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
                 except Exception:
                     pass
             else:
-                btn_atualizar.configure(state="normal")
-                progress_update.pack_forget()
-                label_status.configure(text=msg, text_color="red")
+                _atualizar_popup_atualizacao(f"Falha na atualização: {msg}", 0.0)
+                janela_login.after(1800, _fechar_popup_atualizacao)
                 messagebox.showerror("Atualização", msg, parent=janela_login)
 
         janela_login.after(0, _finalizar)
@@ -1494,24 +1692,7 @@ def _fluxo_pagamento_atualizacao_mensal():
 
 def atualizar_agora():
     global _url_update_disponivel, _auto_update_liberado, _mensagem_politica_update
-    if not _auto_update_liberado:
-        _fluxo_pagamento_atualizacao_mensal()
-        return
-
     _executar_instalacao_update()
-
-
-btn_atualizar = ctk.CTkButton(
-    main_frame,
-    text="ATUALIZAR AGORA",
-    command=atualizar_agora,
-    width=320,
-    height=36,
-    fg_color="#2ecc71",
-    hover_color="#27ae60",
-    state="disabled",
-)
-btn_atualizar.pack(pady=(0, 8))
 
 
 def atualizar_status_trial_tela():
@@ -1519,57 +1700,34 @@ def atualizar_status_trial_tela():
     lic_ativa, _msg_lic, cliente_lic, validade_lic = _licenca_local_ativa_prioritaria()
     if lic_ativa:
         _PAGAMENTO_EXPIRADO_JA_EXIBIDO = False
-        texto_validade = "ATIVA (arquivo local)" if str(validade_lic).upper() == "PERMANENTE" else str(validade_lic)
-        label_trial.configure(
-            text=f"LICENCA ATIVA ({cliente_lic}) - validade: {texto_validade}",
-            text_color="#2ecc71"
-        )
         entry_user.configure(state="normal")
         entry_pass.configure(state="normal")
         btn_entrar.configure(state="normal", fg_color="#27ae60", hover_color="#2ecc71")
         _ocultar_botao_ativar()
-        label_status.configure(text="Licenciamento ativo.", text_color="#2ecc71")
+        try:
+            label_trial.configure(text="")
+            label_status.configure(text="")
+        except Exception:
+            pass
         return
 
-    ativo, dias_restantes, data_limite = obter_status_trial()
-    if ativo:
-        _PAGAMENTO_EXPIRADO_JA_EXIBIDO = False
-        label_trial.configure(
-            text=f"VERSAO TRIAL: {dias_restantes} dia(s) restante(s). Valido ate {data_limite}.",
-            text_color="#f1c40f"
-        )
-        entry_user.configure(state="normal")
-        entry_pass.configure(state="normal")
-        btn_entrar.configure(state="normal", fg_color="#27ae60", hover_color="#2ecc71")
-        _mostrar_botao_ativar()
-        btn_ativar.configure(
-            state="normal",
-            text="ATIVAR LICENCA",
-            width=320,
-            height=40,
-            fg_color="#2980b9",
-            hover_color="#3498db"
-        )
-        return
-
-    label_trial.configure(
-        text=f"TRIAL EXPIRADO em {data_limite}. Contate o suporte para ativacao.",
-        text_color="#e74c3c"
-    )
-    # Mantém login interativo para digitação mesmo com trial expirado.
     entry_user.configure(state="normal")
     entry_pass.configure(state="normal")
     btn_entrar.configure(state="normal", fg_color="#27ae60", hover_color="#2ecc71")
     _mostrar_botao_ativar()
     btn_ativar.configure(
         state="normal",
-        text="ATIVAR LICENCA",
+        text="Ativar Licença",
         width=320,
-        height=40,
-        fg_color="#2980b9",
-        hover_color="#3498db"
+        height=38,
+        fg_color="#34495e",
+        hover_color="#3c5a71"
     )
-    label_status.configure(text="Trial expirado. Login bloqueado até ativação.", text_color="red")
+    try:
+        label_trial.configure(text="")
+        label_status.configure(text="")
+    except Exception:
+        pass
 
 def atualizar_status_primeiro_acesso():
     """Verifica se existem usuários cadastrados e atualiza o alerta na tela de login."""
@@ -1628,84 +1786,26 @@ def _checar_versao_bg():
     disponivel = bool(versao_nova and eh_versao_mais_nova(versao_nova, APP_VERSION))
 
     if disponivel:
-        lic_ativa, _msg_lic, _cliente_lic, validade_lic = obter_status_licenca()
-        tipo_licenca = obter_tipo_licenca()
-        chave_ativa = obter_chave_licenca_ativa()
-
-        remoto_ok = True
-        msg_remota = ""
-        tipo_remoto = ""
-        if URL_CHECK_LICENCAS and chave_ativa:
-            remoto_ok, msg_remota, tipo_remoto = validar_licenca_remota(URL_CHECK_LICENCAS, chave_ativa)
-            if tipo_remoto:
-                tipo_licenca = tipo_remoto
-
-        if URL_CHECK_LICENCAS and not remoto_ok:
-            auto_update_liberado = False
-            msg_politica = f"Licença sem liberação online: {msg_remota}"
-        else:
-            auto_update_liberado, msg_politica = obter_politica_atualizacao(
-                lic_ativa,
-                validade_lic,
-                tipo_licenca,
-            )
+        _url_update_disponivel = url_download
+        _auto_update_liberado = True
+        _mensagem_politica_update = "Atualização automática liberada."
 
         def _mostrar():
             global _url_update_disponivel, _auto_update_liberado, _mensagem_politica_update, _popup_update_exibido, _auto_update_disparada
-            _auto_update_liberado = auto_update_liberado
-            _mensagem_politica_update = msg_politica
-            tipo_txt = tipo_licenca.title() if tipo_licenca else "Licença"
-            if auto_update_liberado:
-                texto_update = f"Nova versão {versao_nova} disponível ({tipo_txt}). {msg_politica}"
-                cor = "#2ecc71"
-                if url_download:
-                    _url_update_disponivel = url_download
-                    btn_atualizar.configure(
-                        state="normal",
-                        text="ATUALIZAR AGORA",
-                        fg_color="#16a34a",
-                        hover_color="#15803d",
-                        border_width=2,
-                        border_color="#facc15",
-                    )
-                else:
-                    btn_atualizar.configure(state="disabled")
-
-                if not _popup_update_exibido and _url_update_disponivel:
-                    _popup_update_exibido = True
-                    # Fluxo automático: versão remota maior dispara atualização sem confirmação manual.
-                    if not _auto_update_disparada:
-                        _auto_update_disparada = True
-                        _executar_instalacao_update(confirmar_usuario=False)
-            else:
-                texto_update = f"Nova versão {versao_nova} disponível ({tipo_txt}). {msg_politica}"
-                cor = "#f39c12"
-                btn_atualizar.configure(
-                    text="RENOVAR PARA ATUALIZAR",
-                    state="normal",
-                    fg_color="#f39c12",
-                    hover_color="#d68910",
-                    border_width=2,
-                    border_color="#fef3c7",
-                )
-
-            if auto_update_liberado:
-                btn_atualizar.configure(
-                    text="ATUALIZAR AGORA",
-                    fg_color="#2ecc71",
-                    hover_color="#27ae60",
-                )
-
+            texto_update = f"Nova versão {versao_nova} disponível."
             if novidades:
                 texto_update = f"{texto_update} {novidades}".strip()
-
             label_versao.configure(
                 text=texto_update,
-                text_color=cor,
+                text_color="#2ecc71",
                 font=("Arial", 11, "bold"),
             )
-            janela_login.geometry("420x570")
+            if not _popup_update_exibido and _url_update_disponivel:
+                _popup_update_exibido = True
+                _abrir_popup_aviso_atualizacao(versao_nova, novidades)
         janela_login.after(0, _mostrar)
+    else:
+        janela_login.after(0, _fechar_popup_atualizacao)
 
 janela_login.after(120, _inicializar_fluxo_pos_termos)
 janela_login.after(50, _solicitar_foco_login)
