@@ -147,6 +147,7 @@ import json
 import logging
 import configparser
 import tempfile
+import io
 import subprocess
 import re
 import threading
@@ -155,7 +156,7 @@ import glob
 import shutil
 import platform
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 from contextlib import contextmanager
 import urllib.request
@@ -349,7 +350,7 @@ INFINITEPAY_LINK_ANUAL = _CFG.get('pagamento', 'infinitepay_link_anual', fallbac
 INFINITEPAY_API_CHECKOUT_URL = _CFG.get(
     'pagamento',
     'infinitepay_checkout_url',
-    fallback='https://api.infinitepay.io/invoices/public/checkout/links'
+    fallback='https://api.checkout.infinitepay.io/links'
 ).strip()
 INFINITEPAY_API_TOKEN = _CFG.get('pagamento', 'infinitepay_api_token', fallback='').strip()
 INFINITEPAY_HANDLE = _CFG.get('pagamento', 'infinitepay_handle', fallback='frsoficinadepesca').strip()
@@ -428,6 +429,11 @@ GOOGLE_DRIVE_USER_SCOPES = [
     "openid",
 ]
 GOOGLE_DRIVE_PASTA_APP = "Oficina de Pesca"
+GOOGLE_DRIVE_PASTA_TOKEN = "Oficina de Pesca - Tokens"
+GOOGLE_DRIVE_PASTA_LICENCA = "Oficina de Pesca - Licencas"
+TOKEN_ARQUIVO_NOME = "acesso.token"
+TOKEN_VALIDADE_DIAS = 30
+TOKEN_RENOVAR_FALTANDO_DIAS = 5
 
 
 def _firebase_cfg_get(key: str, default: str = "") -> str:
@@ -2745,7 +2751,10 @@ def _extrair_licenca_de_arquivo() -> tuple[str, str, str, str]:
             break
 
     if not existente:
-        return "", "", "", "Arquivo de licença ausente na raiz (licenca.key/licenca.json/licencas.json)."
+        ok_drive, chave_drive, erro_drive = obter_chave_licenca_drive()
+        if ok_drive:
+            return chave_drive, "", "", ""
+        return "", "", "", f"Arquivo de licença ausente na raiz (licenca.key/licenca.json/licencas.json) e no Drive ({erro_drive})."
 
     try:
         if existente.lower().endswith(".key"):
@@ -2921,6 +2930,316 @@ def validar_chave_licenca(chave: str):
     return True, "Licenca valida.", payload
 
 
+def _assinar_payload_token(payload_b64: str) -> str:
+    assinatura = hmac.new(
+        LICENCA_SECRET.encode("utf-8"),
+        payload_b64.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return assinatura[:20].upper()
+
+
+def gerar_token_acesso(user_id: str, dias_validade: int = TOKEN_VALIDADE_DIAS) -> str:
+    uid = str(user_id or "").strip().lower()
+    if not uid:
+        raise ValueError("user_id do token não pode estar vazio.")
+
+    dias = max(1, int(dias_validade or TOKEN_VALIDADE_DIAS))
+    hoje = date.today()
+    exp = (hoje + timedelta(days=dias)).isoformat()
+    payload = {
+        "uid": uid,
+        "exp": exp,
+        "iat": hoje.isoformat(),
+        "ver": 1,
+    }
+    payload_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
+    payload_b64 = base64.urlsafe_b64encode(payload_json.encode("utf-8")).decode("ascii").rstrip("=")
+    assinatura = _assinar_payload_token(payload_b64)
+    return f"OFP-TKN-{payload_b64}-{assinatura}"
+
+
+def validar_token_acesso(token: str, user_id_esperado: str = "") -> tuple[bool, str, Optional[dict]]:
+    token_limpo = "".join(str(token or "").split()).strip()
+    if not token_limpo:
+        return False, "Token vazio.", None
+
+    if not token_limpo.startswith("OFP-TKN-"):
+        return False, "Formato de token inválido.", None
+
+    try:
+        _p1, _p2, payload_b64, assinatura = token_limpo.split("-", 3)
+    except ValueError:
+        return False, "Token incompleto.", None
+
+    assinatura_recebida = str(assinatura or "").strip().upper()
+    assinatura_ok = _assinar_payload_token(payload_b64)
+    if not hmac.compare_digest(assinatura_ok, assinatura_recebida):
+        return False, "Assinatura de token inválida.", None
+
+    try:
+        padding = "=" * ((4 - len(payload_b64) % 4) % 4)
+        payload_json = base64.urlsafe_b64decode((payload_b64 + padding).encode("ascii")).decode("utf-8")
+        payload = json.loads(payload_json)
+    except Exception:
+        return False, "Conteúdo do token inválido.", None
+
+    if not isinstance(payload, dict):
+        return False, "Payload do token inválido.", None
+
+    uid = str(payload.get("uid") or "").strip().lower()
+    if not uid:
+        return False, "Token sem uid.", payload
+
+    esperado = str(user_id_esperado or "").strip().lower()
+    if esperado and uid != esperado:
+        return False, "Token não pertence ao usuário esperado.", payload
+
+    exp = str(payload.get("exp") or "").strip()
+    if not exp:
+        return False, "Token sem validade.", payload
+    try:
+        data_exp = date.fromisoformat(exp)
+    except Exception:
+        return False, "Data de validade do token inválida.", payload
+
+    if date.today() > data_exp:
+        return False, f"Token expirado em {data_exp.strftime('%d/%m/%Y')}.", payload
+
+    return True, "Token válido.", payload
+
+
+def obter_user_id_token_padrao() -> str:
+    email_cfg = str(obter_email_backup_nuvem() or "").strip().lower()
+    if validar_email_basico(email_cfg):
+        return email_cfg
+
+    try:
+        creds, _msg = _obter_credenciais_google_drive_usuario(interativo=False)
+        if creds and google_build is not None:
+            service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+            about = service.about().get(fields="user(emailAddress)").execute()
+            user = about.get("user", {}) if isinstance(about, dict) else {}
+            email = str(user.get("emailAddress") or "").strip().lower()
+            if validar_email_basico(email):
+                return email
+    except Exception:
+        pass
+
+    return "ofp-user"
+
+
+def _obter_ou_criar_pasta_drive_usuario(service, nome_pasta: str) -> str:
+    nome = str(nome_pasta or "").strip() or GOOGLE_DRIVE_PASTA_TOKEN
+    nome_esc = nome.replace("'", "\\'")
+    q = (
+        "mimeType='application/vnd.google-apps.folder' and "
+        f"name='{nome_esc}' and trashed=false"
+    )
+    pastas = service.files().list(q=q, fields="files(id,name)", pageSize=1).execute().get("files", [])
+    if pastas:
+        return str(pastas[0]["id"])
+
+    pasta = service.files().create(
+        body={"name": nome, "mimeType": "application/vnd.google-apps.folder"},
+        fields="id",
+    ).execute()
+    return str(pasta["id"])
+
+
+def _upsert_arquivo_texto_drive(service, folder_id: str, nome_arquivo: str, conteudo: str) -> tuple[bool, str]:
+    if MediaFileUpload is None:
+        return False, "Dependência Google Drive ausente para upload do token."
+
+    nome = str(nome_arquivo or TOKEN_ARQUIVO_NOME).strip() or TOKEN_ARQUIVO_NOME
+    nome_esc = nome.replace("'", "\\'")
+    q = f"name='{nome_esc}' and trashed=false and '{folder_id}' in parents"
+    existentes = service.files().list(q=q, fields="files(id,name)", pageSize=1).execute().get("files", [])
+
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".token", delete=False) as ftmp:
+        ftmp.write(str(conteudo or "").strip())
+        caminho_tmp = ftmp.name
+
+    try:
+        media = MediaFileUpload(caminho_tmp, mimetype="text/plain", resumable=False)
+        if existentes:
+            file_id = str(existentes[0].get("id") or "")
+            if not file_id:
+                return False, "Arquivo de token existente sem id no Drive."
+            service.files().update(fileId=file_id, media_body=media).execute()
+            return True, f"Token atualizado no Drive: {nome}"
+
+        service.files().create(
+            body={"name": nome, "parents": [folder_id]},
+            media_body=media,
+            fields="id",
+        ).execute()
+        return True, f"Token enviado ao Drive: {nome}"
+    finally:
+        try:
+            os.remove(caminho_tmp)
+        except Exception:
+            pass
+
+
+def _ler_arquivo_texto_drive(service, folder_id: str, nome_arquivo: str) -> tuple[bool, str, str]:
+    if MediaIoBaseDownload is None:
+        return False, "", "Dependência Google Drive ausente para leitura do arquivo."
+
+    nome = str(nome_arquivo or "").strip()
+    if not nome:
+        return False, "", "Nome do arquivo de leitura inválido."
+
+    nome_esc = nome.replace("'", "\\'")
+    q = f"name='{nome_esc}' and trashed=false and '{folder_id}' in parents"
+    arquivos = service.files().list(q=q, fields="files(id,name)", pageSize=1).execute().get("files", [])
+    if not arquivos:
+        return False, "", "Arquivo não encontrado no Drive."
+
+    fid = str(arquivos[0].get("id") or "").strip()
+    if not fid:
+        return False, "", "Arquivo encontrado no Drive sem ID."
+
+    req = service.files().get_media(fileId=fid)
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, req)
+    done = False
+    while not done:
+        _status, done = downloader.next_chunk()
+
+    conteudo = buffer.getvalue().decode("utf-8", errors="ignore").strip()
+    if not conteudo:
+        return False, "", "Arquivo vazio no Drive."
+    return True, conteudo, "OK"
+
+
+def _ler_token_drive(service, folder_id: str, nome_arquivo: str = TOKEN_ARQUIVO_NOME) -> tuple[bool, str, str]:
+    if MediaIoBaseDownload is None:
+        return False, "", "Dependência Google Drive ausente para download do token."
+
+    nome = str(nome_arquivo or TOKEN_ARQUIVO_NOME).strip() or TOKEN_ARQUIVO_NOME
+    nome_esc = nome.replace("'", "\\'")
+    q = f"name='{nome_esc}' and trashed=false and '{folder_id}' in parents"
+    arquivos = service.files().list(q=q, fields="files(id,name)", pageSize=1).execute().get("files", [])
+    if not arquivos:
+        return False, "", "Arquivo de token não encontrado no Drive."
+
+    fid = str(arquivos[0].get("id") or "").strip()
+    if not fid:
+        return False, "", "Arquivo de token encontrado sem ID no Drive."
+
+    req = service.files().get_media(fileId=fid)
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, req)
+    done = False
+    while not done:
+        _status, done = downloader.next_chunk()
+
+    conteudo = buffer.getvalue().decode("utf-8", errors="ignore").strip()
+    if not conteudo:
+        return False, "", "Arquivo de token vazio no Drive."
+    return True, conteudo, "OK"
+
+
+def publicar_token_acesso_drive(user_id: str = "", dias_validade: int = TOKEN_VALIDADE_DIAS) -> tuple[bool, str]:
+    uid = str(user_id or "").strip().lower() or obter_user_id_token_padrao()
+    if not uid:
+        return False, "Não foi possível determinar user_id para token."
+
+    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
+    if not creds:
+        return False, msg
+    if google_build is None:
+        return False, "Dependência google-api-python-client não encontrada."
+
+    try:
+        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        folder_id = _obter_ou_criar_pasta_drive_usuario(service, GOOGLE_DRIVE_PASTA_TOKEN)
+        token = gerar_token_acesso(uid, dias_validade=dias_validade)
+        return _upsert_arquivo_texto_drive(service, folder_id, TOKEN_ARQUIVO_NOME, token)
+    except Exception as e:
+        return False, f"Falha ao publicar token no Drive: {e}"
+
+
+def publicar_licenca_drive(chave: str) -> tuple[bool, str]:
+    chave_limpa = _normalizar_texto_chave_licenca(chave)
+    if not chave_limpa:
+        return False, "Chave de licença vazia."
+
+    valida, msg, _payload = validar_chave_licenca(chave_limpa)
+    if not valida:
+        return False, msg
+
+    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
+    if not creds:
+        return False, msg
+    if google_build is None:
+        return False, "Dependência google-api-python-client não encontrada."
+
+    try:
+        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        folder_id = _obter_ou_criar_pasta_drive_usuario(service, GOOGLE_DRIVE_PASTA_LICENCA)
+        return _upsert_arquivo_texto_drive(service, folder_id, "licenca.key", chave_limpa)
+    except Exception as e:
+        return False, f"Falha ao publicar licença no Drive: {e}"
+
+
+def obter_chave_licenca_drive() -> tuple[bool, str, str]:
+    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
+    if not creds:
+        return False, "", msg
+    if google_build is None:
+        return False, "", "Dependência google-api-python-client não encontrada."
+
+    try:
+        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        folder_id = _obter_ou_criar_pasta_drive_usuario(service, GOOGLE_DRIVE_PASTA_LICENCA)
+        return _ler_arquivo_texto_drive(service, folder_id, "licenca.key")
+    except Exception as e:
+        return False, "", f"Falha ao ler licença no Drive: {e}"
+
+
+def renovar_token_acesso_drive_se_necessario(force: bool = False) -> tuple[bool, str]:
+    status = obter_status_acesso_centralizado()
+    if not bool(status.get("ativa")):
+        return False, "Licença principal inativa; token não renovado."
+
+    uid = obter_user_id_token_padrao()
+    if not uid:
+        return False, "User ID do token não definido."
+
+    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
+    if not creds:
+        return False, msg
+    if google_build is None:
+        return False, "Dependência google-api-python-client não encontrada."
+
+    try:
+        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        folder_id = _obter_ou_criar_pasta_drive_usuario(service, GOOGLE_DRIVE_PASTA_TOKEN)
+
+        if not force:
+            ok_token, token_atual, msg_token = _ler_token_drive(service, folder_id, TOKEN_ARQUIVO_NOME)
+            if ok_token:
+                ok_val, _msg_val, payload = validar_token_acesso(token_atual, user_id_esperado=uid)
+                if ok_val and isinstance(payload, dict):
+                    exp_txt = str(payload.get("exp") or "").strip()
+                    try:
+                        exp = date.fromisoformat(exp_txt)
+                        faltam = (exp - date.today()).days
+                        if faltam > TOKEN_RENOVAR_FALTANDO_DIAS:
+                            return True, f"Token vigente por {faltam} dia(s); renovação não necessária."
+                    except Exception:
+                        pass
+            elif "não encontrado" not in str(msg_token or "").lower():
+                return False, msg_token
+
+        token_novo = gerar_token_acesso(uid, dias_validade=TOKEN_VALIDADE_DIAS)
+        return _upsert_arquivo_texto_drive(service, folder_id, TOKEN_ARQUIVO_NOME, token_novo)
+    except Exception as e:
+        return False, f"Falha na renovação automática do token: {e}"
+
+
 def diagnosticar_chave_licenca(chave: str) -> dict:
     """Retorna dados tecnicos para suporte da ativacao de licenca."""
     chave_bruta = str(chave or "")
@@ -3016,29 +3335,63 @@ def ativar_licenca(chave: str):
 
 
 def obter_status_licenca():
-    chave, cliente_arquivo, validade_arquivo, erro = _extrair_licenca_de_arquivo()
-    if not chave:
-        return False, erro or "Sem licença ativa.", "", "SEM_ARQUIVO"
+    """Status de acesso unificado por token assinado (v1.0.34)."""
+    uid = str(obter_user_id_token_padrao() or "").strip().lower()
+    if not uid:
+        return False, "Licença expirada ou inválida", "", "SEM_TOKEN"
 
-    valida, msg, payload = validar_chave_licenca(chave)
-    if not valida:
-        return False, msg, cliente_arquivo, validade_arquivo or "INVALIDA"
+    token = ""
+    token_origem = ""
+    caminhos_token = [
+        os.path.join(DIRETORIO_ATUAL, TOKEN_ARQUIVO_NOME),
+        os.path.join(DIRETORIO_DADOS, TOKEN_ARQUIVO_NOME),
+    ]
 
-    validade_payload = str((payload or {}).get("val") or "").strip()
-    validade = validade_payload or validade_arquivo or "ATIVA"
-    cliente = cliente_arquivo
+    for caminho in caminhos_token:
+        try:
+            if os.path.exists(caminho):
+                with open(caminho, "r", encoding="utf-8") as f:
+                    conteudo = str(f.read() or "").strip()
+                if conteudo:
+                    token = conteudo
+                    token_origem = caminho
+                    break
+        except Exception:
+            continue
 
-    tipo = _normalizar_tipo_licenca(str((payload or {}).get("tipo") or ""), validade)
+    if not token:
+        try:
+            creds, _msg = _obter_credenciais_google_drive_usuario(interativo=False)
+            if creds and google_build is not None:
+                service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+                folder_id = _obter_ou_criar_pasta_drive_usuario(service, GOOGLE_DRIVE_PASTA_TOKEN)
+                ok_drive, token_drive, _msg_drive = _ler_token_drive(service, folder_id, TOKEN_ARQUIVO_NOME)
+                if ok_drive:
+                    token = token_drive
+                    token_origem = "drive"
+        except Exception:
+            token = ""
+
+    if not token:
+        return False, "Licença expirada ou inválida", uid, "SEM_TOKEN"
+
+    ok, _msg_token, payload = validar_token_acesso(token, user_id_esperado=uid)
+    if not ok:
+        validade_payload = str((payload or {}).get("exp") or "INVALIDA").strip() if isinstance(payload, dict) else "INVALIDA"
+        return False, "Licença expirada ou inválida", uid, validade_payload
+
+    validade = str((payload or {}).get("exp") or "ATIVA").strip() if isinstance(payload, dict) else "ATIVA"
+
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_chave', ?)",
-                (chave,)
+                (f"TOKEN::{token_origem}",)
             )
             cursor.execute(
                 "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_cliente', ?)",
-                (cliente,)
+                (uid,)
             )
             cursor.execute(
                 "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_validade', ?)",
@@ -3046,53 +3399,35 @@ def obter_status_licenca():
             )
             cursor.execute(
                 "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_tipo', ?)",
-                (tipo,)
+                ("TOKEN",)
             )
             conn.commit()
     except Exception:
         pass
 
-    return True, "Licença ativa por arquivo.", cliente, validade
+    return True, "Token de acesso válido.", uid, validade
 
 
 def obter_status_acesso_centralizado() -> dict:
-    """Avalia acesso usando exatamente o mesmo critério do Desktop."""
+    """Avalia acesso usando exatamente o mesmo critério do Desktop (v1.0.34)."""
     licenca_ativa, msg_licenca, cliente_licenca, validade_licenca = obter_status_licenca()
-    trial_ativo, dias_trial_restantes, data_limite_trial = obter_status_trial()
-    tipo_licenca = obter_tipo_licenca()
-    chave_ativa = obter_chave_licenca_ativa()
-
-    remoto_ok = True
-    remoto_msg = ""
-    tipo_remoto = ""
-    if URL_CHECK_LICENCAS and chave_ativa:
-        remoto_ok, remoto_msg, tipo_remoto = validar_licenca_remota(URL_CHECK_LICENCAS, chave_ativa)
-        if tipo_remoto:
-            tipo_licenca = tipo_remoto
-
-    if URL_CHECK_LICENCAS and chave_ativa and not remoto_ok:
-        licenca_ativa = False
-        msg_licenca = f"Licença sem liberação online: {remoto_msg}"
-
-    acesso_liberado = bool(licenca_ativa or trial_ativo)
+    acesso_liberado = bool(licenca_ativa)
     bloqueada = not acesso_liberado
-    mensagem = msg_licenca if licenca_ativa else (
-        f"Trial ativo até {data_limite_trial}." if trial_ativo else (msg_licenca or "Licença inválida ou bloqueada.")
-    )
+    mensagem = msg_licenca if licenca_ativa else (msg_licenca or "Licença expirada ou inválida")
 
     return {
         "ativa": acesso_liberado,
         "bloqueada": bloqueada,
         "licenca_ativa": bool(licenca_ativa),
-        "trial_ativo": bool(trial_ativo),
+        "trial_ativo": False,
         "mensagem": str(mensagem or "").strip(),
         "cliente": str(cliente_licenca or "").strip(),
         "validade": str(validade_licenca or "").strip(),
-        "tipo": str(tipo_licenca or "").strip(),
-        "dias_trial_restantes": int(dias_trial_restantes or 0) if trial_ativo else 0,
-        "data_limite_trial": str(data_limite_trial or "").strip(),
-        "validacao_remota_ok": bool(remoto_ok),
-        "validacao_remota_msg": str(remoto_msg or "").strip(),
+        "tipo": "TOKEN",
+        "dias_trial_restantes": 0,
+        "data_limite_trial": "",
+        "validacao_remota_ok": True,
+        "validacao_remota_msg": "",
     }
 
 

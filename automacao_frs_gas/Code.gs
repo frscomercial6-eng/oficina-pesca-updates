@@ -5,13 +5,14 @@
  * - Monitorar e-mails da InfinitePay no Gmail
  * - Garantir estrutura de pastas no Drive
  * - Registrar vendas na planilha central
- * - Chamar gerador de licenca por modulo (sem unificar regras)
+ * - Gerar token de acesso temporário assinado
  * - Salvar resultado no log e no Firebase
  *
  * Configurar as propriedades em: Project Settings > Script properties
  */
 
 const HUB_CONFIG = {
+  ecosystemVersion: '1.0.34',
   rootFolderName: 'FRS_Solutions',
   programs: ['Oficina_Pesca', 'Atlas', 'Mercado'],
   masterSheetName: 'FRS_Hub_Clientes',
@@ -22,37 +23,20 @@ const HUB_CONFIG = {
     novo: 'NOVA_VENDA',
     aguardandoHwid: 'AGUARDANDO_HWID',
     licencaGerada: 'LICENCA_GERADA',
+    tokenGerado: 'TOKEN_GERADO',
     erroGeracao: 'ERRO_GERACAO'
   }
 };
 
+const TOKEN_CONFIG = {
+  fileName: 'acesso.token',
+  daysValid: 30,
+  signaturePrefix: 'OFP-TKN'
+};
 /**
  * Registro de adaptadores por programa.
  * Cada modulo aponta para o proprio endpoint de geracao.
  * Assim, a regra de licenca continua isolada por app.
- */
-const MODULE_REGISTRY = {
-  Oficina_Pesca: {
-    endpointProp: 'LICENSE_ENDPOINT_OFICINA_PESCA',
-    tokenProp: 'LICENSE_TOKEN_OFICINA_PESCA',
-    timeoutMs: 20000
-  },
-  Atlas: {
-    endpointProp: 'LICENSE_ENDPOINT_ATLAS',
-    tokenProp: 'LICENSE_TOKEN_ATLAS',
-    timeoutMs: 20000
-  },
-  Mercado: {
-    endpointProp: 'LICENSE_ENDPOINT_MERCADO',
-    tokenProp: 'LICENSE_TOKEN_MERCADO',
-    timeoutMs: 20000
-  }
-};
-
-/**
- * Executar 1x para preparar Drive, planilha e trigger recorrente.
- */
-function setupHubFRS() {
   const structure = ensureDriveStructure_();
   const sheet = getOrCreateMasterSheet_(structure.rootFolderId);
   ensureMasterHeader_(sheet);
@@ -116,25 +100,26 @@ function processSale_(sale, msg, sheet, structure) {
   const now = new Date();
   const programa = normalizeProgram_(sale.programa);
   const hwid = (sale.hwid || '').trim();
+  const userId = normalizeUserId_(sale);
 
   const baseRow = {
     data: now,
     cliente: sale.cliente || sale.email || 'NAO_IDENTIFICADO',
     hwid: hwid,
     programa: programa,
-    statusLicenca: hwid ? HUB_CONFIG.status.novo : HUB_CONFIG.status.aguardandoHwid,
-    chaveGerada: '',
+    statusLicenca: userId ? HUB_CONFIG.status.novo : HUB_CONFIG.status.aguardandoHwid,
+    tokenGerado: '',
     transacao: sale.transactionId || '',
     emailComprador: sale.email || '',
     origemEmailId: sale.messageId
   };
 
-  if (!hwid) {
+  if (!userId) {
     appendMasterRow_(sheet, baseRow);
     writeHubLog_(structure.rootFolderId, {
       ts: now.toISOString(),
       level: 'WARN',
-      action: 'SALE_REGISTERED_WITHOUT_HWID',
+      action: 'SALE_REGISTERED_WITHOUT_USERID',
       transactionId: sale.transactionId || '',
       programa: programa,
       cliente: baseRow.cliente
@@ -142,41 +127,35 @@ function processSale_(sale, msg, sheet, structure) {
     return;
   }
 
-  const licenseResult = gerarLicencaPorModulo_(programa, {
-    cliente: baseRow.cliente,
-    hwid: hwid,
-    programa: programa,
-    transactionId: sale.transactionId || '',
-    email: baseRow.emailComprador,
-    source: 'GMAIL_INFINITEPAY'
-  });
-
-  baseRow.statusLicenca = licenseResult.ok
-    ? HUB_CONFIG.status.licencaGerada
-    : HUB_CONFIG.status.erroGeracao;
-  baseRow.chaveGerada = licenseResult.chave || '';
-
+  const tokenRes = gerarEPublicarTokenViaHub_(programa, sale, structure, userId);
+  baseRow.statusLicenca = tokenRes.ok ? HUB_CONFIG.status.tokenGerado : HUB_CONFIG.status.erroGeracao;
+  baseRow.tokenGerado = tokenRes.tokenPreview || '';
   appendMasterRow_(sheet, baseRow);
 
   const saleFileMeta = saveSaleJsonInProgramFolder_(structure.programFolderIds[programa], {
+    ecosystemVersion: HUB_CONFIG.ecosystemVersion,
     createdAt: now.toISOString(),
     programa: programa,
     cliente: baseRow.cliente,
     hwid: hwid,
+    userId: userId,
     transactionId: baseRow.transacao,
     statusLicenca: baseRow.statusLicenca,
-    chaveGerada: baseRow.chaveGerada,
+    tokenGerado: baseRow.tokenGerado,
     emailComprador: baseRow.emailComprador,
-    origemEmailId: baseRow.origemEmailId
+    origemEmailId: baseRow.origemEmailId,
+    tokenFolderId: tokenRes.folderId || ''
   });
 
   const firebaseRes = saveLicenseFirebase_(programa, {
+    ecosystemVersion: HUB_CONFIG.ecosystemVersion,
     createdAt: now.toISOString(),
     cliente: baseRow.cliente,
     hwid: hwid,
+    userId: userId,
     programa: programa,
     statusLicenca: baseRow.statusLicenca,
-    chaveGerada: baseRow.chaveGerada,
+    tokenGerado: baseRow.tokenGerado,
     transactionId: baseRow.transacao,
     emailComprador: baseRow.emailComprador,
     source: 'hub_gas'
@@ -184,19 +163,137 @@ function processSale_(sale, msg, sheet, structure) {
 
   writeHubLog_(structure.rootFolderId, {
     ts: now.toISOString(),
-    level: licenseResult.ok ? 'INFO' : 'ERROR',
-    action: 'SALE_PROCESSED',
+    level: tokenRes.ok ? 'INFO' : 'ERROR',
+    action: 'SALE_TOKEN_PROCESSED',
+    ecosystemVersion: HUB_CONFIG.ecosystemVersion,
     programa: programa,
     cliente: baseRow.cliente,
+    userId: userId,
     hwid: hwid,
     transactionId: baseRow.transacao,
     statusLicenca: baseRow.statusLicenca,
-    chaveGerada: baseRow.chaveGerada,
+    tokenPreview: tokenRes.tokenPreview || '',
+    tokenFolderId: tokenRes.folderId || '',
     saleFileId: saleFileMeta.id,
     firebaseOk: firebaseRes.ok,
     firebaseStatus: firebaseRes.status,
-    moduloMensagem: licenseResult.message
+    hubMensagem: tokenRes.message
   });
+}
+
+function normalizeUserId_(sale) {
+  const fromEmail = String(sale.email || '').trim().toLowerCase();
+  if (fromEmail) return fromEmail;
+  const fromTx = String(sale.transactionId || '').trim().toUpperCase();
+  if (fromTx) return 'tx:' + fromTx;
+  const fromHwid = String(sale.hwid || '').trim().toUpperCase();
+  if (fromHwid) return 'hwid:' + fromHwid;
+  return '';
+}
+
+function gerarEPublicarTokenViaHub_(programa, sale, structure, userId) {
+  const props = PropertiesService.getScriptProperties();
+  const secret = (props.getProperty('TOKEN_SECRET') || props.getProperty('OFP_LICENCA_SECRET') || '').trim();
+  if (!secret) {
+    return { ok: false, message: 'TOKEN_SECRET não configurado no Hub.', tokenPreview: '', folderId: '' };
+  }
+
+  const token = gerarTokenAssinado_(userId, secret, TOKEN_CONFIG.daysValid);
+  const folderInfo = resolverPastaDestinoToken_(programa, sale, structure);
+  if (!folderInfo.ok) {
+    return { ok: false, message: folderInfo.message, tokenPreview: '', folderId: '' };
+  }
+
+  const upload = upsertArquivoToken_(folderInfo.folderId, TOKEN_CONFIG.fileName, token);
+  if (!upload.ok) {
+    return { ok: false, message: upload.message, tokenPreview: '', folderId: folderInfo.folderId };
+  }
+
+  return {
+    ok: true,
+    message: 'Token gerado e enviado ao Drive do cliente.',
+    tokenPreview: token.substring(0, 24) + '...',
+    folderId: folderInfo.folderId
+  };
+}
+
+function gerarTokenAssinado_(userId, secret, diasValidade) {
+  const now = new Date();
+  const exp = new Date(now.getTime() + (Math.max(1, Number(diasValidade || 30)) * 24 * 60 * 60 * 1000));
+  const payload = {
+    uid: String(userId || '').trim().toLowerCase(),
+    iat: Utilities.formatDate(now, 'GMT', 'yyyy-MM-dd'),
+    exp: Utilities.formatDate(exp, 'GMT', 'yyyy-MM-dd'),
+    ver: 1
+  };
+  const payloadJson = JSON.stringify(payload);
+  const payloadB64 = Utilities.base64EncodeWebSafe(payloadJson).replace(/=+$/g, '');
+  const assinatura = assinarPayloadToken_(payloadB64, secret);
+  return TOKEN_CONFIG.signaturePrefix + '-' + payloadB64 + '-' + assinatura;
+}
+
+function assinarPayloadToken_(payloadB64, secret) {
+  const signature = Utilities.computeHmacSha256Signature(payloadB64, secret);
+  const hex = signature.map(function(b) {
+    const v = (b < 0 ? b + 256 : b).toString(16);
+    return v.length === 1 ? '0' + v : v;
+  }).join('').toUpperCase();
+  return hex.substring(0, 20);
+}
+
+function resolverPastaDestinoToken_(programa, sale, structure) {
+  // Prioridade: ID explícito no e-mail > mapa por e-mail em Script Properties > fallback pasta do programa.
+  const explicitFolderId = String(sale.driveFolderId || '').trim();
+  if (explicitFolderId) {
+    try {
+      DriveApp.getFolderById(explicitFolderId);
+      return { ok: true, folderId: explicitFolderId, message: 'Usando pasta explícita no payload.' };
+    } catch (err) {
+      return { ok: false, folderId: '', message: 'driveFolderId informado é inválido ou sem permissão.' };
+    }
+  }
+
+  const props = PropertiesService.getScriptProperties();
+  const mapRaw = props.getProperty('DRIVE_CLIENT_FOLDER_MAP_JSON') || '{}';
+  let folderMap = {};
+  try {
+    folderMap = JSON.parse(mapRaw);
+  } catch (_err) {
+    folderMap = {};
+  }
+
+  const email = String(sale.email || '').trim().toLowerCase();
+  const mappedFolderId = email ? String(folderMap[email] || '').trim() : '';
+  if (mappedFolderId) {
+    try {
+      DriveApp.getFolderById(mappedFolderId);
+      return { ok: true, folderId: mappedFolderId, message: 'Usando pasta mapeada por e-mail.' };
+    } catch (err2) {
+      return { ok: false, folderId: '', message: 'Pasta mapeada no DRIVE_CLIENT_FOLDER_MAP_JSON é inválida.' };
+    }
+  }
+
+  // Fallback operacional: mantém token na estrutura FRS_Solutions/<Programa>
+  const folderId = structure.programFolderIds[programa];
+  if (!folderId) {
+    return { ok: false, folderId: '', message: 'Pasta de programa não encontrada para salvar token.' };
+  }
+  return { ok: true, folderId: folderId, message: 'Usando pasta padrão do programa no Hub.' };
+}
+
+function upsertArquivoToken_(folderId, fileName, content) {
+  try {
+    const folder = DriveApp.getFolderById(folderId);
+    const existing = findFileByNameInsideFolder_(fileName, folderId, MimeType.PLAIN_TEXT);
+    if (existing) {
+      existing.setContent(content);
+      return { ok: true, message: 'Token atualizado no Drive.' };
+    }
+    folder.createFile(fileName, content, MimeType.PLAIN_TEXT);
+    return { ok: true, message: 'Token criado no Drive.' };
+  } catch (err) {
+    return { ok: false, message: String(err) };
+  }
 }
 
 /**
@@ -228,6 +325,10 @@ function parseInfinitePayMessage_(msg) {
     /(?:hwid|hardware\s*id|id\s*instala[cç][aã]o)\s*[:\-]\s*([A-Z0-9\-]{8,})/i
   ]);
 
+  const driveFolderId = firstMatch_(body, [
+    /(?:drive[_\s-]*folder[_\s-]*id|pasta[_\s-]*drive[_\s-]*id)\s*[:\-]\s*([a-zA-Z0-9_-]{12,})/i
+  ]);
+
   const programa = detectProgram_(body);
 
   const subjectAprovado = /pagamento\s+aprovado/i.test(subject);
@@ -242,6 +343,7 @@ function parseInfinitePayMessage_(msg) {
     email: email,
     cliente: sanitizeText_(cliente),
     hwid: (hwid || '').toUpperCase(),
+    driveFolderId: (driveFolderId || '').trim(),
     programa: programa
   };
 }
@@ -257,63 +359,6 @@ function detectProgram_(text) {
 function normalizeProgram_(programa) {
   if (HUB_CONFIG.programs.indexOf(programa) >= 0) return programa;
   return 'Oficina_Pesca';
-}
-
-function gerarLicencaPorModulo_(programa, payload) {
-  const mod = MODULE_REGISTRY[programa];
-  if (!mod) {
-    return { ok: false, message: 'Modulo nao cadastrado', chave: '' };
-  }
-
-  const props = PropertiesService.getScriptProperties();
-  const endpoint = props.getProperty(mod.endpointProp) || '';
-  const token = props.getProperty(mod.tokenProp) || '';
-  const hubApiKey = props.getProperty('HUB_API_KEY') || '';
-
-  if (!endpoint) {
-    return {
-      ok: false,
-      message: 'Endpoint do modulo nao configurado em Script Properties',
-      chave: ''
-    };
-  }
-
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) headers.Authorization = 'Bearer ' + token;
-  if (hubApiKey) headers['X-OFP-Hub-Key'] = hubApiKey;
-
-  const req = {
-    method: 'post',
-    contentType: 'application/json',
-    muteHttpExceptions: true,
-    payload: JSON.stringify(payload),
-    headers: headers
-  };
-
-  try {
-    const res = UrlFetchApp.fetch(endpoint, req);
-    const status = res.getResponseCode();
-    const text = res.getContentText() || '{}';
-    let json;
-
-    try {
-      json = JSON.parse(text);
-    } catch (parseErr) {
-      json = { raw: text };
-    }
-
-    const chave = (json.chave || json.license_key || json.licenca || '').toString();
-    const ok = status >= 200 && status < 300 && !!chave;
-
-    return {
-      ok: ok,
-      message: json.message || ('HTTP ' + status),
-      chave: chave,
-      raw: json
-    };
-  } catch (err) {
-    return { ok: false, message: String(err), chave: '' };
-  }
 }
 
 function saveLicenseFirebase_(programa, saleData) {
@@ -385,8 +430,8 @@ function ensureMasterHeader_(sheet) {
     'Cliente',
     'HWID',
     'Programa',
-    'Status da Licenca',
-    'Chave Gerada',
+    'Status do Token',
+    'Token Gerado (preview)',
     'Transacao',
     'Email Comprador',
     'Origem Email ID'
@@ -408,7 +453,7 @@ function appendMasterRow_(sheet, row) {
     row.hwid,
     row.programa,
     row.statusLicenca,
-    row.chaveGerada,
+    row.tokenGerado,
     row.transacao,
     row.emailComprador,
     row.origemEmailId

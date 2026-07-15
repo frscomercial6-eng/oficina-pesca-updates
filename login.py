@@ -59,6 +59,7 @@ from config import (
     obter_status_trial,
     obter_status_licenca,
     ativar_licenca,
+    publicar_licenca_drive,
     get_logger,
     verificar_nova_versao,
     obter_info_nova_versao,
@@ -115,6 +116,16 @@ _APP_INIT_DONE = False
 _STARTUP_LOCK_PATH = ""
 _LOGIN_SUCESSO_DADOS = None #
 _LOGIN_TRANSICAO_EM_ANDAMENTO = False
+
+
+def _trial_ativo_prioritario() -> tuple[bool, int, str]:
+    """Consulta o trial antes de qualquer validação externa."""
+    try:
+        ativo, dias_restantes, data_limite = obter_status_trial()
+        return bool(ativo), int(dias_restantes or 0), str(data_limite or "").strip()
+    except Exception as exc:
+        logger.warning("[startup] Falha ao consultar trial prioritário: %s", exc)
+        return False, 0, ""
 
 class SafeCTk(ctk.CTk):
     """Custom CTk class with a safe destroy method."""
@@ -383,7 +394,23 @@ def _inicializar_fluxo_pos_termos() -> None:
     if _APP_INIT_DONE:
         return
     _APP_INIT_DONE = True
-    logger.info("[startup] Verificando sincronização segura Drive -> Local antes do login.")
+    trial_ativo, dias_trial, data_limite_trial = _trial_ativo_prioritario()
+    if trial_ativo:
+        logger.info(
+            "[startup] Trial ativo detectado (%s dia(s) restante(s) até %s). Pulando Drive/Firebase/Token.",
+            dias_trial,
+            data_limite_trial,
+        )
+        try:
+            inicializar_banco()
+            logger.info("[startup] Banco inicializado em modo trial sem validações externas.")
+        except Exception as exc:
+            logger.warning("[startup] Falha ao inicializar banco em modo trial: %s", exc)
+        atualizar_status_trial_tela()
+        atualizar_status_primeiro_acesso()
+        return
+
+    logger.info("[startup] Trial expirado/inativo. Verificando sincronização segura Drive -> Local antes do login.")
     ok_sync_startup, msg_sync_startup = preparar_banco_local_priorizando_drive()
     if ok_sync_startup:
         logger.info("[startup] Sync inicial de banco: %s", msg_sync_startup)
@@ -694,7 +721,7 @@ def _criar_link_checkout_infinitepay(
             )
         return ""
 
-    url = checkout_url_cfg or "https://api.infinitepay.io/invoices/public/checkout/links"
+    url = checkout_url_cfg or "https://api.checkout.infinitepay.io/links"
     valor_centavos = max(int(round(float(valor_reais) * 100)), 1)
     item_descricao = str(item_descricao or "Atualização").strip() or "Atualização"
 
@@ -1041,14 +1068,22 @@ def verificar_login():
                 messagebox.showerror("Erro de Acesso", "Usuário ou senha inválidos.")
                 return
 
-            status_acesso = obter_status_acesso_centralizado()
-            if not bool(status_acesso.get("ativa")):
-                label_status.configure(
-                    text=str(status_acesso.get("mensagem") or "Licença ausente/inválida e trial expirado. Ative a licença para continuar."),
-                    text_color="red",
+            trial_ativo, dias_trial, data_limite_trial = _trial_ativo_prioritario()
+            if trial_ativo:
+                logger.info(
+                    "[startup] Login liberado por trial (%s dia(s) restante(s) até %s).",
+                    dias_trial,
+                    data_limite_trial,
                 )
-                logger.warning("[startup] Login bloqueado por licença/acesso centralizado: %s", status_acesso)
-                return
+            else:
+                status_acesso = obter_status_acesso_centralizado()
+                if not bool(status_acesso.get("ativa")):
+                    label_status.configure(
+                        text=str(status_acesso.get("mensagem") or "Licença expirada ou inválida."),
+                        text_color="red",
+                    )
+                    logger.warning("[startup] Login bloqueado por token/Drive/Firebase: %s", status_acesso)
+                    return
 
             print("Log: Autenticação bem-sucedida.")
             role = resultado[3] if len(resultado) > 3 else "OPERADOR"
@@ -1175,16 +1210,50 @@ def abrir_tela_ativacao():
             pass
         messagebox.showerror("Ativação", msg, parent=dialog)
 
+    def _push_para_drive():
+        chave = entry_chave.get().strip()
+        if not chave:
+            messagebox.showwarning("Drive", "Informe a chave antes de enviar para o Drive.", parent=dialog)
+            return
+
+        ok, msg = publicar_licenca_drive(chave)
+        if ok:
+            messagebox.showinfo("Drive", msg, parent=dialog)
+            return
+
+        try:
+            diag = diagnosticar_chave_licenca(chave)
+            detalhe = str(diag.get("motivo") or "").strip()
+            if detalhe:
+                msg = f"{msg}\n\nDiagnóstico: {detalhe}"
+        except Exception:
+            pass
+        messagebox.showerror("Drive", msg, parent=dialog)
+
+    frame_acoes = ctk.CTkFrame(dialog, fg_color="transparent")
+    frame_acoes.pack(pady=(0, 10))
+
     btn_confirmar = ctk.CTkButton(
-        dialog,
+        frame_acoes,
         text="ATIVAR AGORA",
         command=_confirmar_ativacao,
-        width=200,
+        width=180,
         height=36,
         fg_color="#27ae60",
         hover_color="#2ecc71",
     )
-    btn_confirmar.pack(pady=(0, 10))
+    btn_confirmar.grid(row=0, column=0, padx=(0, 8))
+
+    btn_push_drive = ctk.CTkButton(
+        frame_acoes,
+        text="PUSH PARA O DRIVE",
+        command=_push_para_drive,
+        width=180,
+        height=36,
+        fg_color="#1a73e8",
+        hover_color="#1558b0",
+    )
+    btn_push_drive.grid(row=0, column=1)
     entry_chave.bind("<Return>", lambda _e: _confirmar_ativacao())
 
 ctk.set_appearance_mode("dark")
