@@ -2562,7 +2562,7 @@ class FrmMenu(ctk.CTk):
 
                 if not status.get("ativo") and not self._aviso_motor_fiscal_inicio_exibido:
                     self._aviso_motor_fiscal_inicio_exibido = True
-                    logger.warning("Motor fiscal inativo na abertura. Notificação exibida apenas no dashboard.")
+                    logger.info("Motor fiscal inativo na abertura. Isso não bloqueia o uso básico do sistema.")
 
                 mudou = anterior is None or anterior != bool(status.get("ativo"))
                 if (forcar_dashboard or mudou) and hasattr(self, "dashboard_frame") and self.dashboard_frame.winfo_exists():

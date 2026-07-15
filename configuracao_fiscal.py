@@ -222,7 +222,7 @@ def verificar_status_motor_fiscal(configuracao: ConfiguracaoFiscal | None = None
         "mensagem": (
             "Motor fiscal detectado e ativo."
             if ok
-            else "Motor fiscal não detectado. Verifique se o ACBrMonitor está aberto"
+            else "Motor fiscal não detectado. Isso não bloqueia o uso básico do sistema."
         ),
         "provedor": provedor,
         "monitor": monitor,
