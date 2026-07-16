@@ -1325,7 +1325,7 @@ print("Log: Interface de Login montada e botão vinculado.")
 
 btn_ativar = ctk.CTkButton(
     main_frame,
-    text="Ativar Licença",
+    text="ATIVAR LICENÇA",
     command=abrir_tela_ativacao,
     width=320,
     height=38,
@@ -1706,10 +1706,13 @@ def atualizar_status_trial_tela():
         _ocultar_botao_ativar()
         try:
             label_trial.configure(text="")
+            label_trial.pack_forget()
             label_status.configure(text="")
         except Exception:
             pass
         return
+
+    trial_ativo, dias_trial, data_limite_trial = _trial_ativo_prioritario()
 
     entry_user.configure(state="normal")
     entry_pass.configure(state="normal")
@@ -1717,14 +1720,21 @@ def atualizar_status_trial_tela():
     _mostrar_botao_ativar()
     btn_ativar.configure(
         state="normal",
-        text="Ativar Licença",
+        text="ATIVAR LICENÇA",
         width=320,
         height=38,
         fg_color="#34495e",
         hover_color="#3c5a71"
     )
     try:
-        label_trial.configure(text="")
+        if trial_ativo:
+            label_trial.configure(text=f"Modo Trial ativo: {dias_trial} dia(s) restante(s) (até {data_limite_trial}).")
+            if not label_trial.winfo_manager():
+                label_trial.pack(pady=(0, 8), before=label_status)
+        else:
+            label_trial.configure(text="Trial expirado. Ative uma licença para continuar.")
+            if not label_trial.winfo_manager():
+                label_trial.pack(pady=(0, 8), before=label_status)
         label_status.configure(text="")
     except Exception:
         pass

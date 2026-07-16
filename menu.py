@@ -100,6 +100,10 @@ from config import (
     obter_status_trial,
     obter_status_acesso_centralizado,
     obter_tipo_licenca,
+    obter_chave_instalacao,
+    ativar_licenca,
+    diagnosticar_chave_licenca,
+    publicar_licenca_drive,
     obter_modo_operacao,
     URL_APP_CELULAR_PUBLICA,
     WHATSAPP_ADMIN_DESTINO,
@@ -1252,6 +1256,34 @@ class FrmDadosOficina(ctk.CTkToplevel):
         self.lbl_licenca.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
         linha += 1
 
+        ctk.CTkLabel(form, text="Tipo de licença atual", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
+            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
+        )
+        linha += 1
+        self.ent_tipo_licenca = ctk.CTkEntry(
+            form,
+            height=34,
+            fg_color="#f8fafc",
+            border_width=2,
+            border_color="#1d4ed8",
+            text_color="#0f1720",
+        )
+        self.ent_tipo_licenca.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
+        self.ent_tipo_licenca.insert(0, "CARREGANDO...")
+        self.ent_tipo_licenca.configure(state="readonly")
+        linha += 1
+
+        ctk.CTkButton(
+            form,
+            text="ATIVAR LICENÇA",
+            fg_color="#34495e",
+            hover_color="#3c5a71",
+            width=220,
+            font=("Arial", 12, "bold"),
+            command=self.abrir_tela_ativacao_licenca,
+        ).grid(row=linha, column=0, sticky="w", padx=10, pady=(0, 10))
+        linha += 1
+
         ctk.CTkButton(form, text="SALVAR DADOS", fg_color="#27ae60", width=220, font=("Arial", 13, "bold"), command=self.salvar).grid(
             row=linha, column=0, sticky="w", padx=10, pady=(0, 10)
         )
@@ -1457,8 +1489,95 @@ class FrmDadosOficina(ctk.CTkToplevel):
             if hasattr(self, 'lbl_licenca'):
                 texto_licenca, cor_licenca = _obter_info_licenca_visual(role="ADMIN")
                 self.lbl_licenca.configure(text=texto_licenca.replace("\n", " | "), text_color=cor_licenca)
+
+            if hasattr(self, 'ent_tipo_licenca'):
+                tipo = str(obter_tipo_licenca() or "INATIVA").strip().upper()
+                self.ent_tipo_licenca.configure(state="normal")
+                self.ent_tipo_licenca.delete(0, "end")
+                self.ent_tipo_licenca.insert(0, tipo)
+                self.ent_tipo_licenca.configure(state="readonly")
         except Exception as lic_err:
             logger.warning("Erro ao configurar labels de licença: %s", lic_err)
+
+    def abrir_tela_ativacao_licenca(self):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Ativar Licença")
+        dialog.geometry("500x285")
+        dialog.resizable(False, False)
+        dialog.grab_set()
+        dialog.focus_force()
+
+        chave_inst = str(obter_chave_instalacao() or "").strip()
+        ctk.CTkLabel(dialog, text="Chave de instalação deste PC:", text_color="#bdc3c7").pack(pady=(16, 4))
+
+        frame_chave = ctk.CTkFrame(dialog, fg_color="#1f2a38")
+        frame_chave.pack(pady=(0, 12), padx=12, fill="x")
+        ctk.CTkLabel(frame_chave, text=chave_inst, text_color="#f1c40f", font=("Courier", 13, "bold")).pack(side="left", padx=(10, 8), pady=8)
+
+        def _copiar_chave():
+            dialog.clipboard_clear()
+            dialog.clipboard_append(chave_inst)
+            btn_copiar.configure(text="Copiado")
+            dialog.after(1500, lambda: btn_copiar.configure(text="Copiar Chave"))
+
+        btn_copiar = ctk.CTkButton(
+            frame_chave,
+            text="Copiar Chave",
+            command=_copiar_chave,
+            width=130,
+            height=30,
+            fg_color="#2980b9",
+            hover_color="#3498db",
+        )
+        btn_copiar.pack(side="right", padx=(0, 8), pady=8)
+
+        ctk.CTkLabel(dialog, text="Contra-senha de ativação:", text_color="#bdc3c7").pack(pady=(2, 4))
+        entry_chave = ctk.CTkEntry(dialog, width=420, height=40, placeholder_text="Cole aqui a chave enviada pelo suporte")
+        entry_chave.pack(pady=(0, 10))
+
+        def _confirmar():
+            chave = entry_chave.get().strip()
+            if not chave:
+                messagebox.showwarning("Ativação", "Informe a contra-senha de ativação.", parent=dialog)
+                return
+
+            btn_confirmar.configure(state="disabled", text="ATIVANDO...")
+            ok, msg = ativar_licenca(chave)
+            if ok:
+                def _publicar_drive_bg():
+                    try:
+                        publicar_licenca_drive(chave)
+                    except Exception as exc:
+                        logger.warning("Falha silenciosa ao publicar licença no Drive: %s", exc)
+
+                threading.Thread(target=_publicar_drive_bg, daemon=True, name="ofp-licenca-drive-menu").start()
+                self._configurar_labels_info()
+                messagebox.showinfo("Ativação", "Licença ativada com sucesso.", parent=dialog)
+                dialog.destroy()
+                return
+
+            try:
+                diag = diagnosticar_chave_licenca(chave)
+                detalhe = str(diag.get("motivo") or "").strip()
+                if detalhe:
+                    msg = f"{msg}\n\nDiagnóstico: {detalhe}"
+            except Exception:
+                pass
+
+            btn_confirmar.configure(state="normal", text="ATIVAR AGORA")
+            messagebox.showerror("Ativação", msg, parent=dialog)
+
+        btn_confirmar = ctk.CTkButton(
+            dialog,
+            text="ATIVAR AGORA",
+            command=_confirmar,
+            width=320,
+            height=36,
+            fg_color="#27ae60",
+            hover_color="#2ecc71",
+        )
+        btn_confirmar.pack(pady=(4, 8))
+        entry_chave.bind("<Return>", lambda _e: _confirmar())
 
     def escolher_logo(self):
         caminho = filedialog.askopenfilename(

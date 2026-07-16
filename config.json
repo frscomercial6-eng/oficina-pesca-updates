@@ -4,8 +4,8 @@
     "pdv": false
   },
   "update": {
-    "versao": "1.0.38",
-    "novidades": "Exibição dinâmica de licença e melhorias de interface",
+    "versao": "1.0.39",
+    "novidades": "Sistema com ativação simplificada e modo Trial de 15 dias habilitado",
     "download_url": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe"
   }
 }

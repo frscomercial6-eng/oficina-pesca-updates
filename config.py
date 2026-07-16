@@ -3364,10 +3364,49 @@ def ativar_licenca(chave: str):
 
 
 def obter_status_licenca():
-    """Status de acesso unificado por token assinado (v1.0.34)."""
+    """Retorna status da licença ativa (chave local/Drive ou token).
+
+    Observação: o fallback para trial é tratado em obter_status_acesso_centralizado().
+    """
+    chave, cliente_arquivo, validade_arquivo, _erro_arquivo = _extrair_licenca_de_arquivo()
+    if chave:
+        ok_chave, msg_chave, payload_chave = validar_chave_licenca(chave)
+        if ok_chave:
+            validade = str((payload_chave or {}).get("val") or validade_arquivo or "PERMANENTE").strip()
+            cliente = str((payload_chave or {}).get("cliente") or cliente_arquivo or "").strip()
+            tipo = _normalizar_tipo_licenca(str((payload_chave or {}).get("tipo") or ""), validade)
+
+            try:
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_chave', ?)",
+                        (chave,)
+                    )
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_cliente', ?)",
+                        (cliente,)
+                    )
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_validade', ?)",
+                        (validade,)
+                    )
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_tipo', ?)",
+                        (tipo,)
+                    )
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_ja_ativada', '1')"
+                    )
+                    conn.commit()
+            except Exception:
+                pass
+
+            return True, "Licença válida.", cliente, validade
+
     uid = str(obter_user_id_token_padrao() or "").strip().lower()
     if not uid:
-        return False, "Licença expirada ou inválida", "", "SEM_TOKEN"
+        return False, "Licença inativa", "", "SEM_TOKEN"
 
     token = ""
     token_origem = ""
@@ -3402,12 +3441,12 @@ def obter_status_licenca():
             token = ""
 
     if not token:
-        return False, "Licença expirada ou inválida", uid, "SEM_TOKEN"
+        return False, "Licença inativa", uid, "SEM_TOKEN"
 
     ok, _msg_token, payload = validar_token_acesso(token, user_id_esperado=uid)
     if not ok:
         validade_payload = str((payload or {}).get("exp") or "INVALIDA").strip() if isinstance(payload, dict) else "INVALIDA"
-        return False, "Licença expirada ou inválida", uid, validade_payload
+        return False, "Licença inativa", uid, validade_payload
 
     validade = str((payload or {}).get("exp") or "ATIVA").strip() if isinstance(payload, dict) else "ATIVA"
 
@@ -3438,23 +3477,47 @@ def obter_status_licenca():
 
 
 def obter_status_acesso_centralizado() -> dict:
-    """Avalia acesso usando exatamente o mesmo critério do Desktop (v1.0.34)."""
+    """Avalia acesso final: licença ativa OU trial válido (15 dias)."""
     licenca_ativa, msg_licenca, cliente_licenca, validade_licenca = obter_status_licenca()
-    acesso_liberado = bool(licenca_ativa)
+    trial_ativo = False
+    dias_trial_restantes = 0
+    data_limite_trial = ""
+
+    if not licenca_ativa:
+        try:
+            trial_ativo, dias_trial_restantes, data_limite_trial = obter_status_trial()
+            trial_ativo = bool(trial_ativo)
+            dias_trial_restantes = int(dias_trial_restantes or 0)
+            data_limite_trial = str(data_limite_trial or "").strip()
+        except Exception:
+            trial_ativo = False
+            dias_trial_restantes = 0
+            data_limite_trial = ""
+
+    acesso_liberado = bool(licenca_ativa or trial_ativo)
     bloqueada = not acesso_liberado
-    mensagem = msg_licenca if licenca_ativa else (msg_licenca or "Licença expirada ou inválida")
+
+    if licenca_ativa:
+        mensagem = str(msg_licenca or "Licença ativa.").strip()
+        tipo = str(obter_tipo_licenca() or "ATIVO").strip().upper()
+    elif trial_ativo:
+        mensagem = f"Modo Trial ativo: {dias_trial_restantes} dia(s) restante(s) (até {data_limite_trial})."
+        tipo = "TRIAL"
+    else:
+        mensagem = str(msg_licenca or "Licença inativa.").strip()
+        tipo = "INATIVA"
 
     return {
         "ativa": acesso_liberado,
         "bloqueada": bloqueada,
         "licenca_ativa": bool(licenca_ativa),
-        "trial_ativo": False,
+        "trial_ativo": bool(trial_ativo),
         "mensagem": str(mensagem or "").strip(),
         "cliente": str(cliente_licenca or "").strip(),
         "validade": str(validade_licenca or "").strip(),
-        "tipo": "TOKEN",
-        "dias_trial_restantes": 0,
-        "data_limite_trial": "",
+        "tipo": tipo,
+        "dias_trial_restantes": int(dias_trial_restantes or 0),
+        "data_limite_trial": data_limite_trial,
         "validacao_remota_ok": True,
         "validacao_remota_msg": "",
     }
@@ -3504,9 +3567,14 @@ def ja_teve_licenca_ativa() -> bool:
 
 def obter_tipo_licenca() -> str:
     ativa, _msg, _cliente, validade = obter_status_licenca()
-    if not ativa:
-        return "INATIVA"
-    return _normalizar_tipo_licenca("", str(validade or ""))
+    if ativa:
+        return _normalizar_tipo_licenca("", str(validade or ""))
+
+    trial_ativo, _dias, _limite = obter_status_trial()
+    if bool(trial_ativo):
+        return "TRIAL"
+
+    return "INATIVA"
 
 
 def obter_chave_licenca_ativa() -> str:
@@ -3552,6 +3620,37 @@ def obter_status_trial():
 
     dias_passados = max(0, hoje_ordinal - inicio_ordinal)
     dias_restantes = max(0, TRIAL_DIAS - dias_passados)
+
+    # Regra operacional: sem licença ativa prévia, libera um ciclo de trial automático.
+    if dias_restantes <= 0:
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'trial_auto_bootstrap_v1'")
+                row_bootstrap = cursor.fetchone()
+                bootstrap_ja_usado = str(row_bootstrap[0] if row_bootstrap and row_bootstrap[0] is not None else "").strip() in {"1", "true", "TRUE", "sim", "SIM"}
+
+                cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'licenca_ja_ativada'")
+                row_hist = cursor.fetchone()
+                historico_ativacao = str(row_hist[0] if row_hist and row_hist[0] is not None else "").strip() in {"1", "true", "TRUE", "sim", "SIM"}
+
+                tem_chave_ativa = bool(obter_chave_licenca_ativa())
+
+                if (not bootstrap_ja_usado) and (not historico_ativacao) and (not tem_chave_ativa):
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('trial_inicio_ordinal', ?)",
+                        (hoje_ordinal,)
+                    )
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('trial_auto_bootstrap_v1', '1')"
+                    )
+                    conn.commit()
+                    inicio_ordinal = hoje_ordinal
+                    dias_passados = 0
+                    dias_restantes = TRIAL_DIAS
+        except Exception:
+            pass
+
     limite_ordinal = inicio_ordinal + TRIAL_DIAS
     data_limite = date.fromordinal(limite_ordinal).strftime("%d/%m/%Y")
 
