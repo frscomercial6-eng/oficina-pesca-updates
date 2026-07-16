@@ -2754,11 +2754,45 @@ class FrmMenu(ctk.CTk):
             return
         self._atualizar_status_fiscal_dashboard(forcar_dashboard=True)
 
+    def _acbr_configurado_para_uso(self) -> tuple[bool, str]:
+        """Valida campos mínimos do ACBr no banco antes de considerar status ativo."""
+        try:
+            cfg = carregar_configuracao_fiscal()
+            params = cfg.parametros_gerais if isinstance(cfg.parametros_gerais, dict) else {}
+
+            provedor = str(params.get("provedor") or "acbr").strip().lower()
+            if provedor != "acbr":
+                return False, "Provedor fiscal diferente de ACBr"
+
+            monitor_path = str(params.get("acbr_monitor_path") or "").strip()
+            if not monitor_path or not os.path.isdir(monitor_path):
+                return False, "ACBrMonitor não configurado"
+
+            cert_path = str(params.get("acbr_certificado_a1_path") or params.get("certificado_a1_path") or "").strip()
+            if not cert_path or not os.path.exists(cert_path):
+                return False, "Certificado A1 não configurado"
+
+            cnpj_emitente = str(params.get("emitente_cnpj") or "").strip()
+            if not cnpj_emitente:
+                return False, "CNPJ fiscal não configurado"
+
+            modalidade = str(params.get("modalidade_fiscal") or "").strip().lower()
+            if modalidade not in {"nfe", "nfse"}:
+                return False, "Modalidade fiscal inválida"
+
+            return True, "ACBr configurado"
+        except Exception:
+            return False, "Falha ao validar configuração fiscal"
+
     def _obter_status_fiscal_dashboard(self) -> dict:
         try:
-            acesso = obter_status_acesso_centralizado()
-            if bool(acesso.get("ativa")):
-                return {"texto": "Status Fiscal: Ativo", "cor": "#2ecc71", "ativo": True}
+            acbr_ok, motivo_cfg = self._acbr_configurado_para_uso()
+            if not acbr_ok:
+                return {
+                    "texto": f"Status Fiscal: Inativo ({motivo_cfg})",
+                    "cor": "#e74c3c",
+                    "ativo": False,
+                }
 
             status_motor = verificar_status_motor_fiscal()
             ativo = bool(status_motor.get("ok"))
@@ -2767,6 +2801,16 @@ class FrmMenu(ctk.CTk):
             return {"texto": "Status Fiscal: Inativo", "cor": "#e74c3c", "ativo": False}
         except Exception:
             return {"texto": "Status Fiscal: Inativo", "cor": "#e74c3c", "ativo": False}
+
+    def _abrir_configuracao_acbr_dashboard(self):
+        if self.role != "ADMIN":
+            messagebox.showwarning(
+                "Acesso restrito",
+                "Somente ADMIN pode configurar o ACBr em Dados da Oficina.",
+                parent=self,
+            )
+            return
+        self.abrir_dados_oficina()
 
     def _atualizar_status_fiscal_dashboard(self, forcar_dashboard: bool = False):
         def _worker_fiscal_dashboard():
@@ -3071,18 +3115,23 @@ class FrmMenu(ctk.CTk):
             font=("Arial", 28, "bold"),
             text_color="orange",
         ).pack(anchor="w", pady=(0, 10))
-        ctk.CTkLabel(
-            parent_dash,
-            text="Painel automático em tempo real (sem ações manuais).",
-            font=("Arial", 11),
-            text_color="#9fb3c8",
-        ).pack(anchor="w", pady=(0, 10))
 
         ctk.CTkLabel(
             parent_dash,
             text=str(self._status_fiscal_dashboard.get("texto", "Status Fiscal: Inativo")),
             font=("Arial", 12, "bold"),
             text_color=str(self._status_fiscal_dashboard.get("cor", "#e74c3c")),
+        ).pack(anchor="w", pady=(0, 10))
+
+        ctk.CTkButton(
+            parent_dash,
+            text="Configurar ACBr",
+            width=180,
+            height=34,
+            fg_color="#1f6aa5",
+            hover_color="#1a5a8b",
+            font=("Arial", 11, "bold"),
+            command=self._abrir_configuracao_acbr_dashboard,
         ).pack(anchor="w", pady=(0, 10))
 
         texto_licenca_dashboard, cor_licenca_dashboard = _obter_info_licenca_visual(role=self.role)
