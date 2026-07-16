@@ -199,38 +199,33 @@ verificar_e_criar_tabelas()
 def _obter_info_licenca_visual(role: str = "") -> tuple[str, str]:
     """Retorna texto e cor padronizados para exibição de licença na UI."""
     try:
-        lic_ativa, msg_licenca, _cliente_licenca, validade_licenca = obter_status_licenca()
-        tipo_licenca = str(obter_tipo_licenca() or "").strip()
-        tipo_exibicao = tipo_licenca if tipo_licenca else ("INATIVA" if not lic_ativa else "INDEFINIDA")
+        status = obter_status_acesso_centralizado() or {}
+        licenca_ativa = bool(status.get("licenca_ativa"))
+        trial_ativo = bool(status.get("trial_ativo"))
+        validade = str(status.get("validade") or "").strip().upper()
 
-        texto = f"Licença: {tipo_exibicao}"
-        cor = "#607d8b"
-
-        validade_txt = str(validade_licenca or "").strip()
-        if lic_ativa and validade_txt and validade_txt.upper() != "PERMANENTE":
-            dias_restantes = None
-            formatos = ["%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d"]
-            for fmt in formatos:
-                try:
-                    dt_val = datetime.strptime(validade_txt, fmt)
-                    dias_restantes = (dt_val.date() - datetime.now().date()).days
-                    break
-                except Exception:
-                    continue
-
-            if dias_restantes is not None and dias_restantes <= 7:
-                cor = "#b8860b"
-                texto = f"{texto}\nExpira em {max(dias_restantes, 0)} dia(s)"
+        if trial_ativo:
+            tipo_exibicao = "Trial"
+            cor = "#f1c40f"
+        elif licenca_ativa:
+            tipo_exibicao = "Permanente" if validade == "PERMANENTE" else "Mensal"
+            cor = "#2ecc71"
+        else:
+            tipo = str(obter_tipo_licenca() or "").strip().upper()
+            if tipo == "TRIAL":
+                tipo_exibicao = "Trial"
+                cor = "#f1c40f"
+            elif tipo == "PERMANENTE":
+                tipo_exibicao = "Permanente"
+                cor = "#2ecc71"
+            elif tipo in {"MENSAL", "ATIVA", "TOKEN"}:
+                tipo_exibicao = "Mensal"
+                cor = "#2ecc71"
             else:
-                cor = "#6b7280"
-                texto = f"{texto}\nValidade: {validade_txt}"
-        elif not lic_ativa and str(role).strip().upper() == "ADMIN":
-            detalhe = str(msg_licenca or "").strip()
-            if detalhe:
-                texto = f"{texto}\n{detalhe}"
-            cor = "#6b7280"
+                tipo_exibicao = "Inativa"
+                cor = "#e74c3c"
 
-        return texto, cor
+        return f"Licença: {tipo_exibicao}", cor
     except Exception:
         return "Licença: indisponível", "#6b7280"
 
@@ -1126,6 +1121,17 @@ class FrmDadosOficina(ctk.CTkToplevel):
         )
         linha += 1
 
+        ctk.CTkButton(
+            form,
+            text="Configurar/Instalar ACBr",
+            width=220,
+            fg_color="#1f6aa5",
+            hover_color="#1a5a8b",
+            font=("Arial", 12, "bold"),
+            command=self.abrir_configuracao_instalacao_acbr,
+        ).grid(row=linha, column=0, sticky="w", padx=10, pady=(0, 8))
+        linha += 1
+
         ctk.CTkLabel(form, text="Modalidade Fiscal", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
@@ -1601,6 +1607,44 @@ class FrmDadosOficina(ctk.CTkToplevel):
         if caminho:
             self.ent_fiscal_cert_a1.delete(0, "end")
             self.ent_fiscal_cert_a1.insert(0, caminho)
+
+    def abrir_configuracao_instalacao_acbr(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        candidatos_setup = [
+            os.path.join(base_dir, "instala", "ACBrMonitorPLUS-DEMO-1.4.0.467-x86-I.exe"),
+            os.path.join(base_dir, "config_fiscal", "acbr_monitor", "ACBrMonitorPLUS-DEMO-1.4.0.467-x86-I.exe"),
+        ]
+
+        for instalador in candidatos_setup:
+            if not os.path.exists(instalador):
+                continue
+            try:
+                if hasattr(os, "startfile"):
+                    os.startfile(instalador)  # type: ignore[attr-defined]
+                else:
+                    webbrowser.open(instalador)
+                return
+            except Exception as exc:
+                messagebox.showerror("ACBr", f"Não foi possível abrir o instalador do ACBr: {exc}", parent=self)
+                return
+
+        pasta_config = os.path.join(base_dir, "config_fiscal")
+        if os.path.isdir(pasta_config):
+            try:
+                if hasattr(os, "startfile"):
+                    os.startfile(pasta_config)  # type: ignore[attr-defined]
+                else:
+                    webbrowser.open(pasta_config)
+                return
+            except Exception as exc:
+                messagebox.showerror("ACBr", f"Não foi possível abrir a pasta de configuração fiscal: {exc}", parent=self)
+                return
+
+        messagebox.showwarning(
+            "ACBr",
+            "Não foi localizado instalador ou pasta de configuração do ACBr nesta instalação.",
+            parent=self,
+        )
 
     def _descobrir_oficina_udp_cfg(self, timeout_total=5.0):
         payload = json.dumps({
@@ -2572,6 +2616,18 @@ class FrmMenu(ctk.CTk):
         ctk.CTkLabel(self.sidebar, text=f"👤 {self.usuario.upper()}", font=("Arial", 10), text_color="#7f8c8d", fg_color="#0d1b2a").pack(padx=8, pady=(0, 2))
         ctk.CTkLabel(self.sidebar, text=f"({self.role})", font=("Arial", 9), text_color="#555f6a", fg_color="#0d1b2a").pack(padx=8, pady=(0, 5))
 
+        self.lbl_contador_licenca = ctk.CTkLabel(
+            self.sidebar,
+            text="Licença: carregando...",
+            font=("Arial", 9, "bold"),
+            text_color="#607d8b",
+            fg_color="#0d1b2a",
+            wraplength=190,
+            justify="center",
+        )
+        self.lbl_contador_licenca.pack(padx=8, pady=(0, 5))
+        self._atualizar_contador_licenca()
+
         self.after(2000, self._adicionar_status_nuvem) # Atrasado para estabilizar
 
         ctk.CTkFrame(self.sidebar, height=1, fg_color="#1e3a5f").pack(fill="x", padx=12, pady=(0, 5))
@@ -2770,11 +2826,7 @@ class FrmMenu(ctk.CTk):
         try:
             acbr_ok, motivo_cfg = self._acbr_configurado_para_uso()
             if not acbr_ok:
-                return {
-                    "texto": f"Status Fiscal: Inativo ({motivo_cfg})",
-                    "cor": "#e74c3c",
-                    "ativo": False,
-                }
+                return {"texto": "Status Fiscal: Inativo", "cor": "#e74c3c", "ativo": False}
 
             status_motor = verificar_status_motor_fiscal()
             ativo = bool(status_motor.get("ok"))
@@ -3103,17 +3155,6 @@ class FrmMenu(ctk.CTk):
             text=str(self._status_fiscal_dashboard.get("texto", "Status Fiscal: Inativo")),
             font=("Arial", 12, "bold"),
             text_color=str(self._status_fiscal_dashboard.get("cor", "#e74c3c")),
-        ).pack(anchor="w", pady=(0, 10))
-
-        ctk.CTkButton(
-            parent_dash,
-            text="Configurar ACBr",
-            width=180,
-            height=34,
-            fg_color="#1f6aa5",
-            hover_color="#1a5a8b",
-            font=("Arial", 11, "bold"),
-            command=self._abrir_configuracao_acbr_dashboard,
         ).pack(anchor="w", pady=(0, 10))
 
         # Sem seletor/manual: o dashboard abre pronto pelo perfil do usuário.
@@ -3797,6 +3838,15 @@ class FrmMenu(ctk.CTk):
         return ""
 
     def abrir_app_celular_sidebar(self):
+        tipo_licenca = str(obter_tipo_licenca() or "").strip().upper()
+        if tipo_licenca == "TRIAL":
+            messagebox.showwarning(
+                "APP CELULAR",
+                "Atenção: A integração com o App Celular é exclusiva para licenças Ativas. Por favor, ative sua licença para utilizar este recurso.",
+                parent=self,
+            )
+            return
+
         pasta_apk = self._resolver_pasta_apk_distribuicao()
         if not pasta_apk:
             messagebox.showwarning(

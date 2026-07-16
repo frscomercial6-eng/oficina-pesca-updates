@@ -1332,8 +1332,6 @@ btn_ativar = ctk.CTkButton(
     fg_color="#34495e",
     hover_color="#3c5a71"
 )
-btn_ativar.pack(pady=(0, 8))
-
 btn_pagamento = ctk.CTkButton(
     main_frame,
     text="COMPRAR LICENÇA",
@@ -1344,6 +1342,8 @@ btn_pagamento = ctk.CTkButton(
     hover_color="#7d3c98"
 )
 btn_pagamento.pack(pady=(0, 10))
+
+btn_ativar.pack(pady=(0, 8))
 
 ctk.CTkLabel(main_frame, text="Cadastro de usuários disponível apenas no menu do ADMIN.", text_color="#95a5a6", wraplength=360, justify="center", font=("Segoe UI", 10)).pack(pady=(2, 14))
 
@@ -1357,7 +1357,7 @@ label_status.pack_forget()
 def _mostrar_botao_ativar() -> None:
     try:
         if not btn_ativar.winfo_manager():
-            btn_ativar.pack(pady=(0, 10), before=btn_pagamento)
+            btn_ativar.pack(pady=(0, 8), after=btn_pagamento)
     except Exception:
         pass
 

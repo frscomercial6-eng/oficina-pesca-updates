@@ -6,7 +6,7 @@ set "VENV_PY=.venv\Scripts\python.exe"
 set "ISCC_EXE=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 set "APP_NAME=Oficina_Pesca"
 set "DIST_DIR=dist\%APP_NAME%"
-set "FINAL_SETUP=Setup_OficinaPesca_v1.0.41_FINAL.exe"
+set "FINAL_SETUP=Setup_OficinaPesca_v1.0.42_FINAL.exe"
 echo ============================================
 echo  INSTALADOR FINAL - OFICINA DE PESCA
 echo ============================================
@@ -97,7 +97,7 @@ if errorlevel 1 (
 if exist "%DIST_DIR%\oficina.db" del /f /q "%DIST_DIR%\oficina.db"
 if exist "config.json" copy /y "config.json" "%DIST_DIR%\config.json" >nul
 
-powershell -NoProfile -Command "& '%ISCC_EXE%' '/DInstallerOutputName=Setup_OficinaPesca_v1.0.41_FINAL' 'instalar.iss'; exit $LASTEXITCODE"
+powershell -NoProfile -Command "& '%ISCC_EXE%' '/DInstallerOutputName=Setup_OficinaPesca_v1.0.42_FINAL' 'instalar.iss'; exit $LASTEXITCODE"
 if errorlevel 1 (
   echo [ERRO] Falha ao compilar instalador final.
   exit /b 1
