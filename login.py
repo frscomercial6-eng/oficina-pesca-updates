@@ -1364,8 +1364,8 @@ def _mostrar_botao_ativar() -> None:
 
 def _ocultar_botao_ativar() -> None:
     try:
-        if btn_ativar.winfo_manager():
-            btn_ativar.pack_forget()
+        if not btn_ativar.winfo_manager():
+            btn_ativar.pack(pady=(0, 8), after=btn_pagamento)
     except Exception:
         pass
 
@@ -1698,12 +1698,38 @@ def atualizar_agora():
 def atualizar_status_trial_tela():
     global _PAGAMENTO_EXPIRADO_JA_EXIBIDO
     lic_ativa, _msg_lic, cliente_lic, validade_lic = _licenca_local_ativa_prioritaria()
+    _mostrar_botao_ativar()
     if lic_ativa:
         _PAGAMENTO_EXPIRADO_JA_EXIBIDO = False
         entry_user.configure(state="normal")
         entry_pass.configure(state="normal")
         btn_entrar.configure(state="normal", fg_color="#27ae60", hover_color="#2ecc71")
-        _ocultar_botao_ativar()
+
+        expira_breve = False
+        try:
+            expira_breve, _dias = licenca_vence_em_ate_dias(7)
+        except Exception:
+            expira_breve = False
+
+        if expira_breve:
+            btn_ativar.configure(
+                state="normal",
+                text="ATIVAR LICENÇA",
+                width=320,
+                height=38,
+                fg_color="#34495e",
+                hover_color="#3c5a71",
+            )
+        else:
+            btn_ativar.configure(
+                state="disabled",
+                text="ATIVAR LICENÇA",
+                width=320,
+                height=38,
+                fg_color="#7f8c8d",
+                hover_color="#7f8c8d",
+            )
+
         try:
             label_trial.configure(text="")
             label_trial.pack_forget()
@@ -1717,7 +1743,6 @@ def atualizar_status_trial_tela():
     entry_user.configure(state="normal")
     entry_pass.configure(state="normal")
     btn_entrar.configure(state="normal", fg_color="#27ae60", hover_color="#2ecc71")
-    _mostrar_botao_ativar()
     btn_ativar.configure(
         state="normal",
         text="ATIVAR LICENÇA",

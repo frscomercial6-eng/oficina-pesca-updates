@@ -1262,14 +1262,25 @@ class FrmDadosOficina(ctk.CTkToplevel):
         self.ent_tipo_licenca_info = ctk.CTkEntry(
             form,
             height=34,
-            fg_color="#f8fafc",
-            border_width=2,
-            border_color="#1d4ed8",
-            text_color="#0f1720",
+            fg_color="#d1d5db",
+            border_width=1,
+            border_color="#9ca3af",
+            text_color="#374151",
         )
         self.ent_tipo_licenca_info.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
         self.ent_tipo_licenca_info.insert(0, "Tipo de licença: carregando...")
         self.ent_tipo_licenca_info.configure(state="readonly")
+        linha += 1
+
+        ctk.CTkButton(
+            form,
+            text="ATIVAR LICENÇA",
+            fg_color="#34495e",
+            hover_color="#3c5a71",
+            width=220,
+            font=("Arial", 12, "bold"),
+            command=self.abrir_tela_ativacao_licenca,
+        ).grid(row=linha, column=0, sticky="w", padx=10, pady=(0, 8))
         linha += 1
 
         ctk.CTkButton(form, text="SALVAR DADOS", fg_color="#27ae60", width=220, font=("Arial", 13, "bold"), command=self.salvar).grid(

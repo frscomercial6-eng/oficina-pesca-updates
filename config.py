@@ -2404,6 +2404,25 @@ def executar_atualizacao(
             args.extend(["/VERYSILENT", "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"])
 
         subprocess.Popen(args, cwd=base_tmp)
+
+        app_exec = str(app_executavel or "").strip()
+        if app_exec and os.path.exists(app_exec):
+            try:
+                restart_script = os.path.join(base_tmp, "restart_after_update.cmd")
+                script_lines = [
+                    "@echo off",
+                    "setlocal",
+                    "ping 127.0.0.1 -n 16 > nul",
+                    f"start \"\" \"{app_exec}\"",
+                    "exit /b 0",
+                ]
+                with open(restart_script, "w", encoding="utf-8") as frestart:
+                    frestart.write("\r\n".join(script_lines) + "\r\n")
+                subprocess.Popen(["cmd", "/c", restart_script], cwd=base_tmp)
+                log_upd.info("[update] Restart de contingencia agendado para: %s", app_exec)
+            except Exception as exc_restart:
+                log_upd.warning("[update] Falha ao agendar restart de contingencia: %s", exc_restart)
+
         log_upd.info("[update] Instalador iniciado: %s", " ".join(args))
         return True, "Atualização iniciada com sucesso."
     except Exception as e:
