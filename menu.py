@@ -191,6 +191,45 @@ def verificar_e_criar_tabelas():
 # 3º: CHAMA A FUNÇÃO
 verificar_e_criar_tabelas()
 
+
+def _obter_info_licenca_visual(role: str = "") -> tuple[str, str]:
+    """Retorna texto e cor padronizados para exibição de licença na UI."""
+    try:
+        lic_ativa, msg_licenca, _cliente_licenca, validade_licenca = obter_status_licenca()
+        tipo_licenca = str(obter_tipo_licenca() or "").strip()
+        tipo_exibicao = tipo_licenca if tipo_licenca else ("INATIVA" if not lic_ativa else "INDEFINIDA")
+
+        texto = f"Licença: {tipo_exibicao}"
+        cor = "#607d8b"
+
+        validade_txt = str(validade_licenca or "").strip()
+        if lic_ativa and validade_txt and validade_txt.upper() != "PERMANENTE":
+            dias_restantes = None
+            formatos = ["%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d"]
+            for fmt in formatos:
+                try:
+                    dt_val = datetime.strptime(validade_txt, fmt)
+                    dias_restantes = (dt_val.date() - datetime.now().date()).days
+                    break
+                except Exception:
+                    continue
+
+            if dias_restantes is not None and dias_restantes <= 7:
+                cor = "#b8860b"
+                texto = f"{texto}\nExpira em {max(dias_restantes, 0)} dia(s)"
+            else:
+                cor = "#6b7280"
+                texto = f"{texto}\nValidade: {validade_txt}"
+        elif not lic_ativa and str(role).strip().upper() == "ADMIN":
+            detalhe = str(msg_licenca or "").strip()
+            if detalhe:
+                texto = f"{texto}\n{detalhe}"
+            cor = "#6b7280"
+
+        return texto, cor
+    except Exception:
+        return "Licença: indisponível", "#6b7280"
+
 # 4º: SEGUE O RESTO DO CÓDIGO (CLASSES, ETC)
 # class FrmProdutos(ctk.CTkToplevel):
 # ...
@@ -1415,8 +1454,9 @@ class FrmDadosOficina(ctk.CTkToplevel):
                 return
             self.lbl_versao.configure(text=f"Versão do sistema: {APP_VERSION}")
 
-            tipo = obter_tipo_licenca()
-            self.lbl_licenca.configure(text="", text_color="#2ecc71")
+            if hasattr(self, 'lbl_licenca'):
+                texto_licenca, cor_licenca = _obter_info_licenca_visual(role="ADMIN")
+                self.lbl_licenca.configure(text=texto_licenca.replace("\n", " | "), text_color=cor_licenca)
         except Exception as lic_err:
             logger.warning("Erro ao configurar labels de licença: %s", lic_err)
 
@@ -2423,8 +2463,8 @@ class FrmMenu(ctk.CTk):
         self.lbl_contador_licenca = ctk.CTkLabel(
             self.sidebar,
             text="",
-            font=("Arial", 9, "bold"),
-            text_color="#f1c40f",
+            font=("Arial", 8),
+            text_color="#607d8b",
             fg_color="#0d1b2a",
             wraplength=190,
             justify="center",
@@ -2926,6 +2966,14 @@ class FrmMenu(ctk.CTk):
             text_color=str(self._status_fiscal_dashboard.get("cor", "#e74c3c")),
         ).pack(anchor="w", pady=(0, 10))
 
+        texto_licenca_dashboard, cor_licenca_dashboard = _obter_info_licenca_visual(role=self.role)
+        ctk.CTkLabel(
+            parent_dash,
+            text=texto_licenca_dashboard.replace("\n", " | "),
+            font=("Arial", 10),
+            text_color=cor_licenca_dashboard,
+        ).pack(anchor="w", pady=(0, 10))
+
         # Sem seletor/manual: o dashboard abre pronto pelo perfil do usuário.
         if self.role == "OFICINA":
             mode = "OFICINA"
@@ -3224,10 +3272,11 @@ class FrmMenu(ctk.CTk):
 
     def _atualizar_contador_licenca(self):
         try:
-            self.lbl_contador_licenca.configure(text="", text_color="#2ecc71")
+            texto, cor = _obter_info_licenca_visual(role=self.role)
+            self.lbl_contador_licenca.configure(text=texto, text_color=cor)
         except Exception as e:
             logger.exception("Erro ao atualizar contador de licença/trial: %s", e)
-            self.lbl_contador_licenca.configure(text="", text_color="#f1c40f")
+            self.lbl_contador_licenca.configure(text="Licença: indisponível", text_color="#6b7280")
         finally: #
             if self.winfo_exists():
                 self.after(60000, self._atualizar_contador_licenca)
