@@ -1222,6 +1222,34 @@ class FrmDadosOficina(ctk.CTkToplevel):
         ).grid(row=0, column=1, padx=(8, 0))
         linha += 1
 
+        ctk.CTkLabel(form, text="Tipo de licença atual", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
+            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
+        )
+        linha += 1
+        self.ent_tipo_licenca = ctk.CTkEntry(
+            form,
+            height=34,
+            fg_color="#f8fafc",
+            border_width=2,
+            border_color="#1d4ed8",
+            text_color="#0f1720",
+        )
+        self.ent_tipo_licenca.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
+        self.ent_tipo_licenca.insert(0, "CARREGANDO...")
+        self.ent_tipo_licenca.configure(state="readonly")
+        linha += 1
+
+        ctk.CTkButton(
+            form,
+            text="ATIVAR LICENÇA",
+            fg_color="#34495e",
+            hover_color="#3c5a71",
+            width=220,
+            font=("Arial", 12, "bold"),
+            command=self.abrir_tela_ativacao_licenca,
+        ).grid(row=linha, column=0, sticky="w", padx=10, pady=(0, 10))
+        linha += 1
+
         ctk.CTkLabel(form, text="Configuração de rede da oficina", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
@@ -1251,37 +1279,6 @@ class FrmDadosOficina(ctk.CTkToplevel):
         linha += 1
         self.lbl_versao = ctk.CTkLabel(form, text="Versão: carregando...", anchor="w", text_color="#7f8c8d", font=("Arial", 11))
         self.lbl_versao.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2))
-        linha += 1
-        self.lbl_licenca = ctk.CTkLabel(form, text="", anchor="w", text_color="#7f8c8d", font=("Arial", 11))
-        self.lbl_licenca.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
-        linha += 1
-
-        ctk.CTkLabel(form, text="Tipo de licença atual", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        self.ent_tipo_licenca = ctk.CTkEntry(
-            form,
-            height=34,
-            fg_color="#f8fafc",
-            border_width=2,
-            border_color="#1d4ed8",
-            text_color="#0f1720",
-        )
-        self.ent_tipo_licenca.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
-        self.ent_tipo_licenca.insert(0, "CARREGANDO...")
-        self.ent_tipo_licenca.configure(state="readonly")
-        linha += 1
-
-        ctk.CTkButton(
-            form,
-            text="ATIVAR LICENÇA",
-            fg_color="#34495e",
-            hover_color="#3c5a71",
-            width=220,
-            font=("Arial", 12, "bold"),
-            command=self.abrir_tela_ativacao_licenca,
-        ).grid(row=linha, column=0, sticky="w", padx=10, pady=(0, 10))
         linha += 1
 
         ctk.CTkButton(form, text="SALVAR DADOS", fg_color="#27ae60", width=220, font=("Arial", 13, "bold"), command=self.salvar).grid(
@@ -1485,10 +1482,6 @@ class FrmDadosOficina(ctk.CTkToplevel):
             if not hasattr(self, 'lbl_versao'):
                 return
             self.lbl_versao.configure(text=f"Versão do sistema: {APP_VERSION}")
-
-            if hasattr(self, 'lbl_licenca'):
-                texto_licenca, cor_licenca = _obter_info_licenca_visual(role="ADMIN")
-                self.lbl_licenca.configure(text=texto_licenca.replace("\n", " | "), text_color=cor_licenca)
 
             if hasattr(self, 'ent_tipo_licenca'):
                 tipo = str(obter_tipo_licenca() or "INATIVA").strip().upper()
@@ -2579,17 +2572,6 @@ class FrmMenu(ctk.CTk):
         ctk.CTkLabel(self.sidebar, text=f"👤 {self.usuario.upper()}", font=("Arial", 10), text_color="#7f8c8d", fg_color="#0d1b2a").pack(padx=8, pady=(0, 2))
         ctk.CTkLabel(self.sidebar, text=f"({self.role})", font=("Arial", 9), text_color="#555f6a", fg_color="#0d1b2a").pack(padx=8, pady=(0, 5))
 
-        self.lbl_contador_licenca = ctk.CTkLabel(
-            self.sidebar,
-            text="",
-            font=("Arial", 8),
-            text_color="#607d8b",
-            fg_color="#0d1b2a",
-            wraplength=190,
-            justify="center",
-        )
-        self.lbl_contador_licenca.pack(padx=8, pady=(0, 5))
-        self._atualizar_contador_licenca()
         self.after(2000, self._adicionar_status_nuvem) # Atrasado para estabilizar
 
         ctk.CTkFrame(self.sidebar, height=1, fg_color="#1e3a5f").pack(fill="x", padx=12, pady=(0, 5))
@@ -3132,14 +3114,6 @@ class FrmMenu(ctk.CTk):
             hover_color="#1a5a8b",
             font=("Arial", 11, "bold"),
             command=self._abrir_configuracao_acbr_dashboard,
-        ).pack(anchor="w", pady=(0, 10))
-
-        texto_licenca_dashboard, cor_licenca_dashboard = _obter_info_licenca_visual(role=self.role)
-        ctk.CTkLabel(
-            parent_dash,
-            text=texto_licenca_dashboard.replace("\n", " | "),
-            font=("Arial", 10),
-            text_color=cor_licenca_dashboard,
         ).pack(anchor="w", pady=(0, 10))
 
         # Sem seletor/manual: o dashboard abre pronto pelo perfil do usuário.
