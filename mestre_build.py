@@ -12,7 +12,7 @@ import time
 import zipfile
 
 DIV = "═" * 50
-VERSAO = "1.0.39"
+VERSAO = "1.0.40"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
