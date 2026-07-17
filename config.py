@@ -195,10 +195,27 @@ except Exception:
 
 # Carrega variÃ¡veis de ambiente locais (desenvolvimento/build) sem quebrar em produÃ§Ã£o.
 try:
-    _ENV_BASE = os.path.dirname(os.path.abspath(__file__))
-    _ENV_PATH = os.path.join(_ENV_BASE, ".env")
     if load_dotenv:
-        load_dotenv(_ENV_PATH, override=False)
+        _env_candidates = []
+        _module_dir = os.path.dirname(os.path.abspath(__file__))
+        _exec_dir = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, "frozen", False) else ""
+        _cwd_dir = os.getcwd()
+
+        for _base in (_exec_dir, _cwd_dir, _module_dir):
+            if not _base:
+                continue
+            _env_candidates.append(os.path.join(_base, ".env"))
+            _env_candidates.append(os.path.join(_base, ".env.local"))
+
+        _seen = set()
+        for _env_path in _env_candidates:
+            _abs = os.path.abspath(_env_path)
+            if _abs in _seen:
+                continue
+            _seen.add(_abs)
+            load_dotenv(_abs, override=False)
+
+        # Mantém fallback padrão do python-dotenv (sem caminho explícito).
         load_dotenv(override=False)
 except Exception:
     pass
