@@ -1,11 +1,11 @@
 {
-  "versao": "1.0.49",
-  "novidades": "v1.0.49: Atualização de versão automática.",
+  "versao": "1.0.50",
+  "novidades": "v1.0.50: Atualização de versão automática.",
   "url_download": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe",
   "download_url": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe",
   "force_update": false,
   "apk": {
-    "versao": "1.0.49",
+    "versao": "1.0.50",
     "canal": "nativo"
   }
 }

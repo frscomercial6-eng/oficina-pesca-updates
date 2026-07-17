@@ -7,7 +7,7 @@ set "ISCC_EXE=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 set "APP_NAME=Oficina_Pesca"
 set "DIST_DIR=dist\%APP_NAME%"
 set "STAGE_DIR=INSTALADOR_FINAL\%APP_NAME%"
-set "SETUP_NAME=Setup_OficinaPesca_v1.0.49.exe"
+set "SETUP_NAME=Setup_OficinaPesca_v1.0.50.exe"
 set "APK_FIXED=apk_celular_distribuicao\oficina_app_signed.apk"
 set "APK_DEBUG=apk_celular_distribuicao\app-debug.apk"
 
