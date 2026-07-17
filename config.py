@@ -456,15 +456,68 @@ GOOGLE_DRIVE_PASTA_LICENCA = "Oficina de Pesca - Licencas"
 TOKEN_ARQUIVO_NOME = "acesso.token"
 TOKEN_VALIDADE_DIAS = 30
 TOKEN_RENOVAR_FALTANDO_DIAS = 5
+_FIREBASE_GSERVICES_CACHE = {"loaded": False, "values": {}}
+
+
+def _carregar_firebase_google_services_local() -> dict:
+    """Lê google-services.json local para preencher config Firebase sem hardcode."""
+    global _FIREBASE_GSERVICES_CACHE
+    if _FIREBASE_GSERVICES_CACHE.get("loaded"):
+        return dict(_FIREBASE_GSERVICES_CACHE.get("values") or {})
+
+    candidatos = [
+        os.path.join(DIRETORIO_ATUAL, "google-services.json"),
+        os.path.join(DIRETORIO_RECURSOS, "google-services.json"),
+        os.path.join(DIRETORIO_ATUAL, "android_apk", "app", "google-services.json"),
+        os.path.join(os.getcwd(), "google-services.json"),
+    ]
+
+    mapeado: dict[str, str] = {}
+    for caminho in candidatos:
+        try:
+            if not os.path.isfile(caminho):
+                continue
+            with open(caminho, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+
+            project_info = raw.get("project_info") or {}
+            client = ((raw.get("client") or [{}])[0]) or {}
+            client_info = client.get("client_info") or {}
+            api_cfg = ((client.get("api_key") or [{}])[0]) or {}
+
+            project_id = str(project_info.get("project_id") or "").strip()
+            mapeado = {
+                "database_url": str(project_info.get("firebase_url") or "").strip(),
+                "project_id": project_id,
+                "storage_bucket": str(project_info.get("storage_bucket") or "").strip(),
+                "messaging_sender_id": str(project_info.get("project_number") or "").strip(),
+                "app_id": str(client_info.get("mobilesdk_app_id") or "").strip(),
+                "api_key": str(api_cfg.get("current_key") or "").strip(),
+                "auth_domain": f"{project_id}.firebaseapp.com" if project_id else "",
+            }
+            break
+        except Exception:
+            continue
+
+    _FIREBASE_GSERVICES_CACHE = {"loaded": True, "values": mapeado}
+    return dict(mapeado)
 
 
 def _firebase_cfg_get(key: str, default: str = "") -> str:
     cfg = _ler_cfg()
-    return str(
-        os.environ.get(f"OFP_FIREBASE_{key.upper()}", "")
-        or cfg.get("firebase", key, fallback=default)
-        or ""
-    ).strip()
+    valor_env = str(os.environ.get(f"OFP_FIREBASE_{key.upper()}", "") or "").strip()
+    if valor_env:
+        return valor_env
+
+    valor_cfg = str(cfg.get("firebase", key, fallback="") or "").strip()
+    if valor_cfg:
+        return valor_cfg
+
+    valor_local = str(_carregar_firebase_google_services_local().get(key, "") or "").strip()
+    if valor_local:
+        return valor_local
+
+    return str(default or "").strip()
 
 
 def _firebase_safe_scope(valor: str) -> str:
@@ -537,7 +590,8 @@ def obter_firebase_web_config() -> dict:
     return {
         "apiKey": _firebase_cfg_get("api_key"),
         "authDomain": _firebase_cfg_get("auth_domain"),
-        "databaseURL": _firebase_cfg_get("database_url", "https://oficinapescasystem-default-rtdb.firebaseio.com/"),
+        # Sem fallback hardcoded: a URL deve vir de ambiente/config local.
+        "databaseURL": _firebase_cfg_get("database_url"),
         "projectId": _firebase_cfg_get("project_id"),
         "storageBucket": _firebase_cfg_get("storage_bucket"),
         "messagingSenderId": _firebase_cfg_get("messaging_sender_id"),

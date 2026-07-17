@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'com.google.gms.google-services'
 }
 
 def rootVersionFile = file('../../version.txt')
@@ -22,7 +23,7 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.oficinapesca.mobile"
+        applicationId "com.frs.oficinadepesca"
         minSdk 24
         targetSdk 34
         versionCode appVersionCode
@@ -30,18 +31,15 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField "String", "WEB_APP_URL", "\"${System.getenv('OFP_WEB_APP_URL') ?: 'https://oficinapesca.app/app'}\""
-        buildConfigField "String", "DRIVE_TOKEN_FOLDER_ID", "\"${System.getenv('OFP_DRIVE_TOKEN_FOLDER_ID') ?: ''}\""
-        buildConfigField "String", "TOKEN_SECRET", "\"${System.getenv('OFP_TOKEN_SECRET') ?: (System.getenv('OFP_LICENCA_SECRET') ?: 'ALTERAR-EM-PRODUCAO')}\""
-        buildConfigField "String", "TOKEN_FILE_NAME", "\"${System.getenv('OFP_TOKEN_FILE_NAME') ?: 'acesso.token'}\""
         buildConfigField "String", "FIREBASE_API_KEY", "\"${System.getenv('OFP_FIREBASE_API_KEY') ?: ''}\""
         buildConfigField "String", "FIREBASE_AUTH_DOMAIN", "\"${System.getenv('OFP_FIREBASE_AUTH_DOMAIN') ?: ''}\""
-        buildConfigField "String", "FIREBASE_DATABASE_URL", "\"${System.getenv('OFP_FIREBASE_DATABASE_URL') ?: 'https://oficinapescasystem-default-rtdb.firebaseio.com/'}\""
+        buildConfigField "String", "FIREBASE_DATABASE_URL", "\"${System.getenv('OFP_FIREBASE_DATABASE_URL') ?: ''}\""
         buildConfigField "String", "FIREBASE_PROJECT_ID", "\"${System.getenv('OFP_FIREBASE_PROJECT_ID') ?: ''}\""
         buildConfigField "String", "FIREBASE_STORAGE_BUCKET", "\"${System.getenv('OFP_FIREBASE_STORAGE_BUCKET') ?: ''}\""
         buildConfigField "String", "FIREBASE_MESSAGING_SENDER_ID", "\"${System.getenv('OFP_FIREBASE_MESSAGING_SENDER_ID') ?: ''}\""
         buildConfigField "String", "FIREBASE_APP_ID", "\"${System.getenv('OFP_FIREBASE_APP_ID') ?: ''}\""
         buildConfigField "String", "FIREBASE_SYNC_CHANNEL", "\"${System.getenv('OFP_FIREBASE_SYNC_CHANNEL') ?: 'global'}\""
+        buildConfigField "String", "FIREBASE_AUTH_PATH", "\"${System.getenv('OFP_FIREBASE_AUTH_PATH') ?: 'mobile_auth'}\""
         buildConfigField "String", "PLANO_LINK_PROMO", "\"${cfgValue('infinitepay_link_promo_lancamento', 'https://checkout.infinitepay.io/frsoficinadepesca/7O04uAqkj')}\""
         buildConfigField "String", "PLANO_LINK_MENSAL", "\"${cfgValue('infinitepay_link_mensal', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/7n8vLUjOnD')}\""
         buildConfigField "String", "PLANO_LINK_TRIMESTRAL", "\"${cfgValue('infinitepay_link_trimestral', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/2arDagkoGn')}\""
@@ -80,5 +78,6 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'com.google.android.material:material:1.12.0'
-    implementation 'com.google.android.gms:play-services-auth:21.2.0'
+    implementation platform('com.google.firebase:firebase-bom:33.2.0')
+    implementation 'com.google.firebase:firebase-database-ktx'
 }

@@ -26,8 +26,11 @@ venv/
 .vscode/
 client_secret_desktop.json
 google-services.json
+android_apk/google-services.json
+android_apk/app/google-services.json
 firebase-service-account.json
 *service-account*.json
+*firebase*.json
 build_final_setup_trace.txt
 Setup_OficinaPesca_v*.exe
 Output/

@@ -13,7 +13,11 @@ import requests
 # Função para checar status do Firebase
 def checar_status_firebase():
     try:
-        resp = requests.get("https://oficinapescasystem-default-rtdb.firebaseio.com/.json", timeout=3)
+        cfg = obter_firebase_web_config() if callable(obter_firebase_web_config) else {}
+        db_url = str((cfg or {}).get("databaseURL") or "").strip()
+        if not db_url:
+            return False
+        resp = requests.get(f"{db_url.rstrip('/')}/.json", timeout=3)
         return resp.status_code == 200
     except Exception:
         return False
@@ -43,6 +47,7 @@ from version_info import VERSION
 from config import (
     CAMINHO_BANCO,
     APP_VERSION,
+    obter_firebase_web_config,
 )
 
 # Importação do PIL para garantir que Image e ImageTk estejam definidos

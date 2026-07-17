@@ -8,7 +8,7 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.48"
+#define AppVersion "1.0.49"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
@@ -27,7 +27,7 @@ DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.48
+OutputBaseFilename=Setup_OficinaPesca_v1.0.49
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

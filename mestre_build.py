@@ -12,7 +12,7 @@ import time
 import zipfile
 
 DIV = "═" * 50
-VERSAO = "1.0.48"
+VERSAO = "1.0.49"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -27,7 +27,7 @@ ANDROID_PROJECT_DIR = "android_apk"
 ANDROID_APK_DIST_DIR = os.path.join("dist", "apk_celular")
 ANDROID_APK_PACKAGE_DIR = os.path.join(DISTRIBUTION_DIR, "apk_celular")
 ANDROID_APK_LEGACY_DIR = "apk_celular_distribuicao"
-ANDROID_APK_NAME = "Oficina_Pesca_WebView.apk"
+ANDROID_APK_NAME = "Oficina_Pesca_Nativo.apk"
 ANDROID_APK_INSTALLER_NAME = "oficina_app_signed.apk"
 AUTO_MODE = "--auto" in sys.argv or os.environ.get("OFP_BUILD_AUTO") == "1"
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -225,7 +225,7 @@ def atualizar_versao_json(nova_versao):
         "force_update": False,
         "apk": {
             "versao": nova_versao,
-            "canal": "webview",
+            "canal": "nativo",
         },
     }
     with open(caminho_version, "w", encoding="utf-8") as f:
@@ -488,7 +488,7 @@ def _gerar_log_saude_sistema(versao: str, apk_path: str, instalador_path: str = 
 
 
 def _build_apk_android(versao: str) -> tuple[str, str]:
-    print("📱 Compilando APK WebView com a mesma versão do Desktop...")
+    print("📱 Compilando APK Nativo com a mesma versão do Desktop...")
     _gerar_wrapper_gradle_android()
     gradle_cmd = _resolver_comando_gradle()
     env_gradle = os.environ.copy()
@@ -510,7 +510,7 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
     os.makedirs(ANDROID_APK_PACKAGE_DIR, exist_ok=True)
     os.makedirs(ANDROID_APK_LEGACY_DIR, exist_ok=True)
 
-    nome_versionado = f"Oficina_Pesca_WebView_v{versao}.apk"
+    nome_versionado = f"Oficina_Pesca_Nativo_v{versao}.apk"
     destino_dist = os.path.join(ANDROID_APK_DIST_DIR, nome_versionado)
     destino_pacote = os.path.join(ANDROID_APK_PACKAGE_DIR, ANDROID_APK_NAME)
     destino_legacy = os.path.join(ANDROID_APK_LEGACY_DIR, ANDROID_APK_INSTALLER_NAME)
@@ -1282,7 +1282,7 @@ def build(projeto, versao):
         print(f"✅ Bootstrapper de atualização garantido no bundle: {caminho_bootstrapper}")
 
         apk_dist, apk_distribuicao = _build_apk_android(versao)
-        print(f"✅ APK WebView alinhado à versão {versao}: {apk_dist}")
+        print(f"✅ APK Nativo alinhado à versão {versao}: {apk_dist}")
 
         stage_portatil = _montar_stage_portatil(dist_dir, caminho_bootstrapper)
         _validar_stage_portatil(stage_portatil)
