@@ -120,6 +120,7 @@ from config import (
     eh_versao_mais_nova,
     executar_atualizacao,
     listar_os_rejeitados_abandono_dashboard,
+    obter_firebase_web_config,
 )
 from reforma_tributaria import garantir_estrutura_reforma_tributaria
 from core.modulos import obter_modulos_habilitados
@@ -957,10 +958,13 @@ class FrmDadosOficina(ctk.CTkToplevel):
         import os
         try:
             cred_path = _resolver_recurso('google-services.json') # Padronizado para google-services.json
+            db_url = str((obter_firebase_web_config() or {}).get('databaseURL') or '').strip()
+            if not db_url:
+                return
             if not firebase_admin._apps:
                 cred = credentials.Certificate(cred_path)
                 firebase_admin.initialize_app(cred, {
-                    'databaseURL': 'https://oficinapescasystem-default-rtdb.firebaseio.com/'
+                    'databaseURL': db_url
                 })
         except Exception as e:
             print(f"Erro ao inicializar Firebase: {e}")

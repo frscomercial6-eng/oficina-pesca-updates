@@ -27,6 +27,7 @@ $env:OFP_FIREBASE_STORAGE_BUCKET = "..."
 $env:OFP_FIREBASE_MESSAGING_SENDER_ID = "..."
 $env:OFP_FIREBASE_APP_ID = "..."
 $env:OFP_FIREBASE_SYNC_CHANNEL = "global"
+$env:OFP_FIREBASE_SYNC_SCOPE = "cliente@dominio.com"
 ```
 
 ## Build

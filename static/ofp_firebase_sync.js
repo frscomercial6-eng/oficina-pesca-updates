@@ -9,6 +9,7 @@ let versionCheckId = null;
 let licenseCheckId = null;
 let updateModalTimer = null;
 let updateModalShown = false;
+let bridgeLastSeenTs = "";
 
 function redirectToBlockedPage() {
   console.warn("[ofp-webview] Licença bloqueada detectada. Redirecionando para tela de bloqueio.");
@@ -139,6 +140,18 @@ async function checkLicenseStatus() {
   }
 }
 
+async function isLicenseActiveForSync() {
+  try {
+    const resp = await fetch("/api/licenca-status", { cache: "no-store" });
+    const data = await resp.json();
+    const ativa = Boolean(data && (data.ativa || data.licenca_ativa));
+    const bloqueada = Boolean(data && data.bloqueada);
+    return ativa && !bloqueada;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function loadFirebaseConfig() {
   if (window.__OFP_FIREBASE_CONFIG__) {
     return window.__OFP_FIREBASE_CONFIG__;
@@ -188,12 +201,18 @@ async function startHeartbeat(apkRef) {
 
 async function initFirebaseSync() {
   if (initialized) {
-    return;
+    return true;
+  }
+
+  const licencaAtiva = await isLicenseActiveForSync();
+  if (!licencaAtiva) {
+    console.warn("[ofp-webview] Comunicação Firebase bloqueada: licença inativa.");
+    return false;
   }
 
   const cfg = await loadFirebaseConfig();
   if (!cfg || !cfg.apiKey || !cfg.databaseURL) {
-    return;
+    return false;
   }
 
   syncChannel = String(cfg.syncChannel || "global").trim() || "global";
@@ -203,6 +222,7 @@ async function initFirebaseSync() {
 
   const desktopRef = ref(database, `sync_nodes/${syncChannel}/desktop`);
   const clientRef = ref(database, `sync_nodes/${syncChannel}/apk`);
+  const bridgeRef = ref(database, `sync_nodes/${syncChannel}/bridge`);
 
   await startHeartbeat(clientRef);
 
@@ -215,6 +235,33 @@ async function initFirebaseSync() {
       redirectToBlockedPage();
     }
   });
+
+  onValue(bridgeRef, (snap) => {
+    const val = snap.val() || {};
+    if (!val || typeof val !== "object") return;
+
+    for (const key of Object.keys(val)) {
+      const item = val[key] || {};
+      const source = String(item.source || "").toLowerCase();
+      const action = String(item.acao || "").toLowerCase();
+      const ts = String(item.ts || "").trim();
+
+      if (!source.startsWith("desktop")) continue;
+      if (ts && ts === bridgeLastSeenTs) continue;
+
+      if (action === "desktop_drive_synced") {
+        bridgeLastSeenTs = ts;
+        console.info("[ofp-webview] Evento Desktop recebido: banco sincronizado no Drive.");
+      }
+    }
+  });
+
+  return true;
+}
+
+function nextBridgeId(prefix = "apk") {
+  const rnd = Math.random().toString(36).slice(2, 10);
+  return `${prefix}_${Date.now()}_${rnd}`;
 }
 
 window.ofpRequestDesktopSync = async function ofpRequestDesktopSync(reason = "sync_now") {
@@ -222,12 +269,33 @@ window.ofpRequestDesktopSync = async function ofpRequestDesktopSync(reason = "sy
     return false;
   }
   try {
-    const cmdRef = ref(database, `sync_nodes/${syncChannel}/commands`);
+    const eventId = nextBridgeId("apk_sync");
+    const cmdRef = ref(database, `sync_nodes/${syncChannel}/bridge/${eventId}`);
     await set(cmdRef, {
       acao: reason,
       source: isWebViewRuntime() ? "apk_webview" : "web_browser",
       path: window.location.pathname,
       ts: new Date().toISOString(),
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
+};
+
+window.ofpPushBridgePayload = async function ofpPushBridgePayload(payload = {}, reason = "apk_data_push") {
+  if (!initialized || !database) {
+    return false;
+  }
+  try {
+    const eventId = nextBridgeId("apk_data");
+    const cmdRef = ref(database, `sync_nodes/${syncChannel}/bridge/${eventId}`);
+    await set(cmdRef, {
+      acao: reason,
+      source: isWebViewRuntime() ? "apk_webview" : "web_browser",
+      path: window.location.pathname,
+      ts: new Date().toISOString(),
+      dados: payload || {},
     });
     return true;
   } catch (_) {

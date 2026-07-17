@@ -22,8 +22,12 @@ venv/
 *.sqlite3
 *.log
 .env
+.env.*
 .vscode/
 client_secret_desktop.json
+google-services.json
+firebase-service-account.json
+*service-account*.json
 build_final_setup_trace.txt
 Setup_OficinaPesca_v*.exe
 Output/
@@ -34,6 +38,7 @@ logs/saude_sistema_producao.json
 
 # Android local secrets and build metadata
 android_apk/.env
+android_apk/.env.*
 android_apk/app/src/main/assets/.env
 android_apk/local.properties
 android_apk/.gradle/

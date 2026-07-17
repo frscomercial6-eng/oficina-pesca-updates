@@ -425,6 +425,7 @@ _CLOUD_SYNC_STARTED = False
 _FIREBASE_LISTENER_THREAD: Optional[threading.Thread] = None
 _FIREBASE_LISTENER_STARTED = False
 _FIREBASE_LAST_REMOTE_EVENT_TS = ""
+_FIREBASE_SYNC_EMAIL_CACHE = {"email": "", "ts": 0.0}
 _DISCOVERY_CACHE = {"url": "", "ts": 0.0}
 GOOGLE_DRIVE_USER_SCOPES = [
     # Escopo explicitamente definido para permitir acesso a arquivos criados pelo App
@@ -449,10 +450,69 @@ def _firebase_cfg_get(key: str, default: str = "") -> str:
     ).strip()
 
 
+def _firebase_safe_scope(valor: str) -> str:
+    txt = str(valor or "").strip().lower()
+    if not txt:
+        return ""
+    txt = re.sub(r"[^a-z0-9@._-]", "", txt)
+    txt = txt.replace("@", "_at_").replace(".", "_dot_")
+    txt = re.sub(r"_+", "_", txt).strip("_")
+    return txt
+
+
+def _obter_email_google_drive_usuario_conectado(force: bool = False) -> str:
+    """Obtém e-mail do OAuth do Drive para isolar o nó Firebase por cliente."""
+    global _FIREBASE_SYNC_EMAIL_CACHE
+    agora = time.time()
+    cache_email = str(_FIREBASE_SYNC_EMAIL_CACHE.get("email") or "").strip().lower()
+    cache_ts = float(_FIREBASE_SYNC_EMAIL_CACHE.get("ts") or 0.0)
+    if not force and cache_email and (agora - cache_ts) < 300:
+        return cache_email
+
+    try:
+        creds, _msg = _obter_credenciais_google_drive_usuario(interativo=False)
+        if not creds or google_build is None:
+            return ""
+        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        about = service.about().get(fields="user(emailAddress)").execute()
+        user = about.get("user", {}) if isinstance(about, dict) else {}
+        email = str(user.get("emailAddress") or "").strip().lower()
+        if email:
+            _FIREBASE_SYNC_EMAIL_CACHE = {"email": email, "ts": agora}
+        return email
+    except Exception:
+        return ""
+
+
+def _firebase_sync_scope() -> str:
+    """Escopo lógico por cliente (e-mail), evitando canal compartilhado entre clientes."""
+    manual = (
+        str(os.environ.get("OFP_FIREBASE_SYNC_SCOPE", "") or "").strip()
+        or _firebase_cfg_get("sync_scope", "")
+    )
+    if manual:
+        return _firebase_safe_scope(manual) or "global"
+
+    email_drive = _obter_email_google_drive_usuario_conectado()
+    if email_drive:
+        return _firebase_safe_scope(email_drive) or "global"
+
+    try:
+        user_id = str(obter_user_id_token_padrao() or "").strip().lower()
+        if user_id and user_id != "ofp-user":
+            return _firebase_safe_scope(user_id) or "global"
+    except Exception:
+        pass
+
+    return "global"
+
+
 def _firebase_sync_channel() -> str:
-    canal = _firebase_cfg_get("sync_channel", "global")
+    canal = _firebase_cfg_get("sync_channel", "bridge")
     canal = re.sub(r"[^a-zA-Z0-9_-]", "", str(canal or "")).strip()
-    return canal or "global"
+    base = canal or "bridge"
+    scope = _firebase_sync_scope()
+    return f"{base}/{scope}"
 
 
 def obter_firebase_web_config() -> dict:
@@ -466,7 +526,31 @@ def obter_firebase_web_config() -> dict:
         "messagingSenderId": _firebase_cfg_get("messaging_sender_id"),
         "appId": _firebase_cfg_get("app_id"),
         "syncChannel": _firebase_sync_channel(),
+        "syncScope": _firebase_sync_scope(),
     }
+
+
+def publicar_evento_ponte_firebase_para_apk(acao: str = "desktop_drive_synced", extras: Optional[dict] = None) -> tuple[bool, str]:
+    """Publica evento Desktop->APK no Firebase como ponte temporária."""
+    ok_fb, msg_fb = _inicializar_firebase_admin()
+    if not ok_fb:
+        return False, msg_fb
+
+    try:
+        canal = _firebase_sync_channel()
+        event_id = f"desktop_{int(time.time() * 1000)}"
+        payload = {
+            "acao": str(acao or "desktop_drive_synced").strip().lower(),
+            "source": "desktop",
+            "ts": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "canal": canal,
+        }
+        if isinstance(extras, dict):
+            payload.update(extras)
+        firebase_db.reference(f"sync_nodes/{canal}/bridge/{event_id}").set(payload)
+        return True, "Evento de ponte Desktop->APK publicado."
+    except Exception as e:
+        return False, f"Falha ao publicar evento de ponte: {e}"
 
 
 def _firebase_service_account_path() -> str:
@@ -569,18 +653,55 @@ def iniciar_listener_firebase_realtime() -> tuple[bool, str]:
     canal = _firebase_sync_channel()
     logger_fb = get_logger("firebase-sync")
 
-    def _processar_evento(payload: dict):
+    def _registrar_payload_local(payload: dict) -> None:
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO fila_sync_firebase (origem, acao, payload_json, recebido_em, processado)
+                    VALUES (?, ?, ?, ?, 1)
+                    """,
+                    (
+                        str(payload.get("source") or "apk").strip().lower(),
+                        str(payload.get("acao") or "apk_data_push").strip().lower(),
+                        json.dumps(payload, ensure_ascii=False),
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    ),
+                )
+                conn.commit()
+        except Exception:
+            pass
+
+    def _limpar_evento_ponte(origem_path: str, event_id: str):
+        try:
+            if origem_path == "bridge" and event_id:
+                firebase_db.reference(f"sync_nodes/{canal}/bridge/{event_id}").delete()
+            elif origem_path == "commands":
+                firebase_db.reference(f"sync_nodes/{canal}/commands").set({})
+        except Exception:
+            pass
+
+    def _processar_evento(payload: dict, event_id: str = "", origem_path: str = "bridge"):
         nonlocal canal
         global _FIREBASE_LAST_REMOTE_EVENT_TS
         try:
             if not isinstance(payload, dict):
                 return
+
+            origem = str(payload.get("source") or "").strip().lower()
+            if origem.startswith("desktop"):
+                return
+
             acao = str(payload.get("acao") or "").strip().lower()
             ts = str(payload.get("ts") or "").strip()
             if ts and ts == _FIREBASE_LAST_REMOTE_EVENT_TS:
                 return
 
-            if acao in {"sync_now", "pull_latest", "refresh"}:
+            if acao in {"sync_now", "pull_latest", "refresh", "apk_data_push"}:
+                if acao == "apk_data_push":
+                    _registrar_payload_local(payload)
+
                 ok, msg = sincronizar_hibrido_banco_drive()
                 if ok:
                     _FIREBASE_LAST_REMOTE_EVENT_TS = ts
@@ -595,6 +716,7 @@ def iniciar_listener_firebase_realtime() -> tuple[bool, str]:
                         )
                     except Exception:
                         pass
+                    _limpar_evento_ponte(origem_path, event_id)
                 else:
                     logger_fb.warning("Falha ao processar evento remoto Firebase (%s): %s", acao, msg)
         except Exception as e:
@@ -603,19 +725,34 @@ def iniciar_listener_firebase_realtime() -> tuple[bool, str]:
     def _worker_listener():
         nonlocal canal
         while True:
-            stream = None
+            stream_commands = None
+            stream_bridge = None
             try:
                 publicar_heartbeat_firebase()
 
                 # Listener nativo do Realtime Database; em caso de queda, o loop reconecta.
-                ref = firebase_db.reference(f"sync_nodes/{canal}/commands")
+                ref_commands = firebase_db.reference(f"sync_nodes/{canal}/commands")
+                ref_bridge = firebase_db.reference(f"sync_nodes/{canal}/bridge")
 
-                def _on_event(event):
+                def _on_commands(event):
                     dados = event.data
                     if isinstance(dados, dict):
-                        _processar_evento(dados)
+                        _processar_evento(dados, "", "commands")
 
-                stream = ref.listen(_on_event)
+                def _on_bridge(event):
+                    dados = event.data
+                    path = str(getattr(event, "path", "") or "")
+                    if path in {"", "/"} and isinstance(dados, dict):
+                        for k, v in dados.items():
+                            if isinstance(v, dict):
+                                _processar_evento(v, str(k), "bridge")
+                        return
+                    if isinstance(dados, dict):
+                        event_id = path.strip("/").split("/")[0]
+                        _processar_evento(dados, event_id, "bridge")
+
+                stream_commands = ref_commands.listen(_on_commands)
+                stream_bridge = ref_bridge.listen(_on_bridge)
 
                 while True:
                     publicar_heartbeat_firebase()
@@ -625,8 +762,13 @@ def iniciar_listener_firebase_realtime() -> tuple[bool, str]:
                 time.sleep(8)
             finally:
                 try:
-                    if stream:
-                        stream.close()
+                    if stream_commands:
+                        stream_commands.close()
+                except Exception:
+                    pass
+                try:
+                    if stream_bridge:
+                        stream_bridge.close()
                 except Exception:
                     pass
 
@@ -2395,12 +2537,33 @@ def sincronizar_hibrido_banco_drive() -> tuple[bool, str]:
             # Local é mais recente: upload
             media = MediaFileUpload(CAMINHO_BANCO, mimetype="application/octet-stream", resumable=False)
             service.files().update(fileId=file_id, media_body=media).execute()
+            try:
+                publicar_evento_ponte_firebase_para_apk(
+                    "desktop_drive_synced",
+                    {
+                        "db_mtime": int(timestamp_local),
+                        "flow": "pc_to_apk",
+                    },
+                )
+            except Exception:
+                pass
             return True, "Banco sincronizado (upload para nuvem)."
         elif timestamp_nuvem > timestamp_local and existe_na_nuvem:
             # Nuvem é mais recente: download
             request = service.files().get_media(fileId=file_id)
             with open(CAMINHO_BANCO, "wb") as f:
                 f.write(request.execute())
+            try:
+                # Após receber mudança (ex.: vinda do APK pela ponte), atualiza observabilidade no Firebase.
+                publicar_evento_ponte_firebase_para_apk(
+                    "desktop_applied_remote",
+                    {
+                        "db_mtime": int(os.path.getmtime(CAMINHO_BANCO)) if os.path.exists(CAMINHO_BANCO) else 0,
+                        "flow": "apk_to_pc",
+                    },
+                )
+            except Exception:
+                pass
             return True, "Banco sincronizado (download da nuvem)."
         else:
             # Versoes iguais
@@ -2814,6 +2977,19 @@ def inicializar_banco():
             metodo_pagamento TEXT
         )
     """)
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS fila_sync_firebase (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            origem TEXT,
+            acao TEXT,
+            payload_json TEXT,
+            recebido_em TEXT,
+            processado INTEGER DEFAULT 0
+        )
+        """
+    )
 
     cursor.execute("PRAGMA table_info(fluxo_caixa)")
     colunas_fluxo = [row[1] for row in cursor.fetchall()]
