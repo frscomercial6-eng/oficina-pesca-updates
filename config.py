@@ -1042,6 +1042,130 @@ def get_db_connection():
         conn.close()
 
 
+def _parse_data_br_flex_db(valor_data: str):
+    txt = str(valor_data or "").strip()
+    if not txt or txt.upper() == "VAZIO":
+        return None
+    formatos = (
+        "%d/%m/%Y",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y %H:%M:%S",
+        "%Y-%m-%d",
+        "%Y-%m-%d %H:%M:%S",
+    )
+    for fmt in formatos:
+        try:
+            return datetime.strptime(txt, fmt)
+        except Exception:
+            continue
+    return None
+
+
+def listar_os_rejeitados_abandono_dashboard(
+    dias_abandono_min: int = 20,
+    dias_aviso1: int = 15,
+    dias_aviso2: int = 85,
+    limite_card: int = 8,
+) -> dict:
+    """Retorna itens do card Rejeitados/Abandono e níveis de alerta para o dashboard."""
+    hoje = datetime.now()
+    itens = []
+
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    COALESCE(cliente, ''),
+                    COALESCE(telefone_cliente_whatsapp, ''),
+                    UPPER(COALESCE(status, '')),
+                    UPPER(COALESCE(status_entrega, '')),
+                    COALESCE(valor_total, 0),
+                    COALESCE(saldo, 0),
+                    COALESCE(data, ''),
+                    COALESCE(data_finalizacao, ''),
+                    COALESCE(data_entrega, '')
+                FROM orcamentos_aguardo
+                WHERE UPPER(COALESCE(status, '')) IN ('REPROVADO', 'ABANDONO')
+                """
+            )
+            rows = cursor.fetchall()
+
+        for row in rows:
+            os_id = int(row[0] or 0)
+            cliente = str(row[1] or "").strip()
+            telefone = str(row[2] or "").strip()
+            status = str(row[3] or "").strip()
+            status_entrega = str(row[4] or "").strip()
+            valor_total = float(row[5] or 0)
+            saldo = float(row[6] or 0)
+            data_base = str(row[7] or "").strip()
+            data_finalizacao = str(row[8] or "").strip()
+            data_entrega = str(row[9] or "").strip()
+
+            if status_entrega == "ENTREGUE" or (data_entrega and data_entrega.upper() != "VAZIO"):
+                continue
+
+            dt_ref = _parse_data_br_flex_db(data_finalizacao) or _parse_data_br_flex_db(data_base)
+            if dt_ref is None:
+                continue
+
+            dias = max(0, (hoje.date() - dt_ref.date()).days)
+
+            # Regra de negócio: status ABANDONO só entra no card após 20 dias sem retirada.
+            if status == "ABANDONO" and dias < int(dias_abandono_min or 0):
+                continue
+
+            valor_alerta = saldo if float(saldo or 0) > 0 else valor_total
+
+            if dias >= int(dias_aviso2 or 0):
+                nivel_alerta = "critico"
+            elif dias >= int(dias_aviso1 or 0):
+                nivel_alerta = "aviso"
+            else:
+                nivel_alerta = "normal"
+
+            itens.append(
+                {
+                    "os_id": os_id,
+                    "cliente": cliente,
+                    "telefone": telefone,
+                    "status_tipo": status.lower(),
+                    "valor": float(valor_alerta or 0),
+                    "dias": dias,
+                    "nivel_alerta": nivel_alerta,
+                }
+            )
+    except Exception as exc:
+        get_logger("dashboard").info("Falha ao consultar rejeitados/abandono: %s", exc)
+        return {
+            "itens_card": [],
+            "itens_aviso1": [],
+            "itens_aviso2": [],
+            "tem_aviso1": False,
+            "tem_aviso2": False,
+        }
+
+    itens.sort(key=lambda x: int(x.get("dias") or 0), reverse=True)
+    itens_aviso2 = [x for x in itens if x.get("nivel_alerta") == "critico"]
+    itens_aviso1 = [x for x in itens if x.get("nivel_alerta") == "aviso"]
+
+    if isinstance(limite_card, int) and limite_card > 0:
+        itens_card = itens[:limite_card]
+    else:
+        itens_card = list(itens)
+
+    return {
+        "itens_card": itens_card,
+        "itens_aviso1": itens_aviso1,
+        "itens_aviso2": itens_aviso2,
+        "tem_aviso1": bool(itens_aviso1),
+        "tem_aviso2": bool(itens_aviso2),
+    }
+
+
 def obter_info_nova_versao() -> dict:
     """ObtÃ©m dados da versÃ£o remota (JSON ou TXT). Retorna dict vazio em caso de falha."""
     # Limpeza agressiva da URL para evitar caracteres de controle e prefixos indesejados

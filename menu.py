@@ -119,6 +119,7 @@ from config import (
     renovar_token_acesso_drive_se_necessario,
     eh_versao_mais_nova,
     executar_atualizacao,
+    listar_os_rejeitados_abandono_dashboard,
 )
 from reforma_tributaria import garantir_estrutura_reforma_tributaria
 from core.modulos import obter_modulos_habilitados
@@ -2821,78 +2822,18 @@ class FrmMenu(ctk.CTk):
                 continue
         return None
 
-    def _consultar_os_abandono_90_dias(self):
-        hoje = datetime.now()
-        resultados = []
+    def _consultar_os_alertas_abandono(self):
         try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT
-                        id,
-                        COALESCE(cliente, ''),
-                        COALESCE(telefone_cliente_whatsapp, ''),
-                        UPPER(COALESCE(status, '')),
-                        UPPER(COALESCE(status_entrega, '')),
-                        COALESCE(valor_total, 0),
-                        COALESCE(saldo, 0),
-                        COALESCE(data, ''),
-                        COALESCE(data_finalizacao, ''),
-                        COALESCE(data_entrega, '')
-                    FROM orcamentos_aguardo
-                    WHERE UPPER(COALESCE(status, '')) IN ('REPROVADO', 'FINALIZADO')
-                    """
-                )
-                rows = cursor.fetchall()
-
-            for row in rows:
-                os_id = int(row[0] or 0)
-                cliente = str(row[1] or "").strip()
-                telefone = str(row[2] or "").strip()
-                status = str(row[3] or "").strip()
-                status_entrega = str(row[4] or "").strip()
-                valor_total = float(row[5] or 0)
-                saldo = float(row[6] or 0)
-                data_base = str(row[7] or "").strip()
-                data_finalizacao = str(row[8] or "").strip()
-                data_entrega = str(row[9] or "").strip()
-
-                # Não entra em abandono se já entregue.
-                if status_entrega == "ENTREGUE" or data_entrega.upper() != "VAZIO" and data_entrega:
-                    continue
-
-                e_aguardando_retirada = status == "FINALIZADO" and status_entrega != "ENTREGUE"
-                e_reprovado = status == "REPROVADO"
-                if not (e_reprovado or e_aguardando_retirada):
-                    continue
-
-                dt_ref = self._parse_data_br_flex(data_finalizacao) or self._parse_data_br_flex(data_base)
-                if dt_ref is None:
-                    continue
-
-                dias = (hoje.date() - dt_ref.date()).days
-                if dias < 90:
-                    continue
-
-                valor_alerta = saldo if float(saldo or 0) > 0 else valor_total
-                tipo = "aguardando retirada" if e_aguardando_retirada else "reprovado"
-                resultados.append(
-                    {
-                        "os_id": os_id,
-                        "cliente": cliente,
-                        "telefone": telefone,
-                        "status_tipo": tipo,
-                        "valor": float(valor_alerta or 0),
-                        "dias": dias,
-                    }
-                )
+            dados = listar_os_rejeitados_abandono_dashboard(
+                dias_abandono_min=20,
+                dias_aviso1=15,
+                dias_aviso2=85,
+                limite_card=20,
+            )
+            return dados if isinstance(dados, dict) else {}
         except Exception as exc:
-            logger.info("Falha ao consultar abandono 90 dias: %s", exc)
-            return []
-
-        resultados.sort(key=lambda x: int(x.get("dias") or 0), reverse=True)
-        return resultados
+            logger.info("Falha ao consultar alertas de abandono: %s", exc)
+            return {}
 
     def _normalizar_telefone_whatsapp_alerta(self, telefone: str) -> str:
         digitos = re.sub(r"\D", "", str(telefone or ""))
@@ -2911,7 +2852,7 @@ class FrmMenu(ctk.CTk):
         telefone = self._normalizar_telefone_whatsapp_alerta(str(item.get("telefone") or ""))
 
         mensagem = (
-            f"Olá {cliente}, seu equipamento referente à O.S. {os_id} está {status_tipo} há mais de 90 dias. "
+            f"Olá {cliente}, seu equipamento referente à O.S. {os_id} está {status_tipo} sem retirada há mais de 85 dias. "
             "Conforme termo assinado, após este prazo o item está sujeito à desmontagem/venda para sucata. "
             "Favor retirar com urgência."
         )
@@ -2924,21 +2865,36 @@ class FrmMenu(ctk.CTk):
         if self._encerrando_aplicacao or not self.winfo_exists():
             return
 
-        itens = self._consultar_os_abandono_90_dias()
-        if not itens:
+        dados = self._consultar_os_alertas_abandono()
+        itens_criticos = list(dados.get("itens_aviso2") or [])
+        itens_aviso = list(dados.get("itens_aviso1") or [])
+
+        if not itens_criticos and not itens_aviso:
             return
 
-        item = itens[0]
-        os_id = int(item.get("os_id") or 0)
-        valor = self._formatar_moeda(item.get("valor") or 0)
+        if itens_criticos:
+            item = itens_criticos[0]
+            os_id = int(item.get("os_id") or 0)
+            valor = self._formatar_moeda(item.get("valor") or 0)
+            dias = int(item.get("dias") or 0)
 
-        mensagem = (
-            f"Alerta de Abandono: O.S. {os_id}, Valor {valor}, está sem retirada há 90 dias. "
-            "Deseja enviar mensagem de notificação via WhatsApp?"
+            mensagem = (
+                f"Alerta Crítico: O.S. {os_id}, Valor {valor}, está há {dias} dias sem retirada. "
+                "Deseja enviar mensagem de notificação via WhatsApp?"
+            )
+            confirmar = messagebox.askyesno("Alerta Crítico de Abandono", mensagem, parent=self)
+            if confirmar:
+                self._abrir_whatsapp_alerta_abandono(item)
+            return
+
+        item = itens_aviso[0]
+        os_id = int(item.get("os_id") or 0)
+        dias = int(item.get("dias") or 0)
+        messagebox.showinfo(
+            "Aviso Preventivo de Retirada",
+            f"A O.S. {os_id} está há {dias} dias sem retirada. Acompanhe para evitar abandono.",
+            parent=self,
         )
-        confirmar = messagebox.askyesno("Alerta de Abandono", mensagem, parent=self)
-        if confirmar:
-            self._abrir_whatsapp_alerta_abandono(item)
 
     def _checar_motor_fiscal_na_abertura(self):
         if self._encerrando_aplicacao or not self.winfo_exists():
@@ -3087,20 +3043,15 @@ class FrmMenu(ctk.CTk):
             )
             os_aguardando_retirada = int((cursor.fetchone() or [0])[0] or 0)
 
-            cursor.execute(
-                """
-                SELECT id
-                FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) = 'REPROVADO'
-                   OR (
-                        UPPER(COALESCE(status,'')) = 'FINALIZADO'
-                    AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
-                   )
-                ORDER BY id DESC
-                LIMIT 8
-                """
-            )
-            rejeitados_abandono_ids = [int(r[0]) for r in (cursor.fetchall() or []) if r and r[0] is not None]
+        dados_card = listar_os_rejeitados_abandono_dashboard(
+            dias_abandono_min=20,
+            dias_aviso1=15,
+            dias_aviso2=85,
+            limite_card=8,
+        )
+        rejeitados_abandono_itens = list(dados_card.get("itens_card") or [])
+        rejeitados_abandono_tem_aviso1 = bool(dados_card.get("tem_aviso1"))
+        rejeitados_abandono_tem_aviso2 = bool(dados_card.get("tem_aviso2"))
 
         return {
             "bancada": total_bancada,
@@ -3108,7 +3059,9 @@ class FrmMenu(ctk.CTk):
             "pendentes": os_pendentes,
             "finalizados": os_finalizados,
             "aguardando_retirada": os_aguardando_retirada,
-            "rejeitados_abandono_ids": rejeitados_abandono_ids,
+            "rejeitados_abandono_itens": rejeitados_abandono_itens,
+            "rejeitados_abandono_tem_aviso1": rejeitados_abandono_tem_aviso1,
+            "rejeitados_abandono_tem_aviso2": rejeitados_abandono_tem_aviso2,
         }
 
     def _obter_indicadores_pdv(self):
@@ -3231,29 +3184,58 @@ class FrmMenu(ctk.CTk):
         ctk.CTkLabel(box, text=titulo, font=("Arial", 10, "bold"), text_color="#bdc3c7", wraplength=180, justify="center").pack(pady=(0, 6), padx=6)
         box.bind("<Button-1>", lambda _e: self.focus_force())
 
-    def _criar_card_rejeitados_abandono(self, parent, os_ids):
-        box = ctk.CTkFrame(parent, fg_color="#2a1a1a", border_width=1, border_color="#7f1d1d", corner_radius=10)
+    def _criar_card_rejeitados_abandono(self, parent, itens_card, tem_aviso1=False, tem_aviso2=False):
+        if tem_aviso2:
+            fg = "#2a1a1a"
+            bd = "#7f1d1d"
+            titulo_cor = "#fca5a5"
+            texto_cor = "#ef4444"
+            vazio_cor = "#f87171"
+        elif tem_aviso1:
+            fg = "#2e2a16"
+            bd = "#9a6b00"
+            titulo_cor = "#fde68a"
+            texto_cor = "#facc15"
+            vazio_cor = "#fcd34d"
+        else:
+            fg = "#1f2530"
+            bd = "#3b4b63"
+            titulo_cor = "#93c5fd"
+            texto_cor = "#bfdbfe"
+            vazio_cor = "#93c5fd"
+
+        box = ctk.CTkFrame(parent, fg_color=fg, border_width=1, border_color=bd, corner_radius=10)
         box.pack(side="left", fill="both", expand=True, padx=5, pady=3)
 
         ctk.CTkLabel(
             box,
             text="Rejeitados/Abandono",
             font=("Arial", 10, "bold"),
-            text_color="#fca5a5",
+            text_color=titulo_cor,
             wraplength=180,
             justify="center",
         ).pack(pady=(6, 2), padx=6)
 
-        numeros = [f"OS {int(x)}" for x in (os_ids or []) if str(x).isdigit()]
-        if not numeros:
-            ctk.CTkLabel(box, text="Sem O.S.", font=("Arial", 9), text_color="#f87171").pack(pady=(2, 6))
+        linhas = []
+        for item in (itens_card or []):
+            try:
+                os_id = int(item.get("os_id") or 0)
+                dias = int(item.get("dias") or 0)
+            except Exception:
+                continue
+            if os_id <= 0:
+                continue
+            linhas.append(f"OS {os_id} - {dias} dias")
+
+        if not linhas:
+            ctk.CTkLabel(box, text="Sem O.S.", font=("Arial", 9), text_color=vazio_cor).pack(pady=(2, 6))
             return
 
         ctk.CTkLabel(
             box,
-            text=" | ".join(numeros),
+            text=" | ".join(linhas),
             font=("Arial", 9),
-            text_color="#ef4444",
+            text_color=texto_cor,
             wraplength=190,
             justify="center",
         ).pack(pady=(2, 6), padx=6)
@@ -3385,7 +3367,9 @@ class FrmMenu(ctk.CTk):
             "pendentes": 0,
             "finalizados": 0,
             "aguardando_retirada": 0,
-            "rejeitados_abandono_ids": [],
+            "rejeitados_abandono_itens": [],
+            "rejeitados_abandono_tem_aviso1": False,
+            "rejeitados_abandono_tem_aviso2": False,
         }
         pdv = self._obter_indicadores_pdv() if tem_pdv else {"volume_vendas": 0.0, "vendas_dia": 0.0, "estoque_es": "0/0"}
 
@@ -3402,7 +3386,12 @@ class FrmMenu(ctk.CTk):
             linha_oficina_2.pack(fill="x", pady=(0, 2))
             self._criar_card_dashboard(linha_oficina_2, "Finalizados", oficina["finalizados"])
             self._criar_card_dashboard(linha_oficina_2, "Aguardando Retirada", oficina["aguardando_retirada"])
-            self._criar_card_rejeitados_abandono(linha_oficina_2, oficina["rejeitados_abandono_ids"])
+            self._criar_card_rejeitados_abandono(
+                linha_oficina_2,
+                oficina["rejeitados_abandono_itens"],
+                oficina["rejeitados_abandono_tem_aviso1"],
+                oficina["rejeitados_abandono_tem_aviso2"],
+            )
         elif mode == "PDV":
             self._criar_linha_cards(
                 parent_dash,
@@ -3439,7 +3428,12 @@ class FrmMenu(ctk.CTk):
             linha_admin_oficina_2.pack(fill="x", pady=(0, 2))
             self._criar_card_dashboard(linha_admin_oficina_2, "Finalizados", oficina["finalizados"])
             self._criar_card_dashboard(linha_admin_oficina_2, "Aguardando Retirada", oficina["aguardando_retirada"])
-            self._criar_card_rejeitados_abandono(linha_admin_oficina_2, oficina["rejeitados_abandono_ids"])
+            self._criar_card_rejeitados_abandono(
+                linha_admin_oficina_2,
+                oficina["rejeitados_abandono_itens"],
+                oficina["rejeitados_abandono_tem_aviso1"],
+                oficina["rejeitados_abandono_tem_aviso2"],
+            )
 
             col_pdv = ctk.CTkFrame(split, fg_color="transparent")
             col_pdv.pack(side="left", fill="both", expand=True, padx=(6, 0))
