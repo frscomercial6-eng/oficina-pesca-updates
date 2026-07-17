@@ -220,8 +220,8 @@ def atualizar_versao_json(nova_versao):
     dados_version = {
         "versao": nova_versao,
         "novidades": f"v{nova_versao}: Atualização de versão automática.",
-        "url_download": f"https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v{nova_versao}/Oficina_Pesca_Instalador.exe",
-        "download_url": f"https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v{nova_versao}/Oficina_Pesca_Instalador.exe",
+        "url_download": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe",
+        "download_url": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe",
         "force_update": False,
         "apk": {
             "versao": nova_versao,
