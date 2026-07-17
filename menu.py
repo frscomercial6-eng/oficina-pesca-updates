@@ -2644,7 +2644,7 @@ class FrmMenu(ctk.CTk):
         self.lbl_contador_licenca.pack(padx=8, pady=(0, 5))
         self._atualizar_contador_licenca()
 
-        self.after(2000, self._adicionar_status_nuvem) # Atrasado para estabilizar
+        self._adicionar_status_nuvem()
 
         ctk.CTkFrame(self.sidebar, height=1, fg_color="#1e3a5f").pack(fill="x", padx=12, pady=(0, 5))
 
@@ -2728,15 +2728,25 @@ class FrmMenu(ctk.CTk):
         self._dashboard_auto_after_id = self.after(15000, self._auto_refresh_dashboard_tick)
 
     def _adicionar_status_nuvem(self):
-        self.lbl_status_nuvem = ctk.CTkLabel(self.sidebar, text="Verificando nuvem...", text_color="#f1c40f", font=("Arial", 10, "bold"), fg_color="#0d1b2a")
-        self.lbl_status_nuvem.pack(padx=8, pady=(0, 5))
+        if hasattr(self, "lbl_status_nuvem") and self.lbl_status_nuvem.winfo_exists():
+            self._atualizar_status_nuvem()
+            return
+
+        self.lbl_status_nuvem = ctk.CTkLabel(
+            self.sidebar,
+            text="Drive: Verificando...",
+            text_color="#f1c40f",
+            font=("Arial", 9, "bold"),
+            fg_color="#0d1b2a",
+        )
+        self.lbl_status_nuvem.pack(padx=8, pady=(0, 2))
         self._atualizar_status_nuvem()
 
     def _atualizar_status_nuvem(self):
         def _worker_nuvem():
             try:
                 online = checar_status_firebase()
-                status = "Drive: online" if online else "Drive: offline"
+                status = "Drive: Online" if online else "Drive: Offline"
                 cor = "#2ecc71" if online else "#e74c3c"
                 try:
                     ok_token, msg_token = renovar_token_acesso_drive_se_necessario(force=False)
@@ -2747,7 +2757,7 @@ class FrmMenu(ctk.CTk):
                 except Exception as exc_token:
                     logger.warning("Falha ao atualizar token de acesso: %s", exc_token)
             except Exception:
-                status = "Drive: offline"
+                status = "Drive: Offline"
                 cor = "#e74c3c"
 
             def _aplicar():
@@ -4055,7 +4065,8 @@ class FrmMenu(ctk.CTk):
     def _resolver_arquivo_apk(self) -> str:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         candidatos = [
-            os.path.join(base_dir, "PACOTE_ENVIO", "apk_celular", "Oficina_Pesca_WebView.apk"),
+            os.path.join(base_dir, "PACOTE_ENVIO", "apk_celular", "oficina_app_signed.apk"),
+            os.path.join(base_dir, "PACOTE_ENVIO", "apk_celular", "Oficina_Pesca_Nativo.apk"),
             os.path.join(base_dir, "apk_celular_distribuicao", "oficina_app_signed.apk"),
             os.path.join(base_dir, "android_apk", "app", "build", "outputs", "apk", "debug", "app-debug.apk"),
         ]
