@@ -232,9 +232,21 @@ def atualizar_versao_json(nova_versao):
         json.dump(dados_version, f, ensure_ascii=False, indent=2)
     print(f"✅ version.json sincronizado para {nova_versao}.")
 
+    caminho_config = "config.json"
+    if os.path.exists(caminho_config):
+        with open(caminho_config, encoding="utf-8") as f:
+            dados_cfg = json.load(f)
+        if not isinstance(dados_cfg.get("update"), dict):
+            dados_cfg["update"] = {}
+        dados_cfg["update"]["versao"] = nova_versao
+        dados_cfg["update"]["download_url"] = "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe"
+        with open(caminho_config, "w", encoding="utf-8") as f:
+            json.dump(dados_cfg, f, ensure_ascii=False, indent=2)
+        print(f"✅ config.json sincronizado para {nova_versao}.")
+
 
 def _sincronizar_manifests(nova_versao: str) -> None:
-    """Propaga a versão para config.cfg, versao.json e version.txt."""
+    """Propaga a versão para config.cfg, config.json, versao.json e version.txt."""
     atualizar_versao_json(nova_versao)
     with open("version.txt", "w", encoding="utf-8") as _f:
         _f.write(nova_versao + "\n")
@@ -246,7 +258,7 @@ def _sincronizar_manifests(nova_versao: str) -> None:
     _cfg.set("versao", "versao_atual", nova_versao)
     with open("config.cfg", "w", encoding="utf-8") as _f:
         _cfg.write(_f)
-    print(f"✅ Manifests sincronizados: config.cfg, versao.json, version.txt → {nova_versao}.")
+    print(f"✅ Manifests sincronizados: config.cfg, config.json, versao.json, version.txt → {nova_versao}.")
 
 
 def _read_text_any(path: str) -> tuple[str, str]:

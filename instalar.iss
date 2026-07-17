@@ -66,7 +66,7 @@ Source: "icone_oficina.ico"; DestDir: "{app}"; Components: core; Flags: ignoreve
 Source: "servidor.py";          DestDir: "{app}"; Components: core; Flags: ignoreversion
 Source: "config.py";            DestDir: "{app}"; Components: core; Flags: ignoreversion
 Source: "config.cfg";           DestDir: "{app}"; Components: core; Flags: ignoreversion onlyifdoesntexist
-Source: "config.json";          DestDir: "{app}"; Components: core; Flags: ignoreversion onlyifdoesntexist
+Source: "config.json";          DestDir: "{app}"; Components: core; Flags: ignoreversion
 Source: "versao.json";          DestDir: "{app}"; Components: core; Flags: ignoreversion onlyifdoesntexist
 Source: "iniciar_servidor.bat"; DestDir: "{app}"; Components: core; Flags: ignoreversion
 Source: "Atualizador.exe";      DestDir: "{app}"; Components: core; Flags: ignoreversion

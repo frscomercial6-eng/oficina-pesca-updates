@@ -1053,6 +1053,95 @@ def obter_info_nova_versao() -> dict:
     if not url_limpa or len(url_limpa) < 10:
         return {}
 
+    def _descobrir_repo_github() -> tuple[str, str]:
+        candidatos = [
+            url_limpa,
+            str(CENTRAL_UPDATE_MANIFEST_URL or "").strip(),
+            str(CENTRAL_UPDATE_DOWNLOAD_URL or "").strip(),
+            str(URL_CHECK_VERSAO or "").strip(),
+        ]
+
+        for raw in candidatos:
+            alvo = str(raw or "").strip()
+            if not alvo:
+                continue
+
+            m_raw = re.search(r"raw\.githubusercontent\.com/([^/]+)/([^/]+)/", alvo, flags=re.IGNORECASE)
+            if m_raw:
+                return m_raw.group(1), m_raw.group(2)
+
+            m_web = re.search(r"github\.com/([^/]+)/([^/]+)", alvo, flags=re.IGNORECASE)
+            if m_web:
+                repo = str(m_web.group(2) or "").strip()
+                if repo.lower() != "releases":
+                    return m_web.group(1), repo
+
+        return "", ""
+
+    def _obter_info_release_github_latest() -> dict:
+        owner, repo = _descobrir_repo_github()
+        if not owner or not repo:
+            return {}
+
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(
+                api_url,
+                headers={
+                    "User-Agent": f"OficinaPesca/{APP_VERSION}",
+                    "Accept": "application/vnd.github+json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                payload = resp.read().decode("utf-8", errors="ignore")
+            data = json.loads(payload)
+            if not isinstance(data, dict):
+                return {}
+
+            tag = str(data.get("tag_name") or data.get("name") or "").strip()
+            versao = tag
+            m_ver = re.search(r"(\d+(?:\.\d+)+)", tag)
+            if m_ver:
+                versao = m_ver.group(1)
+
+            novidades = str(data.get("body") or "").strip()
+
+            download_asset = ""
+            assets = data.get("assets") if isinstance(data.get("assets"), list) else []
+            if assets:
+                preferidos = []
+                for item in assets:
+                    if not isinstance(item, dict):
+                        continue
+                    nome_asset = str(item.get("name") or "").strip().lower()
+                    url_asset = str(item.get("browser_download_url") or "").strip()
+                    if not url_asset:
+                        continue
+                    if nome_asset == "oficina_pesca_instalador.exe":
+                        preferidos.insert(0, url_asset)
+                    elif nome_asset.endswith(".exe"):
+                        preferidos.append(url_asset)
+                if preferidos:
+                    download_asset = preferidos[0]
+
+            if not download_asset:
+                download_asset = str(data.get("html_url") or "").strip()
+
+            if not download_asset:
+                download_asset = str(CENTRAL_UPDATE_DOWNLOAD_URL or "").strip()
+
+            saida = {
+                "versao": str(versao).strip(),
+                "novidades": novidades,
+                "url_download": download_asset,
+            }
+            return {k: v for k, v in saida.items() if v}
+        except Exception:
+            return {}
+
     def _parse_manifesto(conteudo: str) -> dict:
         bruto = str(conteudo or "").strip()
         if not bruto:
@@ -1133,6 +1222,11 @@ def obter_info_nova_versao() -> dict:
 
     try:
         import urllib.request
+
+        # Fonte de verdade prioritária: Release latest do GitHub.
+        info_release = _obter_info_release_github_latest()
+        if info_release.get("versao"):
+            return info_release
 
         urls_tentativa = [url_limpa]
         url_lower = url_limpa.lower()
