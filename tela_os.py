@@ -4146,8 +4146,32 @@ class FrmOS(ctk.CTkToplevel):
 
         # --- IMAGENS NO TOPO (configuráveis) ---
         try:
-            logo_path = self.logo_oficina if os.path.isabs(self.logo_oficina) else os.path.join(DIRETORIO_RECURSOS, self.logo_oficina)
-            patr_path = self.logo_patrocinador if os.path.isabs(self.logo_patrocinador) else os.path.join(DIRETORIO_RECURSOS, self.logo_patrocinador)
+            def _resolver_logo_absoluta(caminho_logo):
+                bruto = str(caminho_logo or "").strip().strip('"')
+                if not bruto:
+                    return ""
+
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                candidatos = []
+                if os.path.isabs(bruto):
+                    candidatos.append(os.path.abspath(bruto))
+                else:
+                    candidatos.extend(
+                        [
+                            os.path.abspath(bruto),
+                            os.path.abspath(os.path.join(DIRETORIO_RECURSOS, bruto)),
+                            os.path.abspath(os.path.join(base_dir, bruto)),
+                            os.path.abspath(os.path.join(base_dir, "assets", bruto)),
+                        ]
+                    )
+
+                for cand in candidatos:
+                    if os.path.exists(cand):
+                        return cand
+                return candidatos[0] if candidatos else ""
+
+            logo_path = _resolver_logo_absoluta(self.logo_oficina)
+            patr_path = _resolver_logo_absoluta(self.logo_patrocinador)
             if self.logo_oficina and os.path.exists(logo_path):
                 c.drawImage(logo_path, 45, altura - 88, width=145, height=72, preserveAspectRatio=True, mask='auto')
             if self.logo_patrocinador and os.path.exists(patr_path):

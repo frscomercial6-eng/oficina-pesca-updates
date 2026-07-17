@@ -2891,7 +2891,6 @@ class FrmMenu(ctk.CTk):
         return f"R$ {float(valor or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
     def _obter_indicadores_oficina(self):
-        hoje = datetime.now().strftime("%d/%m/%Y")
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -2907,12 +2906,10 @@ class FrmMenu(ctk.CTk):
                 """
                 SELECT COALESCE(SUM(saldo), 0)
                 FROM orcamentos_aguardo
-                WHERE data = ?
-                  AND UPPER(COALESCE(status,'')) IN ('APROVADO', 'EM ANDAMENTO')
-                """,
-                (hoje,),
+                WHERE UPPER(COALESCE(status,'')) NOT IN ('ENTREGUE', 'REPROVADO', 'CANCELADO')
+                """
             )
-            total_receber_dia = float((cursor.fetchone() or [0])[0] or 0)
+            total_receber_abertas = float((cursor.fetchone() or [0])[0] or 0)
 
             cursor.execute(
                 """
@@ -2923,10 +2920,31 @@ class FrmMenu(ctk.CTk):
             )
             os_pendentes = int((cursor.fetchone() or [0])[0] or 0)
 
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM orcamentos_aguardo
+                WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
+                """
+            )
+            os_finalizados = int((cursor.fetchone() or [0])[0] or 0)
+
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM orcamentos_aguardo
+                WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
+                  AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
+                """
+            )
+            os_aguardando_retirada = int((cursor.fetchone() or [0])[0] or 0)
+
         return {
             "bancada": total_bancada,
-            "receber": total_receber_dia,
+            "receber": total_receber_abertas,
             "pendentes": os_pendentes,
+            "finalizados": os_finalizados,
+            "aguardando_retirada": os_aguardando_retirada,
         }
 
     def _obter_indicadores_pdv(self):
@@ -3170,7 +3188,13 @@ class FrmMenu(ctk.CTk):
         else:
             mode = "COMPLETO"
 
-        oficina = self._obter_indicadores_oficina() if tem_oficina else {"bancada": 0, "receber": 0.0, "pendentes": 0}
+        oficina = self._obter_indicadores_oficina() if tem_oficina else {
+            "bancada": 0,
+            "receber": 0.0,
+            "pendentes": 0,
+            "finalizados": 0,
+            "aguardando_retirada": 0,
+        }
         pdv = self._obter_indicadores_pdv() if tem_pdv else {"volume_vendas": 0.0, "vendas_dia": 0.0, "estoque_es": "0/0"}
 
         if mode == "OFICINA":
@@ -3180,6 +3204,13 @@ class FrmMenu(ctk.CTk):
                     ("OS na Bancada", oficina["bancada"]),
                     ("Total a Receber Oficina", self._formatar_moeda(oficina["receber"])),
                     ("Pendentes", oficina["pendentes"]),
+                ],
+            )
+            self._criar_linha_cards(
+                parent_dash,
+                [
+                    ("Finalizados", oficina["finalizados"]),
+                    ("Aguardando Retirada", oficina["aguardando_retirada"]),
                 ],
             )
         elif mode == "PDV":
@@ -3197,7 +3228,7 @@ class FrmMenu(ctk.CTk):
             self._criar_card_dashboard(
                 topo,
                 "Consolidado - Total a Receber + Vendas",
-                self._formatar_moeda(oficina["receber"] + pdv["volume_vendas"]),
+                self._formatar_moeda(oficina["receber"] + pdv["vendas_dia"]),
             )
 
             split = ctk.CTkFrame(parent_dash, fg_color="transparent")
@@ -3212,6 +3243,13 @@ class FrmMenu(ctk.CTk):
                     ("OS na Bancada", oficina["bancada"]),
                     ("Total a Receber Oficina", self._formatar_moeda(oficina["receber"])),
                     ("Pendentes", oficina["pendentes"]),
+                ],
+            )
+            self._criar_linha_cards(
+                col_oficina,
+                [
+                    ("Finalizados", oficina["finalizados"]),
+                    ("Aguardando Retirada", oficina["aguardando_retirada"]),
                 ],
             )
 

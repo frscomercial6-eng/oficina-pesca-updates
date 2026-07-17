@@ -193,21 +193,19 @@ class FrmClientes(ctk.CTkToplevel):
         cpf_cnpj_bruto = self.txt_cpf_cnpj.get().strip()
         cpf_cnpj_norm = self._normalizar_cpf_cnpj(cpf_cnpj_bruto)
 
-        if not cpf_cnpj_norm:
-            messagebox.showwarning("Atenção", "Informe o CPF/CNPJ para identificar o cliente.", parent=self)
-            return
-
         self._garantir_schema_identificador()
         
         try:
             with get_db_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT id FROM clientes WHERE cpf_cnpj_normalizado = ? LIMIT 1",
-                    (cpf_cnpj_norm,),
-                )
-                row_doc = cursor.fetchone()
-                id_por_doc = int(row_doc[0]) if row_doc and row_doc[0] is not None else None
+                id_por_doc = None
+                if cpf_cnpj_norm:
+                    cursor.execute(
+                        "SELECT id FROM clientes WHERE cpf_cnpj_normalizado = ? LIMIT 1",
+                        (cpf_cnpj_norm,),
+                    )
+                    row_doc = cursor.fetchone()
+                    id_por_doc = int(row_doc[0]) if row_doc and row_doc[0] is not None else None
 
                 if self.cliente_id and id_por_doc and id_por_doc != int(self.cliente_id):
                     messagebox.showwarning(
