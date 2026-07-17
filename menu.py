@@ -2565,6 +2565,7 @@ class FrmMenu(ctk.CTk):
             "cor": "#f1c40f",
             "ativo": None,
         }
+        self._abandono_alerta_after_id = None
 
         # Adia a criação da UI para garantir root estável
         self.after(250, self.setup_ui)
@@ -2791,6 +2792,153 @@ class FrmMenu(ctk.CTk):
         except Exception:
             pass
         self.after(450, self._checar_motor_fiscal_na_abertura)
+        self._agendar_verificacao_abandono_90d()
+
+    def _agendar_verificacao_abandono_90d(self):
+        try:
+            if self._abandono_alerta_after_id is not None:
+                self.after_cancel(self._abandono_alerta_after_id)
+        except Exception:
+            pass
+        # Executa após estabilizar a UI para não conflitar com popup de primeira instalação.
+        self._abandono_alerta_after_id = self.after(1800, self._verificar_abandono_90_dias_na_inicializacao)
+
+    def _parse_data_br_flex(self, valor_data: str) -> datetime | None:
+        txt = str(valor_data or "").strip()
+        if not txt or txt.upper() == "VAZIO":
+            return None
+        formatos = [
+            "%d/%m/%Y",
+            "%d/%m/%Y %H:%M",
+            "%d/%m/%Y %H:%M:%S",
+            "%Y-%m-%d",
+            "%Y-%m-%d %H:%M:%S",
+        ]
+        for fmt in formatos:
+            try:
+                return datetime.strptime(txt, fmt)
+            except Exception:
+                continue
+        return None
+
+    def _consultar_os_abandono_90_dias(self):
+        hoje = datetime.now()
+        resultados = []
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        COALESCE(cliente, ''),
+                        COALESCE(telefone_cliente_whatsapp, ''),
+                        UPPER(COALESCE(status, '')),
+                        UPPER(COALESCE(status_entrega, '')),
+                        COALESCE(valor_total, 0),
+                        COALESCE(saldo, 0),
+                        COALESCE(data, ''),
+                        COALESCE(data_finalizacao, ''),
+                        COALESCE(data_entrega, '')
+                    FROM orcamentos_aguardo
+                    WHERE UPPER(COALESCE(status, '')) IN ('REPROVADO', 'FINALIZADO')
+                    """
+                )
+                rows = cursor.fetchall()
+
+            for row in rows:
+                os_id = int(row[0] or 0)
+                cliente = str(row[1] or "").strip()
+                telefone = str(row[2] or "").strip()
+                status = str(row[3] or "").strip()
+                status_entrega = str(row[4] or "").strip()
+                valor_total = float(row[5] or 0)
+                saldo = float(row[6] or 0)
+                data_base = str(row[7] or "").strip()
+                data_finalizacao = str(row[8] or "").strip()
+                data_entrega = str(row[9] or "").strip()
+
+                # Não entra em abandono se já entregue.
+                if status_entrega == "ENTREGUE" or data_entrega.upper() != "VAZIO" and data_entrega:
+                    continue
+
+                e_aguardando_retirada = status == "FINALIZADO" and status_entrega != "ENTREGUE"
+                e_reprovado = status == "REPROVADO"
+                if not (e_reprovado or e_aguardando_retirada):
+                    continue
+
+                dt_ref = self._parse_data_br_flex(data_finalizacao) or self._parse_data_br_flex(data_base)
+                if dt_ref is None:
+                    continue
+
+                dias = (hoje.date() - dt_ref.date()).days
+                if dias < 90:
+                    continue
+
+                valor_alerta = saldo if float(saldo or 0) > 0 else valor_total
+                tipo = "aguardando retirada" if e_aguardando_retirada else "reprovado"
+                resultados.append(
+                    {
+                        "os_id": os_id,
+                        "cliente": cliente,
+                        "telefone": telefone,
+                        "status_tipo": tipo,
+                        "valor": float(valor_alerta or 0),
+                        "dias": dias,
+                    }
+                )
+        except Exception as exc:
+            logger.info("Falha ao consultar abandono 90 dias: %s", exc)
+            return []
+
+        resultados.sort(key=lambda x: int(x.get("dias") or 0), reverse=True)
+        return resultados
+
+    def _normalizar_telefone_whatsapp_alerta(self, telefone: str) -> str:
+        digitos = re.sub(r"\D", "", str(telefone or ""))
+        if not digitos:
+            return ""
+        if digitos.startswith("55") and len(digitos) >= 12:
+            return digitos
+        if len(digitos) in (10, 11):
+            return f"55{digitos}"
+        return digitos
+
+    def _abrir_whatsapp_alerta_abandono(self, item: dict):
+        cliente = str(item.get("cliente") or "Cliente").strip() or "Cliente"
+        os_id = int(item.get("os_id") or 0)
+        status_tipo = str(item.get("status_tipo") or "reprovado").strip().lower()
+        telefone = self._normalizar_telefone_whatsapp_alerta(str(item.get("telefone") or ""))
+
+        mensagem = (
+            f"Olá {cliente}, seu equipamento referente à O.S. {os_id} está {status_tipo} há mais de 90 dias. "
+            "Conforme termo assinado, após este prazo o item está sujeito à desmontagem/venda para sucata. "
+            "Favor retirar com urgência."
+        )
+        texto = quote_plus(mensagem)
+        link = f"https://wa.me/{telefone}?text={texto}" if telefone else f"https://wa.me/?text={texto}"
+        webbrowser.open(link)
+
+    def _verificar_abandono_90_dias_na_inicializacao(self):
+        self._abandono_alerta_after_id = None
+        if self._encerrando_aplicacao or not self.winfo_exists():
+            return
+
+        itens = self._consultar_os_abandono_90_dias()
+        if not itens:
+            return
+
+        item = itens[0]
+        os_id = int(item.get("os_id") or 0)
+        valor = self._formatar_moeda(item.get("valor") or 0)
+
+        mensagem = (
+            f"Alerta de Abandono: O.S. {os_id}, Valor {valor}, está sem retirada há 90 dias. "
+            "Deseja enviar mensagem de notificação via WhatsApp?"
+        )
+        confirmar = messagebox.askyesno("Alerta de Abandono", mensagem, parent=self)
+        if confirmar:
+            self._abrir_whatsapp_alerta_abandono(item)
 
     def _checar_motor_fiscal_na_abertura(self):
         if self._encerrando_aplicacao or not self.winfo_exists():
@@ -2939,12 +3087,28 @@ class FrmMenu(ctk.CTk):
             )
             os_aguardando_retirada = int((cursor.fetchone() or [0])[0] or 0)
 
+            cursor.execute(
+                """
+                SELECT id
+                FROM orcamentos_aguardo
+                WHERE UPPER(COALESCE(status,'')) = 'REPROVADO'
+                   OR (
+                        UPPER(COALESCE(status,'')) = 'FINALIZADO'
+                    AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
+                   )
+                ORDER BY id DESC
+                LIMIT 8
+                """
+            )
+            rejeitados_abandono_ids = [int(r[0]) for r in (cursor.fetchall() or []) if r and r[0] is not None]
+
         return {
             "bancada": total_bancada,
             "receber": total_receber_abertas,
             "pendentes": os_pendentes,
             "finalizados": os_finalizados,
             "aguardando_retirada": os_aguardando_retirada,
+            "rejeitados_abandono_ids": rejeitados_abandono_ids,
         }
 
     def _obter_indicadores_pdv(self):
@@ -3062,30 +3226,57 @@ class FrmMenu(ctk.CTk):
 
     def _criar_card_dashboard(self, parent, titulo, valor):
         box = ctk.CTkFrame(parent, fg_color="#1b2635", border_width=1, border_color="#2b3646", corner_radius=10)
-        box.pack(side="left", fill="both", expand=True, padx=8, pady=5)
-        ctk.CTkLabel(box, text=str(valor), font=("Arial", 22, "bold"), text_color="#ecf0f1").pack(pady=(10, 4))
-        ctk.CTkLabel(box, text=titulo, font=("Arial", 11, "bold"), text_color="#bdc3c7", wraplength=220, justify="center").pack(pady=(0, 9), padx=8)
+        box.pack(side="left", fill="both", expand=True, padx=5, pady=3)
+        ctk.CTkLabel(box, text=str(valor), font=("Arial", 17, "bold"), text_color="#ecf0f1").pack(pady=(6, 2))
+        ctk.CTkLabel(box, text=titulo, font=("Arial", 10, "bold"), text_color="#bdc3c7", wraplength=180, justify="center").pack(pady=(0, 6), padx=6)
         box.bind("<Button-1>", lambda _e: self.focus_force())
+
+    def _criar_card_rejeitados_abandono(self, parent, os_ids):
+        box = ctk.CTkFrame(parent, fg_color="#2a1a1a", border_width=1, border_color="#7f1d1d", corner_radius=10)
+        box.pack(side="left", fill="both", expand=True, padx=5, pady=3)
+
+        ctk.CTkLabel(
+            box,
+            text="Rejeitados/Abandono",
+            font=("Arial", 10, "bold"),
+            text_color="#fca5a5",
+            wraplength=180,
+            justify="center",
+        ).pack(pady=(6, 2), padx=6)
+
+        numeros = [f"OS {int(x)}" for x in (os_ids or []) if str(x).isdigit()]
+        if not numeros:
+            ctk.CTkLabel(box, text="Sem O.S.", font=("Arial", 9), text_color="#f87171").pack(pady=(2, 6))
+            return
+
+        ctk.CTkLabel(
+            box,
+            text=" | ".join(numeros),
+            font=("Arial", 9),
+            text_color="#ef4444",
+            wraplength=190,
+            justify="center",
+        ).pack(pady=(2, 6), padx=6)
 
     def _criar_linha_cards(self, parent, cards):
         linha = ctk.CTkFrame(parent, fg_color="transparent")
-        linha.pack(fill="x", pady=(0, 4))
+        linha.pack(fill="x", pady=(0, 2))
         for titulo, valor in cards:
             self._criar_card_dashboard(linha, titulo, valor)
 
     def _criar_painel_pendencias_fixo(self, parent, orcamentos, bancada, status_finalizados, aguardando_orcamento):
         bloco = ctk.CTkFrame(parent, fg_color="#121a24", corner_radius=12)
-        bloco.pack(fill="both", expand=True, pady=(4, 4))
+        bloco.pack(fill="both", expand=True, pady=(2, 2))
 
         ctk.CTkLabel(
             bloco,
             text="PAINEL DE PENDÊNCIAS (ÚLTIMOS 15 DIAS)",
-            font=("Arial", 13, "bold"),
+            font=("Arial", 12, "bold"),
             text_color="#f5f6fa",
-        ).pack(anchor="w", padx=12, pady=(8, 6))
+        ).pack(anchor="w", padx=10, pady=(6, 4))
 
         corpo = ctk.CTkFrame(bloco, fg_color="#121a24")
-        corpo.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        corpo.pack(fill="both", expand=True, padx=8, pady=(0, 6))
         corpo.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
         def _linha_item(item):
@@ -3107,16 +3298,16 @@ class FrmMenu(ctk.CTk):
         for col, (titulo, cor, dados) in enumerate(cards):
             card = ctk.CTkFrame(corpo, fg_color="#1a2230", border_width=2, border_color=cor, corner_radius=12)
             card.grid(row=0, column=col, sticky="nsew", padx=4, pady=2)
-            ctk.CTkLabel(card, text=f"{titulo} ({len(dados)})", font=("Arial", 13, "bold"), text_color=cor).pack(anchor="w", padx=10, pady=(8, 4))
-            lista = ctk.CTkScrollableFrame(card, height=138, fg_color="#0f1720")
-            lista.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+            ctk.CTkLabel(card, text=f"{titulo} ({len(dados)})", font=("Arial", 11, "bold"), text_color=cor).pack(anchor="w", padx=8, pady=(6, 3))
+            lista = ctk.CTkScrollableFrame(card, height=96, fg_color="#0f1720")
+            lista.pack(fill="both", expand=True, padx=6, pady=(0, 6))
 
             if not dados:
                 ctk.CTkLabel(
                     lista,
                     text="Sem pendências",
                     text_color="#9ca3af",
-                    font=("Arial", 10),
+                    font=("Arial", 9),
                     anchor="w",
                 ).pack(fill="x", padx=6, pady=6)
                 continue
@@ -3135,11 +3326,11 @@ class FrmMenu(ctk.CTk):
                     lista,
                     text=texto,
                     anchor="w",
-                    height=28,
+                    height=24,
                     fg_color="#1f2937",
                     hover_color="#334155",
                     text_color="#e5e7eb",
-                    font=("Arial", 10),
+                    font=("Arial", 9),
                     command=lambda oid=os_id: self._abrir_os_por_id_dashboard(oid),
                 ).pack(fill="x", padx=4, pady=3)
 
@@ -3194,6 +3385,7 @@ class FrmMenu(ctk.CTk):
             "pendentes": 0,
             "finalizados": 0,
             "aguardando_retirada": 0,
+            "rejeitados_abandono_ids": [],
         }
         pdv = self._obter_indicadores_pdv() if tem_pdv else {"volume_vendas": 0.0, "vendas_dia": 0.0, "estoque_es": "0/0"}
 
@@ -3206,13 +3398,11 @@ class FrmMenu(ctk.CTk):
                     ("Pendentes", oficina["pendentes"]),
                 ],
             )
-            self._criar_linha_cards(
-                parent_dash,
-                [
-                    ("Finalizados", oficina["finalizados"]),
-                    ("Aguardando Retirada", oficina["aguardando_retirada"]),
-                ],
-            )
+            linha_oficina_2 = ctk.CTkFrame(parent_dash, fg_color="transparent")
+            linha_oficina_2.pack(fill="x", pady=(0, 2))
+            self._criar_card_dashboard(linha_oficina_2, "Finalizados", oficina["finalizados"])
+            self._criar_card_dashboard(linha_oficina_2, "Aguardando Retirada", oficina["aguardando_retirada"])
+            self._criar_card_rejeitados_abandono(linha_oficina_2, oficina["rejeitados_abandono_ids"])
         elif mode == "PDV":
             self._criar_linha_cards(
                 parent_dash,
@@ -3245,13 +3435,11 @@ class FrmMenu(ctk.CTk):
                     ("Pendentes", oficina["pendentes"]),
                 ],
             )
-            self._criar_linha_cards(
-                col_oficina,
-                [
-                    ("Finalizados", oficina["finalizados"]),
-                    ("Aguardando Retirada", oficina["aguardando_retirada"]),
-                ],
-            )
+            linha_admin_oficina_2 = ctk.CTkFrame(col_oficina, fg_color="transparent")
+            linha_admin_oficina_2.pack(fill="x", pady=(0, 2))
+            self._criar_card_dashboard(linha_admin_oficina_2, "Finalizados", oficina["finalizados"])
+            self._criar_card_dashboard(linha_admin_oficina_2, "Aguardando Retirada", oficina["aguardando_retirada"])
+            self._criar_card_rejeitados_abandono(linha_admin_oficina_2, oficina["rejeitados_abandono_ids"])
 
             col_pdv = ctk.CTkFrame(split, fg_color="transparent")
             col_pdv.pack(side="left", fill="both", expand=True, padx=(6, 0))
