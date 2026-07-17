@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.i("OficinaPesca", "Inicializando APK Oficina de Pesca v${BuildConfig.VERSION_NAME}")
 
         // Dark Mode padrão no container.
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)

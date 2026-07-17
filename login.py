@@ -110,6 +110,8 @@ except Exception:
         return True, "Compatibilidade: limpeza de resíduos indisponível nesta versão."
 
 logger = get_logger(__name__)
+print(f"[OFP][STARTUP] Desktop v{VERSION}")
+logger.info("[startup] Versão Desktop inicializada: v%s", VERSION)
 _INFINITEPAY_DEBUG_LOGGED = False
 _PAGAMENTO_EXPIRADO_JA_EXIBIDO = False
 _ALERTA_TRIAL_CONVERSAO_EXIBIDO = False

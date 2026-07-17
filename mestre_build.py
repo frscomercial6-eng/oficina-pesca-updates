@@ -491,7 +491,10 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
     print("📱 Compilando APK WebView com a mesma versão do Desktop...")
     _gerar_wrapper_gradle_android()
     gradle_cmd = _resolver_comando_gradle()
-    subprocess.run([*gradle_cmd, "assembleDebug"], cwd=ANDROID_PROJECT_DIR, check=True)
+    env_gradle = os.environ.copy()
+    env_gradle["OFP_APK_VERSION"] = str(versao or "").strip()
+    subprocess.run([*gradle_cmd, "assembleDebug"], cwd=ANDROID_PROJECT_DIR, check=True, env=env_gradle)
+    _confirmar_version_name_apk(versao)
 
     candidatos_origem = [
         os.path.join(ANDROID_PROJECT_DIR, "build", "outputs", "apk", "debug", "app-debug.apk"),
@@ -512,11 +515,15 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
     destino_pacote = os.path.join(ANDROID_APK_PACKAGE_DIR, ANDROID_APK_NAME)
     destino_legacy = os.path.join(ANDROID_APK_LEGACY_DIR, ANDROID_APK_INSTALLER_NAME)
 
+    # Distribuição só ocorre após validação do APK versionado recém-gerado.
     shutil.copy2(origem_apk, destino_dist)
-    shutil.copy2(origem_apk, destino_pacote)
-    shutil.copy2(origem_apk, destino_legacy)
-
     _validar_apk_gerado(destino_dist)
+    if not os.path.basename(destino_dist).endswith(f"v{versao}.apk"):
+        raise RuntimeError("APK versionado inválido para distribuição.")
+
+    shutil.copy2(destino_dist, destino_pacote)
+    shutil.copy2(destino_dist, destino_legacy)
+
     _validar_apk_gerado(destino_pacote)
     _validar_apk_gerado(destino_legacy)
 
@@ -653,6 +660,112 @@ def _resolver_python_build() -> str:
         if caminho_abs and os.path.exists(caminho_abs):
             return caminho_abs
     raise FileNotFoundError("Nenhum interpretador Python válido foi encontrado para o build.")
+
+
+def _limpar_pycache_recursivo(base_dir: str) -> int:
+    removidos = 0
+    for raiz, dirs, _files in os.walk(base_dir):
+        for nome_dir in list(dirs):
+            if nome_dir != "__pycache__":
+                continue
+            caminho = os.path.join(raiz, nome_dir)
+            try:
+                shutil.rmtree(caminho, ignore_errors=True)
+                removidos += 1
+                print(f"🧹 __pycache__ removido: {caminho}")
+            except Exception as exc:
+                print(f"⚠️  Falha ao remover __pycache__ ({caminho}): {exc}")
+    return removidos
+
+
+def _limpar_apks_assets_internos(base_dir: str) -> int:
+    removidos = 0
+    for raiz, _dirs, arquivos in os.walk(base_dir):
+        rel = os.path.relpath(raiz, base_dir).lower()
+        partes = {p for p in rel.split(os.sep) if p not in {".", ""}}
+        if "assets" not in partes and "_internal" not in partes:
+            continue
+        for nome in arquivos:
+            if not nome.lower().endswith(".apk"):
+                continue
+            caminho = os.path.join(raiz, nome)
+            try:
+                os.remove(caminho)
+                removidos += 1
+                print(f"🧹 APK antigo removido de assets/interno: {caminho}")
+            except Exception as exc:
+                print(f"⚠️  Falha ao remover APK antigo ({caminho}): {exc}")
+    return removidos
+
+
+def _limpeza_total_pre_build() -> None:
+    print(DIV)
+    print("🧼 Limpeza total pré-build (dist, build, __pycache__ e APKs antigos)...")
+
+    bases = []
+    for candidato in [REPO_ROOT, BUILD_ROOT]:
+        abs_candidato = os.path.abspath(candidato)
+        if abs_candidato not in bases:
+            bases.append(abs_candidato)
+
+    for base in bases:
+        for rel_pasta in [
+            "build",
+            "dist",
+            os.path.join(ANDROID_PROJECT_DIR, "build"),
+            os.path.join(ANDROID_PROJECT_DIR, "app", "build"),
+        ]:
+            pasta = os.path.join(base, rel_pasta)
+            if not os.path.exists(pasta):
+                continue
+            print(f"🧹 Limpando pasta: {pasta}")
+            shutil.rmtree(pasta, ignore_errors=True)
+
+    total_pycache = 0
+    total_apk_assets = 0
+    for base in bases:
+        total_pycache += _limpar_pycache_recursivo(base)
+        total_apk_assets += _limpar_apks_assets_internos(base)
+
+    print(
+        f"✅ Limpeza total concluída: __pycache__ removidos={total_pycache}, "
+        f"APKs antigos em assets/_internal removidos={total_apk_assets}"
+    )
+    print(DIV)
+
+
+def _confirmar_version_name_apk(versao_esperada: str) -> None:
+    base = os.path.join(ANDROID_PROJECT_DIR, "app", "build", "generated", "source", "buildConfig")
+    valor_encontrado = ""
+
+    if not os.path.isdir(base):
+        raise RuntimeError(
+            "Pasta BuildConfig do Android não foi gerada. "
+            "Build interrompido para evitar distribuição incorreta."
+        )
+
+    for raiz, _dirs, arquivos in os.walk(base):
+        for nome in arquivos:
+            if nome != "BuildConfig.java":
+                continue
+            caminho = os.path.join(raiz, nome)
+            with open(caminho, "r", encoding="utf-8", errors="ignore") as f:
+                conteudo = f.read()
+            match = re.search(r'VERSION_NAME\s*=\s*"([^"]+)"', conteudo)
+            if not match:
+                continue
+            valor_encontrado = str(match.group(1)).strip()
+            if valor_encontrado != versao_esperada:
+                raise RuntimeError(
+                    f"Versão do APK divergente no BuildConfig: encontrado {valor_encontrado}, esperado {versao_esperada}."
+                )
+            print(f"✅ Versão APK confirmada no BuildConfig: {valor_encontrado}")
+            return
+
+    raise RuntimeError(
+        "Não foi possível confirmar VERSION_NAME do APK após compilação. "
+        "Build interrompido para evitar distribuição incorreta."
+    )
 
 
 def _validar_pasta_trabalho() -> bool:
@@ -1207,6 +1320,7 @@ def main():
     print_header()
     if not _validar_pasta_trabalho():
         sys.exit(1)
+    _limpeza_total_pre_build()
     projeto, versao = get_input()
     if versao != VERSAO:
         print(f"ℹ️  Versão informada ({versao}) ignorada. Usando fonte única do mestre_build.py: {VERSAO}")
