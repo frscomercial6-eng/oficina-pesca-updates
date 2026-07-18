@@ -87,6 +87,7 @@ from config import (
     iniciar_listener_firebase_realtime,
     obter_status_acesso_centralizado,
     modo_cliente_final_licenciado,
+    bloqueio_loop_update_ativo,
 )
 from shutdown_utils import fechar_sistema
 
@@ -1592,6 +1593,10 @@ def _atualizar_popup_atualizacao(mensagem: str, progresso: float | None = None):
 
 
 def _executar_instalacao_update(confirmar_usuario: bool = True):
+    if bloqueio_loop_update_ativo():
+        messagebox.showinfo("Atualização", "Sistema atualizado", parent=janela_login)
+        return
+
     if not _url_update_disponivel:
         messagebox.showwarning("Atualização", "Link de atualização indisponível no momento.", parent=janela_login)
         return
@@ -1639,6 +1644,7 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
             processo_pid=os.getpid(),
             silenciosa=True,
             progresso_cb=_progresso,
+            versao_alvo=_update_versao_detectada,
         )
 
         def _finalizar():
@@ -1655,9 +1661,13 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
                 except Exception:
                     pass
             else:
-                _atualizar_popup_atualizacao(f"Falha na atualização: {msg}", 0.0)
+                _atualizar_popup_atualizacao(str(msg or "Sem novas atualizações"), 0.0)
                 janela_login.after(1800, _fechar_popup_atualizacao)
-                messagebox.showerror("Atualização", msg, parent=janela_login)
+                msg_final = str(msg or "").strip()
+                if msg_final in {"Sistema atualizado", "Sem novas atualizações"}:
+                    messagebox.showinfo("Atualização", msg_final, parent=janela_login)
+                else:
+                    messagebox.showinfo("Atualização", "Sem novas atualizações", parent=janela_login)
 
         janela_login.after(0, _finalizar)
 
@@ -1799,6 +1809,17 @@ label_versao.pack(pady=(0, 4))
 
 def _checar_versao_bg():
     global _url_update_disponivel, _auto_update_liberado, _mensagem_politica_update, _popup_update_exibido, _auto_update_disparada
+    if bloqueio_loop_update_ativo():
+        janela_login.after(
+            0,
+            lambda: label_versao.configure(
+                text="Sistema atualizado",
+                text_color="#2ecc71",
+                font=("Arial", 11, "bold"),
+            ),
+        )
+        return
+
     try:
         # Mantém registro histórico, mas sem bloquear a checagem no startup.
         deve_verificar_atualizacao(INTERVALO_DIAS_CHECK_VERSAO)

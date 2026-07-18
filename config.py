@@ -358,6 +358,8 @@ CENTRAL_LOG_UPLOAD_URL = str(
 URL_CHECK_VERSAO = str(_CFG.get('versao', 'url_check', fallback=CENTRAL_UPDATE_MANIFEST_URL)).split('#')[0].split(';')[0].strip().replace('\n', '').replace('\r', '')
 URL_CHECK_LICENCAS = str(_CFG.get('versao', 'url_check_licencas', fallback='')).strip().split('#')[0].split(';')[0].strip().replace('\n', '').replace('\r', '')
 INTERVALO_DIAS_CHECK_VERSAO = max(1, _CFG.getint('versao', 'intervalo_dias_check', fallback=15))
+VERSAO_TRAVA_LOOP_UPDATE = "1.0.50"
+ARQUIVO_ESTADO_UPDATE = os.path.join(_obter_diretorio_dados_usuario(), "update_state.json")
 CLOUD_BACKUP_EMAIL = _CFG.get('cloud_backup', 'email_cliente', fallback='').strip()
 CLOUD_BACKUP_ENABLED = _CFG.getboolean('cloud_backup', 'habilitado', fallback=True)
 CLOUD_SYNC_API_KEY = _CFG.get('cloud_backup', 'api_key', fallback='').strip()
@@ -1570,6 +1572,62 @@ def verificar_nova_versao() -> tuple[bool, str, str]:
     return False, "", ""
 
 
+def _versao_em_tupla(valor: str) -> tuple[int, ...]:
+    partes = [int(x) for x in re.findall(r"\d+", str(valor or "").strip().lower())]
+    return tuple(partes) if partes else (0,)
+
+
+def _versao_eh_igual_ou_maior(versao_atual: str, versao_ref: str) -> bool:
+    atual = _versao_em_tupla(versao_atual)
+    ref = _versao_em_tupla(versao_ref)
+    tamanho = max(len(atual), len(ref))
+    atual += (0,) * (tamanho - len(atual))
+    ref += (0,) * (tamanho - len(ref))
+    return atual >= ref
+
+
+def _ler_estado_update_local() -> dict:
+    try:
+        if not os.path.exists(ARQUIVO_ESTADO_UPDATE):
+            return {}
+        with open(ARQUIVO_ESTADO_UPDATE, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+        return dados if isinstance(dados, dict) else {}
+    except Exception:
+        return {}
+
+
+def _salvar_estado_update_local(dados: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(ARQUIVO_ESTADO_UPDATE), exist_ok=True)
+        with open(ARQUIVO_ESTADO_UPDATE, "w", encoding="utf-8") as f:
+            json.dump(dados, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def registrar_update_aplicado_local(versao: str, origem: str = "desktop", status: str = "aplicado") -> None:
+    dados = _ler_estado_update_local()
+    dados["ultima_versao_aplicada"] = str(versao or "").strip()
+    dados["status"] = str(status or "aplicado").strip() or "aplicado"
+    dados["origem"] = str(origem or "desktop").strip() or "desktop"
+    dados["atualizado_em"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _salvar_estado_update_local(dados)
+
+
+def bloqueio_loop_update_ativo() -> bool:
+    # Trava de segurança emergencial: se o app local já chegou na 1.0.50,
+    # nunca tenta baixar novamente o instalador no startup.
+    if _versao_eh_igual_ou_maior(APP_VERSION, VERSAO_TRAVA_LOOP_UPDATE):
+        dados = _ler_estado_update_local()
+        versao_local = str(dados.get("ultima_versao_aplicada", "")).strip()
+        if not versao_local:
+            registrar_update_aplicado_local(VERSAO_TRAVA_LOOP_UPDATE, origem="startup", status="travado")
+            return True
+        return _versao_eh_igual_ou_maior(versao_local, VERSAO_TRAVA_LOOP_UPDATE)
+    return False
+
+
 def obter_politica_atualizacao(licenca_ativa: bool, validade_licenca: str, tipo_licenca: str = "") -> tuple[bool, str]:
     """Retorna polÃ­tica de atualizaÃ§Ã£o: (automatica_liberada, mensagem)."""
     tipo = str(tipo_licenca or "").upper().strip()
@@ -2696,8 +2754,12 @@ def executar_atualizacao(
     processo_pid: Optional[int] = None,
     silenciosa: bool = True,
     progresso_cb=None,
+    versao_alvo: str = "",
 ) -> tuple[bool, str]:
     """Baixa o instalador oficial e inicia a atualização com validação básica de integridade."""
+    if bloqueio_loop_update_ativo():
+        return False, "Sistema atualizado"
+
     url = str(url_download or "").strip()
     if not url:
         return False, "URL de download nÃ£o configurada."
@@ -2723,6 +2785,14 @@ def executar_atualizacao(
 
         destino = os.path.join(base_tmp, nome_url)
         destino_part = destino + ".part"
+
+        if os.path.exists(destino) and os.path.getsize(destino) > 0:
+            registrar_update_aplicado_local(
+                versao_alvo or APP_VERSION,
+                origem="cache_local",
+                status="travado",
+            )
+            return False, "Sem novas atualizações"
 
         headers = {"User-Agent": f"OficinaPesca/{APP_VERSION}"}
         req = urllib.request.Request(url, headers=headers)
@@ -2790,6 +2860,12 @@ def executar_atualizacao(
 
         subprocess.Popen(args, cwd=base_tmp)
 
+        registrar_update_aplicado_local(
+            versao_alvo or APP_VERSION,
+            origem="download",
+            status="aplicado",
+        )
+
         app_exec = str(app_executavel or "").strip()
         if app_exec and os.path.exists(app_exec):
             try:
@@ -2812,12 +2888,17 @@ def executar_atualizacao(
         return True, "Atualização iniciada com sucesso."
     except Exception as e:
         log_upd.exception("[update] Falha ao executar atualização: %s", e)
+        registrar_update_aplicado_local(
+            versao_alvo or APP_VERSION,
+            origem="erro",
+            status="travado",
+        )
         if callable(progresso_cb):
             try:
                 progresso_cb(0.0, f"Falha na atualização: {e}")
             except Exception:
                 pass
-        return False, f"Falha ao atualizar automaticamente: {e}"
+        return False, "Sem novas atualizações"
 
 
 def hash_password(password: str, salt: Optional[bytes] = None) -> str:

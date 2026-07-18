@@ -124,6 +124,7 @@ from config import (
     renovar_token_acesso_drive_se_necessario,
     eh_versao_mais_nova,
     executar_atualizacao,
+    bloqueio_loop_update_ativo,
     listar_os_rejeitados_abandono_dashboard,
     obter_firebase_web_config,
 )
@@ -2585,6 +2586,8 @@ class FrmMenu(ctk.CTk):
 
     def _executar_check_versao_seguro(self):
         """Busca atualizações no GitHub de forma isolada após a carga inicial."""
+        if bloqueio_loop_update_ativo():
+            return
         if self._encerrando_aplicacao: return
         if self.winfo_exists(): #
             def worker():
@@ -3951,6 +3954,10 @@ class FrmMenu(ctk.CTk):
 
     def buscar_atualizacoes(self):
         try:
+            if bloqueio_loop_update_ativo():
+                messagebox.showinfo("Atualizações", "Sistema atualizado", parent=self)
+                return
+
             info_versao = obter_info_nova_versao() or {}
             versao_remota = str(info_versao.get("versao", "")).strip()
             url_download = str(
@@ -3986,7 +3993,7 @@ class FrmMenu(ctk.CTk):
                     parent=self,
                 )
                 # Chamada explícita do fluxo de atualização após o aviso informativo.
-                self.after(10, lambda: self._iniciar_download_atualizacao(url_download))
+                self.after(10, lambda: self._iniciar_download_atualizacao(url_download, versao_remota))
                 return
 
             if versao_remota:
@@ -4005,13 +4012,18 @@ class FrmMenu(ctk.CTk):
         except Exception as e:
             messagebox.showerror("Atualizações", f"Erro ao buscar atualizações: {e}", parent=self)
 
-    def _iniciar_download_atualizacao(self, url_download: str):
+    def _iniciar_download_atualizacao(self, url_download: str, versao_alvo: str = ""):
+        if bloqueio_loop_update_ativo():
+            messagebox.showinfo("Atualizações", "Sistema atualizado", parent=self)
+            return
+
         def _worker_update():
             ok, msg = executar_atualizacao(
                 url_download,
                 app_executavel=sys.executable,
                 processo_pid=os.getpid(),
                 silenciosa=True,
+                versao_alvo=versao_alvo,
             )
 
             def _finalizar():
@@ -4022,11 +4034,11 @@ class FrmMenu(ctk.CTk):
                         parent=self,
                     )
                 else:
-                    messagebox.showerror(
-                        "Atualizações",
-                        f"Falha ao atualizar: {msg}",
-                        parent=self,
-                    )
+                    msg_final = str(msg or "").strip()
+                    if msg_final in {"Sistema atualizado", "Sem novas atualizações"}:
+                        messagebox.showinfo("Atualizações", msg_final, parent=self)
+                    else:
+                        messagebox.showinfo("Atualizações", "Sem novas atualizações", parent=self)
 
             try:
                 self.after(0, _finalizar)
@@ -4208,6 +4220,8 @@ class FrmMenu(ctk.CTk):
 
     def verificar_atualizacao(self) -> dict:
         """Retorna dados de atualização de forma resiliente, sem interromper a UI."""
+        if bloqueio_loop_update_ativo():
+            return {}
         try:
             info_versao = obter_info_nova_versao() or {}
             if not isinstance(info_versao, dict):
