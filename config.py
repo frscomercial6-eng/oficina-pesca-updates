@@ -1633,11 +1633,7 @@ def bloqueio_loop_update_ativo(versao_alvo: str = "") -> bool:
 
 
 def limpar_cache_instalacao_update() -> tuple[bool, str]:
-    base_tmp = os.path.join(
-        os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or tempfile.gettempdir(),
-        "OficinaPesca",
-        "temp_update",
-    )
+    base_tmp = os.path.join(tempfile.gettempdir(), "oficina_pesca_update")
     if not os.path.isdir(base_tmp):
         return True, "Cache de atualização limpo."
 
@@ -1646,7 +1642,13 @@ def limpar_cache_instalacao_update() -> tuple[bool, str]:
     for nome in os.listdir(base_tmp):
         caminho = os.path.join(base_tmp, nome)
         nome_lower = nome.lower()
-        if not (nome_lower.endswith(".part") or nome_lower.endswith(".exe") or nome_lower.endswith(".tmp")):
+        if not (
+            nome_lower.endswith(".part")
+            or nome_lower.endswith(".exe")
+            or nome_lower.endswith(".tmp")
+            or nome_lower.endswith(".cmd")
+            or nome_lower.endswith(".json")
+        ):
             continue
         try:
             if os.path.isfile(caminho):
@@ -1658,6 +1660,20 @@ def limpar_cache_instalacao_update() -> tuple[bool, str]:
     if falhas:
         return False, f"Cache parcialmente limpo ({removidos} removido(s), {falhas} falha(s))."
     return True, f"Cache de atualização limpo ({removidos} arquivo(s) removido(s))."
+
+
+def _resetar_trava_update_para_versao_alvo(versao_alvo: str) -> tuple[bool, str]:
+    alvo = str(versao_alvo or "").strip()
+    if not alvo or alvo != VERSAO_TRAVA_LOOP_UPDATE:
+        return True, "Sem reset de trava para esta versão-alvo."
+
+    try:
+        if os.path.exists(ARQUIVO_ESTADO_UPDATE):
+            os.remove(ARQUIVO_ESTADO_UPDATE)
+            return True, f"Trava local removida para atualização {alvo}."
+        return True, f"Trava local não encontrada para atualização {alvo}."
+    except Exception as exc:
+        return False, f"Falha ao resetar trava local da atualização {alvo}: {exc}"
 
 
 def obter_politica_atualizacao(licenca_ativa: bool, validade_licenca: str, tipo_licenca: str = "") -> tuple[bool, str]:
@@ -2789,7 +2805,16 @@ def executar_atualizacao(
     versao_alvo: str = "",
 ) -> tuple[bool, str]:
     """Baixa o instalador oficial e inicia a atualização com validação básica de integridade."""
-    if bloqueio_loop_update_ativo(versao_alvo=versao_alvo):
+    alvo = str(versao_alvo or "").strip()
+
+    if alvo == VERSAO_TRAVA_LOOP_UPDATE:
+        _ok_reset, _msg_reset = _resetar_trava_update_para_versao_alvo(alvo)
+        try:
+            get_logger("update-download").info("[update] %s", _msg_reset)
+        except Exception:
+            pass
+
+    if alvo != VERSAO_TRAVA_LOOP_UPDATE and bloqueio_loop_update_ativo(versao_alvo=alvo):
         return False, "Sistema atualizado"
 
     url = str(url_download or "").strip()
@@ -2804,11 +2829,7 @@ def executar_atualizacao(
     try:
         import urllib.parse
 
-        base_tmp = os.path.join(
-            os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or tempfile.gettempdir(),
-            "OficinaPesca",
-            "temp_update",
-        )
+        base_tmp = os.path.join(tempfile.gettempdir(), "oficina_pesca_update")
         os.makedirs(base_tmp, exist_ok=True)
 
         ok_cache, msg_cache = limpar_cache_instalacao_update()
@@ -2893,7 +2914,34 @@ def executar_atualizacao(
         if silenciosa:
             args.extend(["/VERYSILENT", "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"])
 
-        subprocess.Popen(args, cwd=base_tmp)
+        launcher_script = os.path.join(base_tmp, "run_update_forcado.cmd")
+        pid_txt = str(int(processo_pid)) if processo_pid else ""
+        args_txt = " ".join([f'"{a}"' if " " in str(a) else str(a) for a in args[1:]])
+        script_lines = [
+            "@echo off",
+            "setlocal",
+        ]
+        if pid_txt:
+            script_lines.extend(
+                [
+                    f"taskkill /PID {pid_txt} /F >nul 2>nul",
+                    "ping 127.0.0.1 -n 3 > nul",
+                ]
+            )
+        script_lines.extend(
+            [
+                f"start \"\" \"{args[0]}\" {args_txt}".rstrip(),
+                "exit /b 0",
+            ]
+        )
+        with open(launcher_script, "w", encoding="utf-8") as fscript:
+            fscript.write("\r\n".join(script_lines) + "\r\n")
+
+        subprocess.Popen(
+            ["cmd", "/c", launcher_script],
+            cwd=base_tmp,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
 
         registrar_update_aplicado_local(
             versao_alvo or APP_VERSION,
