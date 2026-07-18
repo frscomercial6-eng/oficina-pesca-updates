@@ -1615,7 +1615,11 @@ def registrar_update_aplicado_local(versao: str, origem: str = "desktop", status
     _salvar_estado_update_local(dados)
 
 
-def bloqueio_loop_update_ativo() -> bool:
+def bloqueio_loop_update_ativo(versao_alvo: str = "") -> bool:
+    alvo = str(versao_alvo or "").strip()
+    if alvo and eh_versao_mais_nova(alvo, APP_VERSION):
+        return False
+
     # Trava de segurança emergencial: se o app local já chegou na 1.0.50,
     # nunca tenta baixar novamente o instalador no startup.
     if _versao_eh_igual_ou_maior(APP_VERSION, VERSAO_TRAVA_LOOP_UPDATE):
@@ -1626,6 +1630,34 @@ def bloqueio_loop_update_ativo() -> bool:
             return True
         return _versao_eh_igual_ou_maior(versao_local, VERSAO_TRAVA_LOOP_UPDATE)
     return False
+
+
+def limpar_cache_instalacao_update() -> tuple[bool, str]:
+    base_tmp = os.path.join(
+        os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or tempfile.gettempdir(),
+        "OficinaPesca",
+        "temp_update",
+    )
+    if not os.path.isdir(base_tmp):
+        return True, "Cache de atualização limpo."
+
+    removidos = 0
+    falhas = 0
+    for nome in os.listdir(base_tmp):
+        caminho = os.path.join(base_tmp, nome)
+        nome_lower = nome.lower()
+        if not (nome_lower.endswith(".part") or nome_lower.endswith(".exe") or nome_lower.endswith(".tmp")):
+            continue
+        try:
+            if os.path.isfile(caminho):
+                os.remove(caminho)
+                removidos += 1
+        except Exception:
+            falhas += 1
+
+    if falhas:
+        return False, f"Cache parcialmente limpo ({removidos} removido(s), {falhas} falha(s))."
+    return True, f"Cache de atualização limpo ({removidos} arquivo(s) removido(s))."
 
 
 def obter_politica_atualizacao(licenca_ativa: bool, validade_licenca: str, tipo_licenca: str = "") -> tuple[bool, str]:
@@ -2757,7 +2789,7 @@ def executar_atualizacao(
     versao_alvo: str = "",
 ) -> tuple[bool, str]:
     """Baixa o instalador oficial e inicia a atualização com validação básica de integridade."""
-    if bloqueio_loop_update_ativo():
+    if bloqueio_loop_update_ativo(versao_alvo=versao_alvo):
         return False, "Sistema atualizado"
 
     url = str(url_download or "").strip()
@@ -2779,20 +2811,23 @@ def executar_atualizacao(
         )
         os.makedirs(base_tmp, exist_ok=True)
 
+        ok_cache, msg_cache = limpar_cache_instalacao_update()
+        if not ok_cache:
+            log_upd.warning("[update] %s", msg_cache)
+        else:
+            log_upd.info("[update] %s", msg_cache)
+        if callable(progresso_cb):
+            try:
+                progresso_cb(0.0, "Limpando cache de atualização...")
+            except Exception:
+                pass
+
         nome_url = os.path.basename(urllib.parse.urlsplit(url).path or "").strip()
         if not nome_url.lower().endswith(".exe"):
             nome_url = "Setup_OficinaPesca_update.exe"
 
         destino = os.path.join(base_tmp, nome_url)
         destino_part = destino + ".part"
-
-        if os.path.exists(destino) and os.path.getsize(destino) > 0:
-            registrar_update_aplicado_local(
-                versao_alvo or APP_VERSION,
-                origem="cache_local",
-                status="travado",
-            )
-            return False, "Sem novas atualizações"
 
         headers = {"User-Agent": f"OficinaPesca/{APP_VERSION}"}
         req = urllib.request.Request(url, headers=headers)
