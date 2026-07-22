@@ -40,6 +40,8 @@ android {
         buildConfigField "String", "FIREBASE_APP_ID", "\"${System.getenv('OFP_FIREBASE_APP_ID') ?: ''}\""
         buildConfigField "String", "FIREBASE_SYNC_CHANNEL", "\"${System.getenv('OFP_FIREBASE_SYNC_CHANNEL') ?: 'global'}\""
         buildConfigField "String", "FIREBASE_AUTH_PATH", "\"${System.getenv('OFP_FIREBASE_AUTH_PATH') ?: 'mobile_auth'}\""
+        buildConfigField "String", "MOBILE_PUBLIC_URL", "\"${cfgValue('url_app_celular_publica', '')}\""
+        buildConfigField "String", "SERVER_BASE_URL", "\"${cfgValue('servidor_url', 'http://localhost:8000')}\""
         buildConfigField "String", "PLANO_LINK_PROMO", "\"${cfgValue('infinitepay_link_promo_lancamento', 'https://checkout.infinitepay.io/frsoficinadepesca/7O04uAqkj')}\""
         buildConfigField "String", "PLANO_LINK_MENSAL", "\"${cfgValue('infinitepay_link_mensal', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/7n8vLUjOnD')}\""
         buildConfigField "String", "PLANO_LINK_TRIMESTRAL", "\"${cfgValue('infinitepay_link_trimestral', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/2arDagkoGn')}\""

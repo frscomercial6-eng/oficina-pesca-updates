@@ -1,5 +1,6 @@
 package com.oficinapesca.mobile
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.provider.Settings
@@ -26,6 +27,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusView: TextView
     private lateinit var detalhesView: TextView
     private lateinit var botaoTentar: Button
+    @Volatile
+    private var navegacaoDisparada = false
 
     private val deviceId: String by lazy {
         (Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "desconhecido").trim()
@@ -223,6 +226,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         botaoTentar.visibility = Button.GONE
+        irParaSistemaPrincipal()
     }
 
     private fun atualizarStatusAutoCadastro(path: String) {
@@ -235,6 +239,18 @@ class MainActivity : AppCompatActivity() {
             append("Status: liberado (modo teste ativo)")
         }
         botaoTentar.visibility = Button.GONE
+        irParaSistemaPrincipal()
+    }
+
+    private fun irParaSistemaPrincipal() {
+        if (navegacaoDisparada) {
+            return
+        }
+        navegacaoDisparada = true
+        val intent = Intent(this, SistemaPrincipalActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        startActivity(intent)
+        finish()
     }
 
     private fun atualizarStatusErro(msg: String) {
