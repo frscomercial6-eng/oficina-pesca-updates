@@ -36,23 +36,21 @@ class SistemaPrincipalActivity : AppCompatActivity() {
 
     private val urlsCandidatas: List<String>
         get() {
-            val mobileUrl = BuildConfig.MOBILE_PUBLIC_URL.trim().trimEnd('/')
-            val serverBase = BuildConfig.SERVER_BASE_URL.trim().trimEnd('/')
+            val publicUrl = BuildConfig.MOBILE_PUBLIC_URL.trim().trimEnd('/')
+            if (publicUrl.isBlank()) {
+                return emptyList()
+            }
 
             val candidatos = mutableListOf<String>()
-            if (mobileUrl.isNotEmpty()) {
-                candidatos += mobileUrl
-                candidatos += "$mobileUrl/web/login"
-                candidatos += "$mobileUrl/app"
+            candidatos += publicUrl
+
+            if (!publicUrl.endsWith("/app", ignoreCase = true)) {
+                candidatos += "$publicUrl/app"
             }
 
-            if (serverBase.isNotEmpty()) {
-                candidatos += "$serverBase/web/login"
-                candidatos += "$serverBase/app"
+            if (!publicUrl.endsWith("/web/login", ignoreCase = true)) {
+                candidatos += "$publicUrl/web/login"
             }
-
-            candidatos += "http://10.0.2.2:8000/web/login"
-            candidatos += "http://10.0.2.2:8000/app"
 
             return candidatos.distinct()
         }
@@ -151,7 +149,7 @@ class SistemaPrincipalActivity : AppCompatActivity() {
         carregamentoConcluido = false
         cancelarTimeout()
         if (candidatos.isEmpty()) {
-            statusView.text = "URL principal não configurada para o app."
+            statusView.text = "URL pública do sistema não configurada. Defina OFP_WEB_APP_URL ou url_app_celular_publica."
             botaoTentar.visibility = Button.VISIBLE
             return
         }
@@ -254,7 +252,7 @@ class SistemaPrincipalActivity : AppCompatActivity() {
             <html><body style=\"background:#0E1524;color:#E5E7EB;font-family:sans-serif;padding:22px;\">
             <h3 style=\"color:#FCD34D;\">Servidor indisponível</h3>
             <p>Não conseguimos abrir a interface web do sistema neste dispositivo.</p>
-            <p>Confirme se o servidor Desktop está ligado na mesma rede e se a URL pública do app celular foi configurada.</p>
+            <p>Confirme se a URL pública do app celular está configurada e acessível pela internet móvel.</p>
             <p>Tente novamente em alguns segundos.</p>
             </body></html>
             """.trimIndent(),
