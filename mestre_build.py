@@ -206,15 +206,15 @@ def atualizar_versao_json(nova_versao):
     with open(caminho, encoding="utf-8") as f:
         dados = json.load(f)
     versao_antiga = dados.get("versao", "")
-    if versao_antiga == nova_versao:
-        print(f"ℹ️  versao.json já está na versão {nova_versao}.")
-        return
     dados["versao"] = nova_versao
     if "novidades" in dados and isinstance(dados["novidades"], str):
         dados["novidades"] = f"v{nova_versao}: Atualização de versão automática."
     with open(caminho, "w", encoding="utf-8") as f:
         json.dump(dados, f, ensure_ascii=False, indent=2)
-    print(f"✅ versao.json atualizado de {versao_antiga} para {nova_versao}.")
+    if versao_antiga == nova_versao:
+        print(f"ℹ️  versao.json já estava na versão {nova_versao}; conteúdo foi revalidado.")
+    else:
+        print(f"✅ versao.json atualizado de {versao_antiga} para {nova_versao}.")
 
     caminho_version = "version.json"
     dados_version = {
@@ -239,6 +239,8 @@ def atualizar_versao_json(nova_versao):
         if not isinstance(dados_cfg.get("update"), dict):
             dados_cfg["update"] = {}
         dados_cfg["update"]["versao"] = nova_versao
+        dados_cfg["update"]["novidades"] = f"v{nova_versao}: Atualização de versão automática."
+        dados_cfg["update"]["url_download"] = "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe"
         dados_cfg["update"]["download_url"] = "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe"
         with open(caminho_config, "w", encoding="utf-8") as f:
             json.dump(dados_cfg, f, ensure_ascii=False, indent=2)

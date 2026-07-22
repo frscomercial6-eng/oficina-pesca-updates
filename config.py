@@ -1642,6 +1642,13 @@ def limpar_cache_instalacao_update() -> tuple[bool, str]:
     for nome in os.listdir(base_tmp):
         caminho = os.path.join(base_tmp, nome)
         nome_lower = nome.lower()
+        if os.path.isdir(caminho) and nome_lower.startswith("run_"):
+            try:
+                shutil.rmtree(caminho, ignore_errors=True)
+                removidos += 1
+            except Exception:
+                falhas += 1
+            continue
         if not (
             nome_lower.endswith(".part")
             or nome_lower.endswith(".exe")
@@ -2804,7 +2811,7 @@ def executar_atualizacao(
     progresso_cb=None,
     versao_alvo: str = "",
 ) -> tuple[bool, str]:
-    """Baixa o instalador oficial e inicia a atualização com validação básica de integridade."""
+    """Baixa o instalador oficial e inicia a atualização em fluxo seguro no Windows."""
     alvo = str(versao_alvo or "").strip()
 
     if alvo == VERSAO_TRAVA_LOOP_UPDATE:
@@ -2829,8 +2836,8 @@ def executar_atualizacao(
     try:
         import urllib.parse
 
-        base_tmp = os.path.join(tempfile.gettempdir(), "oficina_pesca_update")
-        os.makedirs(base_tmp, exist_ok=True)
+        base_tmp_root = os.path.join(tempfile.gettempdir(), "oficina_pesca_update")
+        os.makedirs(base_tmp_root, exist_ok=True)
 
         ok_cache, msg_cache = limpar_cache_instalacao_update()
         if not ok_cache:
@@ -2842,6 +2849,10 @@ def executar_atualizacao(
                 progresso_cb(0.0, "Limpando cache de atualização...")
             except Exception:
                 pass
+
+        exec_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:8]
+        base_tmp = os.path.join(base_tmp_root, f"run_{exec_id}")
+        os.makedirs(base_tmp, exist_ok=True)
 
         nome_url = os.path.basename(urllib.parse.urlsplit(url).path or "").strip()
         if not nome_url.lower().endswith(".exe"):
@@ -2910,64 +2921,70 @@ def executar_atualizacao(
         with open(os.path.join(base_tmp, "update_download_meta.json"), "w", encoding="utf-8") as fmeta:
             json.dump(meta, fmeta, ensure_ascii=False, indent=2)
 
-        args = [destino]
+        args = []
         if silenciosa:
-            args.extend(["/VERYSILENT", "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"])
+            args.extend([
+                "/SP-",
+                "/VERYSILENT",
+                "/SUPPRESSMSGBOXES",
+                "/NOCANCEL",
+                "/CLOSEAPPLICATIONS",
+                "/FORCECLOSEAPPLICATIONS",
+                "/NORESTARTAPPLICATIONS",
+            ])
+
+        inno_log = os.path.join(base_tmp, "inno_update.log")
+        args.append(f'/LOG="{inno_log}"')
 
         launcher_script = os.path.join(base_tmp, "run_update_forcado.cmd")
         pid_txt = str(int(processo_pid)) if processo_pid else ""
-        args_txt = " ".join([f'"{a}"' if " " in str(a) else str(a) for a in args[1:]])
+        args_txt = " ".join(str(a) for a in args)
+        app_exec = str(app_executavel or "").strip()
         script_lines = [
             "@echo off",
-            "setlocal",
+            "setlocal EnableExtensions",
+            f'set "INSTALLER={destino}"',
+            f'set "APP_EXEC={app_exec}"',
+            f'set "PARENT_PID={pid_txt}"',
+            'if not exist "%INSTALLER%" exit /b 2',
         ]
         if pid_txt:
             script_lines.extend(
                 [
-                    f"taskkill /PID {pid_txt} /F >nul 2>nul",
-                    "ping 127.0.0.1 -n 3 > nul",
+                    'taskkill /PID %PARENT_PID% /T /F >nul 2>nul',
+                    'for /l %%I in (1,1,25) do (',
+                    '  tasklist /FI "PID eq %PARENT_PID%" | find "%PARENT_PID%" >nul',
+                    '  if errorlevel 1 goto :pid_encerrado',
+                    '  ping 127.0.0.1 -n 2 >nul',
+                    ')',
+                    ':pid_encerrado',
                 ]
             )
         script_lines.extend(
             [
-                f"start \"\" \"{args[0]}\" {args_txt}".rstrip(),
-                "exit /b 0",
+                f"start \"\" /wait \"{destino}\" {args_txt}".rstrip(),
+                "set \"UPD_EXIT=%ERRORLEVEL%\"",
+                'if not "%APP_EXEC%"=="" if exist "%APP_EXEC%" start "" "%APP_EXEC%"',
+                "exit /b %UPD_EXIT%",
             ]
         )
         with open(launcher_script, "w", encoding="utf-8") as fscript:
             fscript.write("\r\n".join(script_lines) + "\r\n")
 
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
         subprocess.Popen(
             ["cmd", "/c", launcher_script],
             cwd=base_tmp,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            creationflags=creationflags,
         )
 
         registrar_update_aplicado_local(
             versao_alvo or APP_VERSION,
             origem="download",
-            status="aplicado",
+            status="instalador_iniciado",
         )
 
-        app_exec = str(app_executavel or "").strip()
-        if app_exec and os.path.exists(app_exec):
-            try:
-                restart_script = os.path.join(base_tmp, "restart_after_update.cmd")
-                script_lines = [
-                    "@echo off",
-                    "setlocal",
-                    "ping 127.0.0.1 -n 16 > nul",
-                    f"start \"\" \"{app_exec}\"",
-                    "exit /b 0",
-                ]
-                with open(restart_script, "w", encoding="utf-8") as frestart:
-                    frestart.write("\r\n".join(script_lines) + "\r\n")
-                subprocess.Popen(["cmd", "/c", restart_script], cwd=base_tmp)
-                log_upd.info("[update] Restart de contingencia agendado para: %s", app_exec)
-            except Exception as exc_restart:
-                log_upd.warning("[update] Falha ao agendar restart de contingencia: %s", exc_restart)
-
-        log_upd.info("[update] Instalador iniciado: %s", " ".join(args))
+        log_upd.info("[update] Instalador iniciado em processo desacoplado: %s", destino)
         return True, "Atualização iniciada com sucesso."
     except Exception as e:
         log_upd.exception("[update] Falha ao executar atualização: %s", e)
@@ -2981,7 +2998,7 @@ def executar_atualizacao(
                 progresso_cb(0.0, f"Falha na atualização: {e}")
             except Exception:
                 pass
-        return False, "Sem novas atualizações"
+        return False, f"Falha na atualização: {e}"
 
 
 def hash_password(password: str, salt: Optional[bytes] = None) -> str:
