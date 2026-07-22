@@ -17,6 +17,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ServerValue
 import com.google.firebase.database.ValueEventListener
 import java.util.Locale
 
@@ -130,12 +131,18 @@ class MainActivity : AppCompatActivity() {
             "$authBase/default",
         )
 
-        verificarPathAuth(database, paths, 0)
+        verificarPathAuth(database, authBase, channel, paths, 0)
     }
 
-    private fun verificarPathAuth(database: FirebaseDatabase, paths: List<String>, index: Int) {
+    private fun verificarPathAuth(
+        database: FirebaseDatabase,
+        authBase: String,
+        channel: String,
+        paths: List<String>,
+        index: Int,
+    ) {
         if (index >= paths.size) {
-            atualizarStatusErro("Acesso não autorizado no Firebase para este dispositivo.")
+            tentarAutoCadastroGlobal(database, authBase, channel)
             return
         }
 
@@ -145,7 +152,7 @@ class MainActivity : AppCompatActivity() {
                 if (snapshot.exists() && autorizado(snapshot)) {
                     atualizarStatusOk(path, snapshot)
                 } else {
-                    verificarPathAuth(database, paths, index + 1)
+                    verificarPathAuth(database, authBase, channel, paths, index + 1)
                 }
             }
 
@@ -153,12 +160,42 @@ class MainActivity : AppCompatActivity() {
                 val msg = "Falha Firebase em '$path': ${error.message}"
                 Log.w("OficinaPesca", msg)
                 if (index >= paths.lastIndex) {
-                    atualizarStatusErro(msg)
+                    tentarAutoCadastroGlobal(database, authBase, channel)
                     return
                 }
-                verificarPathAuth(database, paths, index + 1)
+                verificarPathAuth(database, authBase, channel, paths, index + 1)
             }
         })
+    }
+
+    private fun tentarAutoCadastroGlobal(database: FirebaseDatabase, authBase: String, channel: String) {
+        val destino = "$authBase/global/$deviceId"
+        statusView.text = "Primeiro acesso detectado. Registrando dispositivo..."
+        statusView.setTextColor(Color.parseColor("#FCD34D"))
+
+        val payload = hashMapOf<String, Any>(
+            "ativa" to true,
+            "enabled" to true,
+            "status" to "liberado",
+            "modo_teste" to true,
+            "canal" to "global",
+            "canal_origem" to channel,
+            "device_id" to deviceId,
+            "app_version" to BuildConfig.VERSION_NAME,
+            "base_desktop" to BuildConfig.VERSION_NAME,
+            "origem" to "auto_cadastro_apk",
+            "updated_at" to ServerValue.TIMESTAMP,
+        )
+
+        database.reference.child(destino).updateChildren(payload)
+            .addOnSuccessListener {
+                atualizarStatusAutoCadastro(destino)
+            }
+            .addOnFailureListener { exc ->
+                atualizarStatusErro(
+                    "Acesso não autorizado no Firebase para este dispositivo e falha no auto-cadastro: ${exc.message}"
+                )
+            }
     }
 
     private fun autorizado(snapshot: DataSnapshot): Boolean {
@@ -168,7 +205,7 @@ class MainActivity : AppCompatActivity() {
         val statusOk = status in setOf("ativo", "active", "liberado", "ok")
 
         val baseDesktop = (snapshot.child("base_desktop").getValue(String::class.java) ?: "").trim()
-        val compatDesktop = baseDesktop.isBlank() || baseDesktop == "1.0.48"
+        val compatDesktop = baseDesktop.isBlank() || baseDesktop == BuildConfig.VERSION_NAME
 
         return (ativa || enabled || statusOk) && compatDesktop
     }
@@ -184,6 +221,18 @@ class MainActivity : AppCompatActivity() {
             if (cliente.isNotBlank()) {
                 append("\nCliente: $cliente")
             }
+        }
+        botaoTentar.visibility = Button.GONE
+    }
+
+    private fun atualizarStatusAutoCadastro(path: String) {
+        statusView.text = "Dispositivo registrado automaticamente"
+        statusView.setTextColor(Color.parseColor("#34D399"))
+        detalhesView.text = buildString {
+            append("Canal: ${BuildConfig.FIREBASE_SYNC_CHANNEL}\n")
+            append("Path auto-cadastro: $path\n")
+            append("Dispositivo: $deviceId\n")
+            append("Status: liberado (modo teste ativo)")
         }
         botaoTentar.visibility = Button.GONE
     }
