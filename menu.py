@@ -4038,7 +4038,7 @@ class FrmMenu(ctk.CTk):
                     if msg_final in {"Sistema atualizado", "Sem novas atualizações"}:
                         messagebox.showinfo("Atualizações", msg_final, parent=self)
                     else:
-                        messagebox.showinfo("Atualizações", "Sem novas atualizações", parent=self)
+                        messagebox.showerror("Atualizações", msg_final or "Falha ao iniciar atualização.", parent=self)
 
             try:
                 self.after(0, _finalizar)

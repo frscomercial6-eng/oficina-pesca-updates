@@ -199,6 +199,7 @@ def get_input():
     return projeto, versao
 
 def atualizar_versao_json(nova_versao):
+    release_url = f"https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v{nova_versao}/Oficina_Pesca_Instalador.exe"
     caminho = "versao.json"
     if not os.path.exists(caminho):
         print(f"⚠️  Arquivo {caminho} não encontrado!")
@@ -220,8 +221,8 @@ def atualizar_versao_json(nova_versao):
     dados_version = {
         "versao": nova_versao,
         "novidades": f"v{nova_versao}: Atualização de versão automática.",
-        "url_download": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe",
-        "download_url": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe",
+        "url_download": release_url,
+        "download_url": release_url,
         "force_update": False,
         "apk": {
             "versao": nova_versao,
@@ -240,8 +241,8 @@ def atualizar_versao_json(nova_versao):
             dados_cfg["update"] = {}
         dados_cfg["update"]["versao"] = nova_versao
         dados_cfg["update"]["novidades"] = f"v{nova_versao}: Atualização de versão automática."
-        dados_cfg["update"]["url_download"] = "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe"
-        dados_cfg["update"]["download_url"] = "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe"
+        dados_cfg["update"]["url_download"] = release_url
+        dados_cfg["update"]["download_url"] = release_url
         with open(caminho_config, "w", encoding="utf-8") as f:
             json.dump(dados_cfg, f, ensure_ascii=False, indent=2)
         print(f"✅ config.json sincronizado para {nova_versao}.")

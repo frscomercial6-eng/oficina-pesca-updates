@@ -2813,6 +2813,19 @@ def executar_atualizacao(
 ) -> tuple[bool, str]:
     """Baixa o instalador oficial e inicia a atualização em fluxo seguro no Windows."""
     alvo = str(versao_alvo or "").strip()
+    base_log_update = os.path.dirname(ARQUIVO_ESTADO_UPDATE)
+    os.makedirs(base_log_update, exist_ok=True)
+    update_error_log = os.path.join(base_log_update, "update_error.log")
+
+    def _registrar_erro_update(mensagem: str, exc: Exception | None = None) -> None:
+        try:
+            detalhe = str(mensagem or "").strip() or "Falha de atualização sem detalhe."
+            if exc is not None:
+                detalhe = f"{detalhe} | excecao={repr(exc)}"
+            with open(update_error_log, "a", encoding="utf-8") as ferr:
+                ferr.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {detalhe}\n")
+        except Exception:
+            pass
 
     if alvo == VERSAO_TRAVA_LOOP_UPDATE:
         _ok_reset, _msg_reset = _resetar_trava_update_para_versao_alvo(alvo)
@@ -2826,10 +2839,12 @@ def executar_atualizacao(
 
     url = str(url_download or "").strip()
     if not url:
-        return False, "URL de download nÃ£o configurada."
+        _registrar_erro_update("URL de download não configurada para atualização.")
+        return False, f"URL de download não configurada. Log: {update_error_log}"
 
     if not url.lower().startswith(("http://", "https://")):
-        return False, "URL de download invÃ¡lida."
+        _registrar_erro_update(f"URL de download inválida: {url}")
+        return False, f"URL de download inválida. Log: {update_error_log}"
 
     log_upd = get_logger("update-download")
 
@@ -2854,6 +2869,13 @@ def executar_atualizacao(
         base_tmp = os.path.join(base_tmp_root, f"run_{exec_id}")
         os.makedirs(base_tmp, exist_ok=True)
 
+        # Falhas de permissão em TEMP eram causa recorrente de updater "piscar" e encerrar.
+        for pasta_teste in (base_tmp_root, base_tmp):
+            teste_perm = os.path.join(pasta_teste, ".perm_check.tmp")
+            with open(teste_perm, "w", encoding="utf-8") as fperm:
+                fperm.write("ok")
+            os.remove(teste_perm)
+
         nome_url = os.path.basename(urllib.parse.urlsplit(url).path or "").strip()
         if not nome_url.lower().endswith(".exe"):
             nome_url = "Setup_OficinaPesca_update.exe"
@@ -2871,6 +2893,17 @@ def executar_atualizacao(
             except Exception:
                 pass
         with urllib.request.urlopen(req, timeout=45) as resp, open(destino_part, "wb") as out:
+            final_url = str(getattr(resp, "geturl", lambda: url)() or url).strip()
+            if alvo and "github.com" in final_url.lower() and f"/download/v{alvo}/" not in final_url.lower():
+                detalhe = (
+                    f"Release remota divergente da versão alvo. alvo={alvo} final_url={final_url} url_original={url}"
+                )
+                log_upd.error("[update] %s", detalhe)
+                _registrar_erro_update(detalhe)
+                return False, (
+                    f"O servidor de atualização ainda está entregando outra release ({final_url}). "
+                    f"Esperado: v{alvo}. Log: {update_error_log}"
+                )
             content_length = int(resp.headers.get("Content-Length", "0") or "0")
             sha = hashlib.sha256()
             total = 0
@@ -2889,17 +2922,29 @@ def executar_atualizacao(
 
         if content_length > 0 and total != content_length:
             log_upd.error("[update] Download inconsistente: esperado=%s recebido=%s", content_length, total)
-            return False, "Falha de integridade no download da atualização (tamanho divergente)."
+            _registrar_erro_update(
+                f"Download inconsistente: esperado={content_length}, recebido={total}, url={url}"
+            )
+            return False, f"Falha de integridade no download (tamanho divergente). Log: {update_error_log}"
 
         if total < 1024 * 1024:
             log_upd.error("[update] Download inválido: tamanho muito pequeno (%s bytes)", total)
-            return False, "Falha de integridade no download da atualização (arquivo inválido)."
+            _registrar_erro_update(f"Download inválido: tamanho insuficiente ({total} bytes), url={url}")
+            return False, f"Falha de integridade no download (arquivo inválido). Log: {update_error_log}"
 
         with open(destino_part, "rb") as fchk:
             assinatura = fchk.read(2)
         if assinatura != b"MZ":
             log_upd.error("[update] Download inválido: assinatura PE ausente em %s", destino_part)
-            return False, "Falha de integridade no download da atualização (executável corrompido)."
+            _registrar_erro_update(f"Assinatura PE inválida para arquivo baixado: {destino_part}")
+            return False, f"Falha de integridade no download (executável corrompido). Log: {update_error_log}"
+
+        if os.path.exists(destino):
+            try:
+                os.remove(destino)
+            except Exception as ex_remove:
+                _registrar_erro_update(f"Falha ao substituir instalador existente em {destino}", ex_remove)
+                return False, f"Falha ao substituir arquivo de atualização. Verifique permissões. Log: {update_error_log}"
 
         os.replace(destino_part, destino)
         hash_hex = sha.hexdigest()
@@ -2922,6 +2967,11 @@ def executar_atualizacao(
             json.dump(meta, fmeta, ensure_ascii=False, indent=2)
 
         args = []
+        app_exec = str(app_executavel or "").strip()
+        app_exec_abs = os.path.abspath(app_exec) if app_exec else ""
+        dir_instalacao_alvo = ""
+        if getattr(sys, "frozen", False) and app_exec_abs and os.path.exists(app_exec_abs):
+            dir_instalacao_alvo = os.path.dirname(app_exec_abs)
         if silenciosa:
             args.extend([
                 "/SP-",
@@ -2933,20 +2983,32 @@ def executar_atualizacao(
                 "/NORESTARTAPPLICATIONS",
             ])
 
+        if dir_instalacao_alvo:
+            args.append(f'/DIR="{dir_instalacao_alvo}"')
+            log_upd.info("[update] Diretório-alvo forçado para instalação: %s", dir_instalacao_alvo)
+
         inno_log = os.path.join(base_tmp, "inno_update.log")
         args.append(f'/LOG="{inno_log}"')
 
         launcher_script = os.path.join(base_tmp, "run_update_forcado.cmd")
+        launcher_err_log = update_error_log.replace("/", "\\")
         pid_txt = str(int(processo_pid)) if processo_pid else ""
         args_txt = " ".join(str(a) for a in args)
-        app_exec = str(app_executavel or "").strip()
         script_lines = [
             "@echo off",
             "setlocal EnableExtensions",
             f'set "INSTALLER={destino}"',
             f'set "APP_EXEC={app_exec}"',
             f'set "PARENT_PID={pid_txt}"',
-            'if not exist "%INSTALLER%" exit /b 2',
+            f'set "UPDATE_ERR_LOG={launcher_err_log}"',
+            f'set "INNO_LOG={inno_log}"',
+            'if not exist "%INSTALLER%" (',
+            '  echo [%date% %time%] Instalador não encontrado: %INSTALLER%>>"%UPDATE_ERR_LOG%"',
+            '  echo ERRO: Instalador não encontrado: %INSTALLER%',
+            '  echo Consulte o log: %UPDATE_ERR_LOG%',
+            '  pause',
+            '  exit /b 2',
+            ')',
         ]
         if pid_txt:
             script_lines.extend(
@@ -2964,6 +3026,15 @@ def executar_atualizacao(
             [
                 f"start \"\" /wait \"{destino}\" {args_txt}".rstrip(),
                 "set \"UPD_EXIT=%ERRORLEVEL%\"",
+                'if not "%UPD_EXIT%"=="0" (',
+                '  echo [%date% %time%] Falha na execução do instalador. exit=%UPD_EXIT% arquivo=%INSTALLER%>>"%UPDATE_ERR_LOG%"',
+                '  if exist "%INNO_LOG%" echo [%date% %time%] Consulte também: %INNO_LOG%>>"%UPDATE_ERR_LOG%"',
+                '  echo.',
+                '  echo ERRO: Atualização falhou (exit=%UPD_EXIT%).',
+                '  echo Log de diagnostico: %UPDATE_ERR_LOG%',
+                '  if exist "%INNO_LOG%" echo Log do instalador: %INNO_LOG%',
+                '  pause',
+                ')',
                 'if not "%APP_EXEC%"=="" if exist "%APP_EXEC%" start "" "%APP_EXEC%"',
                 "exit /b %UPD_EXIT%",
             ]
@@ -2971,7 +3042,7 @@ def executar_atualizacao(
         with open(launcher_script, "w", encoding="utf-8") as fscript:
             fscript.write("\r\n".join(script_lines) + "\r\n")
 
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
         subprocess.Popen(
             ["cmd", "/c", launcher_script],
             cwd=base_tmp,
@@ -2987,6 +3058,7 @@ def executar_atualizacao(
         log_upd.info("[update] Instalador iniciado em processo desacoplado: %s", destino)
         return True, "Atualização iniciada com sucesso."
     except Exception as e:
+        _registrar_erro_update("Falha ao executar atualização (exceção de runtime).", e)
         log_upd.exception("[update] Falha ao executar atualização: %s", e)
         registrar_update_aplicado_local(
             versao_alvo or APP_VERSION,
@@ -2998,7 +3070,7 @@ def executar_atualizacao(
                 progresso_cb(0.0, f"Falha na atualização: {e}")
             except Exception:
                 pass
-        return False, f"Falha na atualização: {e}"
+        return False, f"Falha na atualização: {e}. Log: {update_error_log}"
 
 
 def hash_password(password: str, salt: Optional[bytes] = None) -> str:
