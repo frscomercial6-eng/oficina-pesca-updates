@@ -2969,6 +2969,16 @@ def executar_atualizacao(
         args = []
         app_exec = str(app_executavel or "").strip()
         app_exec_abs = os.path.abspath(app_exec) if app_exec else ""
+        nomes_processo = []
+        if app_exec_abs:
+            nomes_processo.append(os.path.basename(app_exec_abs))
+        nomes_processo.extend(["Oficina_Pesca.exe", "Oficina de Pesca.exe"])
+        nomes_processo_unicos = []
+        for nome_proc in nomes_processo:
+            nome_proc = str(nome_proc or "").strip()
+            if nome_proc and nome_proc.lower() not in {n.lower() for n in nomes_processo_unicos}:
+                nomes_processo_unicos.append(nome_proc)
+        nomes_processo_cmd = " ".join(f'\"{nome}\"' for nome in nomes_processo_unicos)
         dir_instalacao_alvo = ""
         if getattr(sys, "frozen", False) and app_exec_abs and os.path.exists(app_exec_abs):
             dir_instalacao_alvo = os.path.dirname(app_exec_abs)
@@ -3002,6 +3012,7 @@ def executar_atualizacao(
             f'set "PARENT_PID={pid_txt}"',
             f'set "UPDATE_ERR_LOG={launcher_err_log}"',
             f'set "INNO_LOG={inno_log}"',
+            f'set "PROCESS_NAMES={nomes_processo_cmd}"',
             'if not exist "%INSTALLER%" (',
             '  echo [%date% %time%] Instalador não encontrado: %INSTALLER%>>"%UPDATE_ERR_LOG%"',
             '  echo ERRO: Instalador não encontrado: %INSTALLER%',
@@ -3022,6 +3033,25 @@ def executar_atualizacao(
                     ':pid_encerrado',
                 ]
             )
+        script_lines.extend(
+            [
+                'for %%P in (%PROCESS_NAMES%) do (',
+                '  taskkill /IM %%~P /T /F >nul 2>nul',
+                ')',
+                'for /l %%I in (1,1,8) do (',
+                '  set "LOCK_FOUND=0"',
+                '  for %%P in (%PROCESS_NAMES%) do (',
+                '    tasklist /FI "IMAGENAME eq %%~P" | find /I "%%~P" >nul && set "LOCK_FOUND=1"',
+                '  )',
+                '  if "%LOCK_FOUND%"=="0" goto :processos_encerrados',
+                '  ping 127.0.0.1 -n 2 >nul',
+                ')',
+                ':processos_encerrados',
+                'for %%P in (%PROCESS_NAMES%) do (',
+                '  tasklist /FI "IMAGENAME eq %%~P" | find /I "%%~P" >nul && echo [%date% %time%] Processo remanescente detectado antes do instalador: %%~P>>"%UPDATE_ERR_LOG%"',
+                ')',
+            ]
+        )
         script_lines.extend(
             [
                 f"start \"\" /wait \"{destino}\" {args_txt}".rstrip(),
