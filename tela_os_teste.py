@@ -1429,7 +1429,10 @@ class FrmOS(ctk.CTkToplevel):
             valores = self.tab.item(item_id).get("values", [])
             if len(valores) >= 4:
                 status_item = self._normalizar_status_item(valores[4] if len(valores) > 4 else "ATIVO")
-                itens.append([str(valores[0]), str(valores[1]), str(valores[2]), str(valores[3]), status_item])
+                qtd = self._parse_valor(valores[1], default=0.0)
+                unit = self._parse_valor(valores[2], default=0.0)
+                total = float(qtd) * float(unit)
+                itens.append([str(valores[0]), str(valores[1]), str(valores[2]), f"{total:.2f}", status_item])
         return itens
 
     def _normalizar_status_item(self, status_item):
@@ -1458,7 +1461,10 @@ class FrmOS(ctk.CTkToplevel):
         for item in itens or []:
             row_count = len(self.tab.get_children())
             status_item = self._normalizar_status_item(item[4] if len(item) > 4 else "ATIVO")
-            self.tab.insert("", "end", values=(item[0], item[1], item[2], item[3], status_item), tags=self._tags_item(row_count, status_item))
+            qtd = self._parse_valor(item[1], default=0.0)
+            unit = self._parse_valor(item[2], default=0.0)
+            total = float(qtd) * float(unit)
+            self.tab.insert("", "end", values=(item[0], item[1], f"{unit:.2f}", f"{total:.2f}", status_item), tags=self._tags_item(row_count, status_item))
 
     def _reaplicar_zebra_tabela_itens(self):
         for idx, item_id in enumerate(self.tab.get_children()):
@@ -1604,11 +1610,15 @@ class FrmOS(ctk.CTkToplevel):
         self._reaplicar_zebra_tabela_itens()
 
     def _subtotal_equipamento(self, equipamento):
-        itens_ativos = [
-            item[3]
-            for item in (equipamento.get("itens") or [])
-            if len(item) >= 4 and self._normalizar_status_item(item[4] if len(item) > 4 else "AGUARDANDO") != "REPROVADO"
-        ]
+        itens_ativos = []
+        for item in (equipamento.get("itens") or []):
+            if len(item) < 3:
+                continue
+            if self._normalizar_status_item(item[4] if len(item) > 4 else "AGUARDANDO") == "REPROVADO":
+                continue
+            qtd = self._parse_valor(item[1], default=0.0)
+            unit = self._parse_valor(item[2], default=0.0)
+            itens_ativos.append(float(qtd) * float(unit))
         return OSCalculator.calcular_total(
             itens=itens_ativos,
             desconto=equipamento.get("desconto", 0),
@@ -3764,35 +3774,55 @@ class FrmOS(ctk.CTkToplevel):
 
         # --- IMAGENS NO TOPO (configuráveis) ---
         try:
-            def _resolver_logo_absoluta(caminho_logo):
+            def _resolver_logo_absoluta(caminho_logo, padroes=None):
                 bruto = str(caminho_logo or "").strip().strip('"')
-                if not bruto:
-                    return ""
-
                 base_dir = os.path.dirname(os.path.abspath(__file__))
                 candidatos = []
-                if os.path.isabs(bruto):
-                    candidatos.append(os.path.abspath(bruto))
-                else:
+                if bruto:
+                    if os.path.isabs(bruto):
+                        candidatos.append(os.path.abspath(bruto))
+                    else:
+                        candidatos.extend(
+                            [
+                                os.path.abspath(bruto),
+                                os.path.abspath(os.path.join(DIRETORIO_RECURSOS, bruto)),
+                                os.path.abspath(os.path.join(base_dir, bruto)),
+                                os.path.abspath(os.path.join(base_dir, "assets", bruto)),
+                                os.path.abspath(os.path.join(base_dir, "static", bruto)),
+                            ]
+                        )
+
+                    nome_arquivo = os.path.basename(bruto)
+                    if nome_arquivo:
+                        candidatos.extend(
+                            [
+                                os.path.abspath(os.path.join(base_dir, nome_arquivo)),
+                                os.path.abspath(os.path.join(base_dir, "assets", nome_arquivo)),
+                                os.path.abspath(os.path.join(base_dir, "static", nome_arquivo)),
+                            ]
+                        )
+
+                for nome_padrao in (padroes or []):
                     candidatos.extend(
                         [
-                            os.path.abspath(bruto),
-                            os.path.abspath(os.path.join(DIRETORIO_RECURSOS, bruto)),
-                            os.path.abspath(os.path.join(base_dir, bruto)),
-                            os.path.abspath(os.path.join(base_dir, "assets", bruto)),
+                            os.path.abspath(os.path.join(base_dir, nome_padrao)),
+                            os.path.abspath(os.path.join(base_dir, "assets", nome_padrao)),
+                            os.path.abspath(os.path.join(base_dir, "static", nome_padrao)),
                         ]
                     )
 
                 for cand in candidatos:
                     if os.path.exists(cand):
                         return cand
-                return candidatos[0] if candidatos else ""
+                return ""
 
-            logo_path = _resolver_logo_absoluta(self.logo_oficina)
-            patr_path = _resolver_logo_absoluta(self.logo_patrocinador)
-            if self.logo_oficina and os.path.exists(logo_path):
+            logo_path = _resolver_logo_absoluta(self.logo_oficina, padroes=["LOGO.bmp", "logo.png", "logo.jpg", "logo.jpeg", "logo.webp"])
+            patr_path = _resolver_logo_absoluta(self.logo_patrocinador, padroes=["logo.png", "LOGO.bmp"])
+            if os.path.exists(logo_path):
                 c.drawImage(logo_path, 45, altura - 88, width=145, height=72, preserveAspectRatio=True, mask='auto')
-            if self.logo_patrocinador and os.path.exists(patr_path):
+            if not patr_path and os.path.exists(logo_path):
+                patr_path = logo_path
+            if os.path.exists(patr_path):
                 c.drawImage(patr_path, largura - 170, altura - 82, width=120, height=60, preserveAspectRatio=True, mask='auto')
         except Exception:
             pass  # Se a imagem não existir, continua sem ela
@@ -3845,13 +3875,21 @@ class FrmOS(ctk.CTkToplevel):
         for eq in (self.os_equipamentos or []):
             if not isinstance(eq, dict):
                 continue
-            itens_eq = [list(it) for it in (eq.get("itens") or []) if isinstance(it, (list, tuple)) and len(it) >= 4]
+            itens_eq = []
+            for it in (eq.get("itens") or []):
+                if not isinstance(it, (list, tuple)) or len(it) < 3:
+                    continue
+                qtd_item = self._parse_valor(it[1], default=0.0)
+                unit_item = self._parse_valor(it[2], default=0.0)
+                total_item = float(qtd_item) * float(unit_item)
+                status_item = self._normalizar_status_item(it[4] if len(it) > 4 else "ATIVO")
+                itens_eq.append([str(it[0]), str(it[1]), f"{unit_item:.2f}", f"{total_item:.2f}", status_item])
             if not (eq.get("equipamento") or eq.get("defeito") or itens_eq):
                 continue
             subtotal_itens = sum(
                 self._parse_valor(item[3])
                 for item in itens_eq
-                if self._normalizar_status_item(item[4] if len(item) > 4 else "ATIVO") == "ATIVO"
+                if self._normalizar_status_item(item[4] if len(item) > 4 else "ATIVO") != "REPROVADO"
             )
             v_opc_eq = self._parse_valor(eq.get("opcional", 0))
             v_fre_eq = self._parse_valor(eq.get("frete", 0))
@@ -3877,8 +3915,8 @@ class FrmOS(ctk.CTkToplevel):
                 [
                     str(v[0]),
                     str(v[1]),
-                    str(v[2]),
-                    str(v[3]),
+                    f"{self._parse_valor(v[2], default=0.0):.2f}",
+                    f"{(self._parse_valor(v[1], default=0.0) * self._parse_valor(v[2], default=0.0)):.2f}",
                     self._normalizar_status_item(v[4] if len(v) > 4 else "ATIVO"),
                 ]
                 for v in itens_atuais
@@ -3887,7 +3925,7 @@ class FrmOS(ctk.CTkToplevel):
             subtotal_itens = sum(
                 self._parse_valor(item[3])
                 for item in itens_legados
-                if self._normalizar_status_item(item[4] if len(item) > 4 else "ATIVO") == "ATIVO"
+                if self._normalizar_status_item(item[4] if len(item) > 4 else "ATIVO") != "REPROVADO"
             )
             v_opc_eq = self._parse_valor(self.ent_opcional.get())
             v_fre_eq = self._parse_valor(self.ent_frete.get())
@@ -3994,7 +4032,7 @@ class FrmOS(ctk.CTkToplevel):
                         c.drawString(90, y, dl)
                     c.drawString(350, y, str(item[1]))
                     c.drawString(410, y, formatar_monetario(item[2]))
-                    valor_total_item = self._parse_valor(item[3])
+                    valor_total_item = self._parse_valor(item[1], default=0.0) * self._parse_valor(item[2], default=0.0)
                     if status_item == "REPROVADO":
                         c.drawRightString(largura - 55, y, "REPROVADO")
                         c.setFillColorRGB(0, 0, 0)

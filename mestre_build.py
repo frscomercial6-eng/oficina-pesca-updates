@@ -12,7 +12,7 @@ import time
 import zipfile
 
 DIV = "═" * 50
-VERSAO = "1.0.50"
+VERSAO = "1.0.51"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -490,6 +490,41 @@ def _gerar_log_saude_sistema(versao: str, apk_path: str, instalador_path: str = 
     return caminho_log
 
 
+def _limpar_pasta_apk_legada() -> None:
+    os.makedirs(ANDROID_APK_LEGACY_DIR, exist_ok=True)
+    removidos = 0
+    for nome in os.listdir(ANDROID_APK_LEGACY_DIR):
+        caminho = os.path.join(ANDROID_APK_LEGACY_DIR, nome)
+        try:
+            if os.path.isdir(caminho):
+                shutil.rmtree(caminho, ignore_errors=True)
+            else:
+                os.remove(caminho)
+            removidos += 1
+        except Exception as exc:
+            raise RuntimeError(
+                f"Falha ao limpar a pasta de distribuição APK legada: {caminho}"
+            ) from exc
+    print(f"🧹 Pasta {ANDROID_APK_LEGACY_DIR} limpa ({removidos} item(ns) removido(s)).")
+
+
+def _limpar_apks_em_pasta(destino_dir: str) -> None:
+    os.makedirs(destino_dir, exist_ok=True)
+    removidos = 0
+    for nome in os.listdir(destino_dir):
+        caminho = os.path.join(destino_dir, nome)
+        if not os.path.isfile(caminho):
+            continue
+        if not nome.lower().endswith(".apk"):
+            continue
+        try:
+            os.remove(caminho)
+            removidos += 1
+        except Exception as exc:
+            raise RuntimeError(f"Falha ao limpar APK antigo em {destino_dir}: {caminho}") from exc
+    print(f"🧹 Pasta {destino_dir} limpa ({removidos} APK(s) removido(s)).")
+
+
 def _build_apk_android(versao: str) -> tuple[str, str]:
     print("📱 Compilando APK Nativo com a mesma versão do Desktop...")
     _gerar_wrapper_gradle_android()
@@ -509,14 +544,16 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
 
     _validar_apk_gerado(origem_apk)
 
-    os.makedirs(ANDROID_APK_DIST_DIR, exist_ok=True)
-    os.makedirs(ANDROID_APK_PACKAGE_DIR, exist_ok=True)
-    os.makedirs(ANDROID_APK_LEGACY_DIR, exist_ok=True)
+    _limpar_apks_em_pasta(ANDROID_APK_DIST_DIR)
+    _limpar_apks_em_pasta(ANDROID_APK_PACKAGE_DIR)
+    _limpar_pasta_apk_legada()
 
     nome_versionado = f"Oficina_Pesca_Nativo_v{versao}.apk"
     destino_dist = os.path.join(ANDROID_APK_DIST_DIR, nome_versionado)
     destino_pacote = os.path.join(ANDROID_APK_PACKAGE_DIR, ANDROID_APK_NAME)
     destino_legacy = os.path.join(ANDROID_APK_LEGACY_DIR, ANDROID_APK_INSTALLER_NAME)
+    destino_legacy_nome_fixo = os.path.join(ANDROID_APK_LEGACY_DIR, ANDROID_APK_NAME)
+    destino_legacy_versionado = os.path.join(ANDROID_APK_LEGACY_DIR, nome_versionado)
 
     # Distribuição só ocorre após validação do APK versionado recém-gerado.
     shutil.copy2(origem_apk, destino_dist)
@@ -526,13 +563,19 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
 
     shutil.copy2(destino_dist, destino_pacote)
     shutil.copy2(destino_dist, destino_legacy)
+    shutil.copy2(destino_dist, destino_legacy_nome_fixo)
+    shutil.copy2(destino_dist, destino_legacy_versionado)
 
     _validar_apk_gerado(destino_pacote)
     _validar_apk_gerado(destino_legacy)
+    _validar_apk_gerado(destino_legacy_nome_fixo)
+    _validar_apk_gerado(destino_legacy_versionado)
 
     print(f"📦 APK copiado para dist: {destino_dist}")
     print(f"📤 APK copiado para distribuição: {destino_pacote}")
     print(f"📤 APK copiado para pasta legada do instalador: {destino_legacy}")
+    print(f"📤 APK copiado para {ANDROID_APK_LEGACY_DIR}: {destino_legacy_nome_fixo}")
+    print(f"📤 APK versionado copiado para {ANDROID_APK_LEGACY_DIR}: {destino_legacy_versionado}")
     return destino_dist, destino_pacote
 
 

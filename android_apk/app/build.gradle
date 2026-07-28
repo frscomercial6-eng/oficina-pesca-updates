@@ -17,6 +17,42 @@ def cfgValue = { key, fallback ->
     def matcher = pattern.matcher(rootCfgText)
     matcher.find() ? matcher.group(1).trim() : fallback
 }
+def resolverPainelInternoUrl = {
+    def fallback = 'https://oficinapescasystem.web.app/app'
+    def raw = cfgValue('url_app_celular_publica', fallback)
+    if (!raw) {
+        return fallback
+    }
+
+    def parsed
+    try {
+        parsed = new URI(raw)
+    } catch (Exception ignored) {
+        return fallback
+    }
+
+    def scheme = (parsed.scheme ?: 'https').toLowerCase()
+    def host = parsed.host ?: ''
+    if (!host) {
+        return fallback
+    }
+
+    def path = parsed.path ?: ''
+    if (!path || path == '/') {
+        path = '/app'
+    }
+
+    return new URI(
+        scheme,
+        parsed.userInfo,
+        host,
+        parsed.port,
+        path,
+        parsed.query,
+        parsed.fragment
+    ).toString()
+}
+def enforcedMobilePublicUrl = resolverPainelInternoUrl()
 
 android {
     namespace 'com.oficinapesca.mobile'
@@ -40,7 +76,7 @@ android {
         buildConfigField "String", "FIREBASE_APP_ID", "\"${System.getenv('OFP_FIREBASE_APP_ID') ?: ''}\""
         buildConfigField "String", "FIREBASE_SYNC_CHANNEL", "\"${System.getenv('OFP_FIREBASE_SYNC_CHANNEL') ?: 'global'}\""
         buildConfigField "String", "FIREBASE_AUTH_PATH", "\"${System.getenv('OFP_FIREBASE_AUTH_PATH') ?: 'mobile_auth'}\""
-        buildConfigField "String", "MOBILE_PUBLIC_URL", "\"${System.getenv('OFP_WEB_APP_URL') ?: cfgValue('url_app_celular_publica', '')}\""
+        buildConfigField "String", "MOBILE_PUBLIC_URL", "\"${enforcedMobilePublicUrl}\""
         buildConfigField "String", "PLANO_LINK_PROMO", "\"${cfgValue('infinitepay_link_promo_lancamento', 'https://checkout.infinitepay.io/frsoficinadepesca/7O04uAqkj')}\""
         buildConfigField "String", "PLANO_LINK_MENSAL", "\"${cfgValue('infinitepay_link_mensal', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/7n8vLUjOnD')}\""
         buildConfigField "String", "PLANO_LINK_TRIMESTRAL", "\"${cfgValue('infinitepay_link_trimestral', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/2arDagkoGn')}\""

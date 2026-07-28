@@ -2,11 +2,13 @@ package com.oficinapesca.mobile
 
 import android.annotation.SuppressLint
 import android.graphics.Color
-import android.graphics.Bitmap
+import android.net.http.SslError
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.net.http.SslError
+import android.util.Log
+import android.webkit.ConsoleMessage
+import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -15,51 +17,51 @@ import android.webkit.WebSettings
 import android.webkit.SslErrorHandler
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
+import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
+import org.json.JSONObject
 
 class SistemaPrincipalActivity : AppCompatActivity() {
-    private lateinit var statusView: TextView
     private lateinit var webView: WebView
-    private lateinit var botaoTentar: Button
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var indiceAtual = 0
-    private var carregamentoConcluido = false
-    private var timeoutAtivo: Runnable? = null
+    private var statusMonitorAtivo = false
+    private var ultimaAssinaturaStatus = ""
 
-    companion object {
-        private const val LOAD_TIMEOUT_MS = 9000L
+    private val statusMonitor = object : Runnable {
+        override fun run() {
+            if (!statusMonitorAtivo) {
+                return
+            }
+            sincronizarStatusStartupComWebView()
+            mainHandler.postDelayed(this, 250L)
+        }
     }
 
-    private val urlsCandidatas: List<String>
+    companion object {
+        private const val TAG = "OficinaPesca"
+        private const val PAINEL_URL_ABSOLUTA = "https://oficinapescasystem.web.app/app"
+    }
+
+    private val urlPainel: String
         get() {
-            val publicUrl = BuildConfig.MOBILE_PUBLIC_URL.trim().trimEnd('/')
-            if (publicUrl.isBlank()) {
-                return emptyList()
+            val buildConfigUrl = BuildConfig.MOBILE_PUBLIC_URL.trim().trimEnd('/')
+            return if (buildConfigUrl.isNotBlank()) {
+                buildConfigUrl
+            } else {
+                PAINEL_URL_ABSOLUTA
             }
-
-            val candidatos = mutableListOf<String>()
-            candidatos += publicUrl
-
-            if (!publicUrl.endsWith("/app", ignoreCase = true)) {
-                candidatos += "$publicUrl/app"
-            }
-
-            if (!publicUrl.endsWith("/web/login", ignoreCase = true)) {
-                candidatos += "$publicUrl/web/login"
-            }
-
-            return candidatos.distinct()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.i(TAG, "SistemaPrincipalActivity iniciada em modo container WebView limpo.")
+        Log.i(TAG, "URL absoluta do painel: $urlPainel")
         montarInterface()
         configurarWebView()
-        carregarPrimeiraUrlDisponivel()
+        limparEstadoWebView()
+        iniciarMonitorStatusStartup()
+        carregarPainelPrincipal()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -74,7 +76,7 @@ class SistemaPrincipalActivity : AppCompatActivity() {
             javaScriptCanOpenWindowsAutomatically = true
             loadsImagesAutomatically = true
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            cacheMode = WebSettings.LOAD_DEFAULT
+            cacheMode = WebSettings.LOAD_NO_CACHE
             setSupportMultipleWindows(false)
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN) {
                 allowFileAccessFromFileURLs = true
@@ -83,108 +85,62 @@ class SistemaPrincipalActivity : AppCompatActivity() {
         }
 
         webView.webChromeClient = object : WebChromeClient() {
-            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                super.onProgressChanged(view, newProgress)
-                if (!carregamentoConcluido) {
-                    statusView.text = "Conectando... $newProgress%"
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                if (consoleMessage != null) {
+                    Log.d(
+                        TAG,
+                        "WebView console [${consoleMessage.messageLevel()}] " +
+                            "${consoleMessage.sourceId()}:${consoleMessage.lineNumber()} -> ${consoleMessage.message()}"
+                    )
                 }
+                return super.onConsoleMessage(consoleMessage)
             }
         }
     }
 
+    private fun limparEstadoWebView() {
+        try {
+            val cookieManager = CookieManager.getInstance()
+            cookieManager.removeAllCookies(null)
+            cookieManager.flush()
+        } catch (exc: Exception) {
+            Log.w(TAG, "Falha ao limpar cookies da WebView: ${exc.message}")
+        }
+        webView.clearHistory()
+        webView.clearCache(true)
+        webView.clearFormData()
+    }
+
     private fun montarInterface() {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val root = FrameLayout(this).apply {
             setBackgroundColor(Color.parseColor("#0E1524"))
-        }
-
-        statusView = TextView(this).apply {
-            text = "Carregando interface principal..."
-            setTextColor(Color.parseColor("#9CA3AF"))
-            textSize = 13f
-            setPadding(24, 18, 24, 10)
-        }
-
-        botaoTentar = Button(this).apply {
-            text = "Tentar novamente"
-            isAllCaps = false
-            visibility = Button.GONE
-            setOnClickListener {
-                visibility = Button.GONE
-                carregarPrimeiraUrlDisponivel()
-            }
         }
 
         webView = WebView(this)
 
         root.addView(
-            statusView,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-        )
-        root.addView(
-            botaoTentar,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-        )
-        root.addView(
             webView,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
             )
         )
 
         setContentView(root)
     }
 
-    private fun carregarPrimeiraUrlDisponivel() {
-        val candidatos = urlsCandidatas
-        indiceAtual = 0
-        carregamentoConcluido = false
-        cancelarTimeout()
-        if (candidatos.isEmpty()) {
-            statusView.text = "URL pública do sistema não configurada. Defina OFP_WEB_APP_URL ou url_app_celular_publica."
-            botaoTentar.visibility = Button.VISIBLE
-            return
-        }
-
-        tentarCarregar(candidatos, 0)
-    }
-
-    private fun tentarCarregar(candidatos: List<String>, index: Int) {
-        cancelarTimeout()
-        if (index >= candidatos.size) {
-            exibirTelaFalhaAmigavel()
-            return
-        }
-
-        indiceAtual = index
-        val url = candidatos[index]
-        carregamentoConcluido = false
-        statusView.text = "Conectando: $url"
-        botaoTentar.visibility = Button.GONE
-
+    private fun carregarPainelPrincipal() {
+        val url = urlPainel
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 return false
             }
 
-            override fun onPageStarted(view: WebView?, loadingUrl: String?, favicon: Bitmap?) {
-                super.onPageStarted(view, loadingUrl, favicon)
-                agendarTimeout(candidatos, index)
-            }
-
             override fun onPageFinished(view: WebView?, loadedUrl: String?) {
                 super.onPageFinished(view, loadedUrl)
-                cancelarTimeout()
-                carregamentoConcluido = true
-                statusView.text = "Conectado: ${loadedUrl ?: url}"
+                val finalUrl = loadedUrl ?: url
+                sincronizarStatusStartupComWebView()
+                Log.i(TAG, "onPageFinished: $finalUrl")
             }
 
             override fun onReceivedHttpError(
@@ -194,7 +150,11 @@ class SistemaPrincipalActivity : AppCompatActivity() {
             ) {
                 super.onReceivedHttpError(view, request, errorResponse)
                 if (request?.isForMainFrame == true) {
-                    tentarProximaUrl(candidatos, index, "Erro HTTP ${errorResponse?.statusCode ?: 0}")
+                    Log.w(
+                        TAG,
+                        "Erro HTTP main frame em ${request.url}: status=${errorResponse?.statusCode ?: 0}"
+                    )
+                    exibirFalhaCarregamento(url)
                 }
             }
 
@@ -206,54 +166,36 @@ class SistemaPrincipalActivity : AppCompatActivity() {
                 super.onReceivedError(view, request, error)
                 if (request?.isForMainFrame == true) {
                     val descricao = error?.description?.toString()?.trim().orEmpty()
-                    tentarProximaUrl(candidatos, index, if (descricao.isNotBlank()) descricao else "Falha de rede")
+                    val codigo = error?.errorCode ?: 0
+                    Log.w(
+                        TAG,
+                        "Erro de rede main frame em ${request.url}: code=$codigo, desc='${if (descricao.isNotBlank()) descricao else "sem_descricao"}'"
+                    )
+                    exibirFalhaCarregamento(url)
                 }
             }
 
             override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                Log.w(TAG, "SSL error recebido para ${error?.url}. Prosseguindo por política atual.")
                 handler?.proceed()
             }
         }
 
+        Log.i(TAG, "Carregando painel absoluto: $url")
         webView.loadUrl(url)
     }
 
-    private fun tentarProximaUrl(candidatos: List<String>, index: Int, motivo: String) {
-        if (index != indiceAtual || carregamentoConcluido) {
-            return
-        }
-        cancelarTimeout()
-        statusView.text = "Falha em ${candidatos[index]} ($motivo). Tentando próxima rota..."
-        mainHandler.post { tentarCarregar(candidatos, index + 1) }
-    }
-
-    private fun agendarTimeout(candidatos: List<String>, index: Int) {
-        cancelarTimeout()
-        timeoutAtivo = Runnable {
-            if (!carregamentoConcluido && index == indiceAtual) {
-                tentarProximaUrl(candidatos, index, "timeout")
-            }
-        }
-        mainHandler.postDelayed(timeoutAtivo!!, LOAD_TIMEOUT_MS)
-    }
-
-    private fun cancelarTimeout() {
-        timeoutAtivo?.let { mainHandler.removeCallbacks(it) }
-        timeoutAtivo = null
-    }
-
-    private fun exibirTelaFalhaAmigavel() {
-        cancelarTimeout()
-        botaoTentar.visibility = Button.VISIBLE
-        statusView.text = "Não foi possível conectar ao servidor do sistema."
+    private fun exibirFalhaCarregamento(url: String) {
+        Log.e(TAG, "Falha ao carregar painel absoluto: $url")
         webView.loadDataWithBaseURL(
             null,
             """
-            <html><body style=\"background:#0E1524;color:#E5E7EB;font-family:sans-serif;padding:22px;\">
-            <h3 style=\"color:#FCD34D;\">Servidor indisponível</h3>
-            <p>Não conseguimos abrir a interface web do sistema neste dispositivo.</p>
-            <p>Confirme se a URL pública do app celular está configurada e acessível pela internet móvel.</p>
-            <p>Tente novamente em alguns segundos.</p>
+            <html><body style="background:#0E1524;color:#E5E7EB;font-family:sans-serif;padding:22px;">
+            <h3 style="color:#FCD34D;">Falha de conexão</h3>
+            <p>Não foi possível carregar o painel interno da aplicação.</p>
+            <p>Toque em "Recarregar" para tentar novamente.</p>
+            <button style="margin-top:12px;padding:10px 14px;border-radius:8px;border:0;background:#22C55E;color:#0B1220;font-weight:700;"
+                onclick="location.href='${url}';">Recarregar</button>
             </body></html>
             """.trimIndent(),
             "text/html",
@@ -262,8 +204,47 @@ class SistemaPrincipalActivity : AppCompatActivity() {
         )
     }
 
+    private fun iniciarMonitorStatusStartup() {
+        if (statusMonitorAtivo) {
+            return
+        }
+        statusMonitorAtivo = true
+        mainHandler.post(statusMonitor)
+    }
+
+    private fun pararMonitorStatusStartup() {
+        statusMonitorAtivo = false
+        mainHandler.removeCallbacks(statusMonitor)
+    }
+
+    private fun sincronizarStatusStartupComWebView() {
+        if (!::webView.isInitialized) {
+            return
+        }
+
+        val snapshot = StartupConnectionState.current()
+        val assinatura = "${snapshot.state}|${snapshot.message}|${snapshot.dotColor}"
+        if (assinatura == ultimaAssinaturaStatus) {
+            return
+        }
+        ultimaAssinaturaStatus = assinatura
+
+        val texto = if (snapshot.state == "error") "Erro de Conexão" else "Conectado"
+        val payload = JSONObject()
+            .put("state", snapshot.state)
+            .put("text", texto)
+            .put("dotColor", snapshot.dotColor)
+            .toString()
+
+        webView.post {
+            webView.evaluateJavascript("window.ofpApplyConnectionStatus($payload);", null)
+        }
+    }
+
     override fun onDestroy() {
-        cancelarTimeout()
+        pararMonitorStatusStartup()
+        webView.stopLoading()
+        webView.destroy()
         super.onDestroy()
     }
 

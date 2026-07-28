@@ -3,148 +3,325 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Oficina de Pesca | Sistema</title>
+  <title>Oficina de Pesca | App Principal</title>
+  <meta name="theme-color" content="#0f1923">
   <style>
     :root {
-      --bg: #0b1320;
-      --panel: #132036;
-      --line: #243753;
-      --text: #e5ecf5;
-      --muted: #a8b6ca;
-      --ok: #2ecc71;
-      --warn: #f1c40f;
-      --bad: #ef4444;
-      --brand: #60a5fa;
+      --bg: #0f1923;
+      --surface: #1a2535;
+      --surface-2: #223149;
+      --line: rgba(255,255,255,.08);
+      --text: #f3f4f6;
+      --muted: #b8c0cc;
+      --accent: #f39c12;
+      --accent-2: #27ae60;
+      --accent-3: #3b82f6;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Segoe UI", Tahoma, sans-serif;
-      color: var(--text);
-      background: radial-gradient(circle at top right, #1d2f4f 0%, var(--bg) 55%);
       min-height: 100vh;
-      display: grid;
-      place-items: center;
-      padding: 20px;
+      color: var(--text);
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(243,156,18,.18), transparent 22%),
+        radial-gradient(circle at top right, rgba(59,130,246,.16), transparent 30%),
+        linear-gradient(180deg, #0a111a 0%, #0f1923 42%, #0c1420 100%);
     }
-    .card {
-      width: min(880px, 100%);
-      background: linear-gradient(180deg, #182a45 0%, var(--panel) 100%);
+    .shell {
+      width: min(940px, 100%);
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+    }
+    .hero {
+      background: linear-gradient(135deg, rgba(26,37,53,.98), rgba(15,25,35,.9));
       border: 1px solid var(--line);
-      border-radius: 16px;
-      box-shadow: 0 24px 52px rgba(0, 0, 0, .45);
+      border-radius: 28px;
       padding: 24px;
+      box-shadow: 0 24px 60px rgba(0,0,0,.38);
+      overflow: hidden;
+      position: relative;
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -80px -90px auto;
+      width: 180px;
+      height: 180px;
+      background: radial-gradient(circle, rgba(243,156,18,.25), transparent 68%);
+      pointer-events: none;
+    }
+    .eyebrow {
+      font-size: .8rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin: 0 0 6px;
     }
     h1 {
-      margin: 0 0 8px;
-      font-size: 1.8rem;
-      color: var(--brand);
+      margin: 0;
+      font-size: clamp(1.7rem, 5vw, 2.6rem);
+      line-height: 1.05;
     }
-    p {
-      margin: 0 0 12px;
+    .subtitle {
+      margin: 10px 0 0;
       color: var(--muted);
-      line-height: 1.45;
+      max-width: 58ch;
+      line-height: 1.5;
+    }
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      color: var(--text);
+      font-size: .92rem;
+      text-decoration: none;
+    }
+    .chip strong { color: #fff; }
+    .chip--primary { background: rgba(243,156,18,.14); border-color: rgba(243,156,18,.28); }
+    .chip--success { background: rgba(39,174,96,.14); border-color: rgba(39,174,96,.28); }
+    .chip--info { background: rgba(59,130,246,.14); border-color: rgba(59,130,246,.28); }
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .btn {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      border: none;
+      border-radius: 16px;
+      padding: 15px 16px;
+      min-height: 58px;
+      font-weight: 700;
+      font-size: 1rem;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent-3), #2563eb);
+      box-shadow: 0 12px 24px rgba(37,99,235,.24);
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform .18s ease, filter .18s ease;
+    }
+    .btn:hover { transform: translateY(-1px); filter: brightness(1.06); }
+    .btn--ghost {
+      background: rgba(255,255,255,.06);
+      box-shadow: none;
+      border: 1px solid var(--line);
     }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
-      margin-top: 16px;
+      margin-top: 18px;
     }
-    .tile {
+    .card {
+      display: block;
+      text-decoration: none;
+      color: var(--text);
+      background: rgba(26,37,53,.94);
       border: 1px solid var(--line);
-      border-radius: 12px;
-      background: rgba(8, 14, 24, .42);
-      padding: 12px;
+      border-radius: 20px;
+      padding: 16px;
+      min-height: 130px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.18);
+      transition: transform .18s ease, border-color .18s ease, background .18s ease;
     }
-    .tag {
-      display: inline-block;
-      border-radius: 999px;
-      padding: 4px 10px;
-      font-size: .8rem;
-      font-weight: 700;
-      letter-spacing: .02em;
-      margin-bottom: 8px;
+    .card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(243,156,18,.35);
+      background: rgba(34,49,73,.96);
     }
-    .ok { background: rgba(46, 204, 113, .18); color: #89f0b0; }
-    .warn { background: rgba(241, 196, 15, .18); color: #f9e27d; }
-    .bad { background: rgba(239, 68, 68, .2); color: #ff9ea0; }
-    code { color: #d8e7ff; }
-    .footer {
-      margin-top: 16px;
-      padding-top: 12px;
-      border-top: 1px solid var(--line);
-      font-size: .9rem;
+    .card .icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 10px;
+      font-size: 1.15rem;
+      background: rgba(255,255,255,.06);
+    }
+    .card h2 {
+      margin: 0 0 6px;
+      font-size: 1rem;
+    }
+    .card p {
+      margin: 0;
       color: var(--muted);
+      font-size: .92rem;
+      line-height: 1.45;
+    }
+    .footer-note {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: .92rem;
+      line-height: 1.5;
+      text-align: center;
+    }
+    @media (max-width: 640px) {
+      .shell { padding: 14px 12px 28px; }
+      .hero { padding: 18px; border-radius: 22px; }
+      .actions, .grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <main class="card">
-    <h1>Oficina de Pesca - Sistema Online</h1>
-    <p>Ambiente oficial de acesso para o aplicativo móvel (WebView). Esta página confirma o carregamento do hosting e valida a conectividade com o Firebase.</p>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">Oficina de Pesca</p>
+      <h1>Interface principal do App Celular</h1>
+      <p class="subtitle">
+        Esta rota oficial abre diretamente o painel do aplicativo, com atalhos para os módulos
+        principais da operação da Oficina.
+      </p>
 
-    <div class="grid">
-      <section class="tile">
-        <span class="tag ok">Hosting</span>
-        <p><strong>Status:</strong> <span id="host-status">online</span></p>
-        <p><strong>Projeto:</strong> <code>oficinapescasystem</code></p>
-      </section>
-      <section class="tile">
-        <span class="tag warn">Realtime Database</span>
-        <p><strong>Status:</strong> <span id="db-status">testando...</span></p>
-        <p><strong>Canal:</strong> <code>global</code></p>
-      </section>
-      <section class="tile">
-        <span class="tag warn">Sincronização</span>
-        <p><strong>Última checagem:</strong> <span id="check-time">-</span></p>
-        <p><strong>Endpoint:</strong> <code>sync_nodes/global</code></p>
-      </section>
-    </div>
+      <div class="status-row">
+        <span class="chip chip--primary"><strong>Rota:</strong> /app</span>
+        <span class="chip chip--success"><strong>APK:</strong> WebView direto</span>
+        <span class="chip chip--info"><strong>API:</strong> <span id="api-status">validando...</span></span>
+        <span class="chip chip--info"><strong>Versão:</strong> <span id="api-version">-</span></span>
+      </div>
 
-    <div class="footer">
-      URL oficial para APK: <code>https://oficinapescasystem.web.app</code>
-    </div>
+      <div class="actions">
+        <a class="btn" id="btn-login" href="#" target="_self" rel="noopener">Acessar Sistema</a>
+        <a class="btn btn--ghost" href="#modulos">Ir para Módulos</a>
+      </div>
+    </section>
+
+    <section class="grid" id="modulos" aria-label="Módulos principais">
+      <a class="card" href="#clientes">
+        <div class="icon">👤</div>
+        <h2>Cadastro de Cliente</h2>
+        <p>Acesso ao cadastro e pesquisa de clientes.</p>
+      </a>
+
+      <a class="card" href="#os">
+        <div class="icon">🧾</div>
+        <h2>Orçamento e O.S.</h2>
+        <p>Fluxo operacional para ordens de serviço e acompanhamento.</p>
+      </a>
+
+      <a class="card" href="#foto-ia">
+        <div class="icon">📷</div>
+        <h2>Foto + IA Vision</h2>
+        <p>Área visual para apoio de diagnóstico técnico.</p>
+      </a>
+
+      <a class="card" href="#pecas">
+        <div class="icon">🧩</div>
+        <h2>Peças</h2>
+        <p>Consulta e gestão de peças e componentes.</p>
+      </a>
+
+      <a class="card" href="#fechamento">
+        <div class="icon">💳</div>
+        <h2>Fechamento</h2>
+        <p>Resumo final de atendimento e pagamentos.</p>
+      </a>
+
+      <a class="card" href="#dashboard">
+        <div class="icon">📊</div>
+        <h2>Painel Geral</h2>
+        <p>Visão geral dos indicadores operacionais da Oficina.</p>
+      </a>
+
+      <a class="card" id="card-docs" href="#" target="_blank" rel="noopener noreferrer">
+        <div class="icon">🧪</div>
+        <h2>API Docs</h2>
+        <p>Documentação da API publicada no Cloud Run.</p>
+      </a>
+    </section>
+
+    <p class="footer-note">
+      URL oficial no APK: <strong>https://oficinapescasystem.web.app/app</strong><br>
+      API de produção: <strong id="api-base">(não configurada)</strong>
+    </p>
   </main>
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-    import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
-
-    const hostStatus = document.getElementById("host-status");
-    const dbStatus = document.getElementById("db-status");
-    const checkTime = document.getElementById("check-time");
-
-    const firebaseConfig = {
-      apiKey: "AIzaSyDPAghwC-OPuFWPWCsfFnjg_k1BL4v8GDI",
-      authDomain: "oficinapescasystem.firebaseapp.com",
-      databaseURL: "https://oficinapescasystem-default-rtdb.firebaseio.com",
-      projectId: "oficinapescasystem",
-      storageBucket: "oficinapescasystem.firebasestorage.app",
-      messagingSenderId: "603770787119",
-      appId: "1:603770787119:android:920207b7cdf63659843dda"
-    };
-
-    hostStatus.textContent = "online";
-    hostStatus.style.color = "#89f0b0";
-
-    async function checkDatabase() {
+  <script>
+    async function carregarConfigApi() {
       try {
-        const app = initializeApp(firebaseConfig);
-        const db = getDatabase(app);
-        await get(ref(db, "sync_nodes/global"));
-        dbStatus.textContent = "conectado";
-        dbStatus.style.color = "#89f0b0";
-      } catch (err) {
-        dbStatus.textContent = "indisponível";
-        dbStatus.style.color = "#ff9ea0";
-        console.error("Falha ao consultar Firebase:", err);
-      } finally {
-        checkTime.textContent = new Date().toLocaleString("pt-BR");
+        const resp = await fetch('/app-config.json?ts=' + Date.now(), { cache: 'no-store' });
+        if (!resp.ok) {
+          throw new Error('Falha ao carregar app-config.json');
+        }
+        const cfg = await resp.json();
+        const apiBase = String(cfg.apiBaseUrl || '').trim().replace(/\/$/, '');
+        return apiBase;
+      } catch (_err) {
+        return '';
       }
     }
 
-    checkDatabase();
+    function setStatusApi(texto, ok) {
+      const el = document.getElementById('api-status');
+      if (!el) return;
+      el.textContent = texto;
+      el.style.color = ok ? '#9ae6b4' : '#fca5a5';
+    }
+
+    async function validarApi(apiBase) {
+      if (!apiBase) {
+        setStatusApi('não configurada', false);
+        return;
+      }
+
+      const statusUrl = apiBase + '/api/health';
+      const versaoUrl = apiBase + '/api/versao';
+      try {
+        const healthResp = await fetch(statusUrl + '?ts=' + Date.now(), { cache: 'no-store' });
+        if (!healthResp.ok) {
+          throw new Error('health indisponível');
+        }
+        setStatusApi('online', true);
+      } catch (_err) {
+        setStatusApi('offline', false);
+      }
+
+      try {
+        const versaoResp = await fetch(versaoUrl + '?ts=' + Date.now(), { cache: 'no-store' });
+        if (versaoResp.ok) {
+          const dados = await versaoResp.json();
+          const versao = String(dados.versao || dados.version || '-');
+          const versaoEl = document.getElementById('api-version');
+          if (versaoEl) versaoEl.textContent = versao;
+        }
+      } catch (_err) {
+      }
+    }
+
+    async function inicializar() {
+      const apiBase = await carregarConfigApi();
+      const baseEl = document.getElementById('api-base');
+      if (baseEl) baseEl.textContent = apiBase || '(não configurada)';
+
+      const btnLogin = document.getElementById('btn-login');
+      const cardDocs = document.getElementById('card-docs');
+
+      if (apiBase) {
+        if (btnLogin) btnLogin.href = apiBase + '/web/login';
+        if (cardDocs) cardDocs.href = apiBase + '/api/docs';
+      } else {
+        if (btnLogin) btnLogin.href = '/app';
+        if (cardDocs) cardDocs.href = '/app';
+      }
+
+      await validarApi(apiBase);
+    }
+
+    inicializar();
   </script>
 </body>
 </html>

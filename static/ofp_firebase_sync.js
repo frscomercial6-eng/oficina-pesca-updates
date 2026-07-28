@@ -10,6 +10,115 @@ let licenseCheckId = null;
 let updateModalTimer = null;
 let updateModalShown = false;
 let bridgeLastSeenTs = "";
+let statusBarTimer = null;
+let statusBarState = "connecting";
+let statusBarMessage = "Conectando";
+let statusBarDotColor = "#F59E0B";
+
+function logSyncError(context, error) {
+  const msg = error && error.message ? error.message : String(error || "erro_desconhecido");
+  console.error(`[ofp-webview] ${context}: ${msg}`, error);
+}
+
+function ensureConnectionBar() {
+  let bar = document.getElementById("ofp-connection-bar");
+  if (bar) return bar;
+
+  bar = document.createElement("div");
+  bar.id = "ofp-connection-bar";
+  bar.style.cssText = [
+    "position:fixed",
+    "top:12px",
+    "left:50%",
+    "transform:translateX(-50%)",
+    "z-index:2147483647",
+    "display:flex",
+    "align-items:center",
+    "gap:8px",
+    "padding:8px 12px",
+    "border-radius:999px",
+    "background:rgba(10,17,26,.82)",
+    "backdrop-filter:blur(10px)",
+    "box-shadow:0 8px 24px rgba(0,0,0,.22)",
+    "border:1px solid rgba(255,255,255,.08)",
+    "color:#f3f4f6",
+    "font:600 12px/1.1 'Segoe UI',Tahoma,sans-serif",
+    "letter-spacing:.01em",
+    "pointer-events:none",
+    "max-width:calc(100vw - 24px)",
+    "white-space:nowrap",
+  ].join(";");
+
+  const dot = document.createElement("span");
+  dot.id = "ofp-connection-bar-dot";
+  dot.style.cssText = [
+    "width:8px",
+    "height:8px",
+    "border-radius:999px",
+    "background:#F59E0B",
+    "box-shadow:0 0 0 4px rgba(245,158,11,.12)",
+    "flex:0 0 auto",
+  ].join(";");
+
+  const text = document.createElement("span");
+  text.id = "ofp-connection-bar-text";
+  text.textContent = "Conectando";
+
+  bar.appendChild(dot);
+  bar.appendChild(text);
+  document.body.appendChild(bar);
+  return bar;
+}
+
+function applyConnectionBar(state, message, dotColor) {
+  const safeState = String(state || "connecting").toLowerCase();
+  const safeMessage = String(message || (safeState === "error" ? "Erro de Conexão" : "Conectado"));
+  const safeDotColor = String(dotColor || (safeState === "error" ? "#EF4444" : "#22C55E"));
+
+  statusBarState = safeState;
+  statusBarMessage = safeMessage;
+  statusBarDotColor = safeDotColor;
+
+  const bar = ensureConnectionBar();
+  const dot = document.getElementById("ofp-connection-bar-dot");
+  const text = document.getElementById("ofp-connection-bar-text");
+
+  if (dot) {
+    dot.style.background = safeDotColor;
+    dot.style.boxShadow = safeState === "error"
+      ? "0 0 0 4px rgba(239,68,68,.12)"
+      : "0 0 0 4px rgba(34,197,94,.12)";
+  }
+
+  if (text) {
+    text.textContent = safeState === "error" ? "Erro de Conexão" : "Conectado";
+  }
+
+  bar.setAttribute("data-state", safeState);
+  bar.title = safeMessage;
+}
+
+window.ofpApplyConnectionStatus = function ofpApplyConnectionStatus(payload = {}) {
+  try {
+    applyConnectionBar(payload.state, payload.text, payload.dotColor);
+    return true;
+  } catch (error) {
+    logSyncError("Falha ao aplicar status de conexão", error);
+    return false;
+  }
+};
+
+function setConnectionState(state, message, dotColor) {
+  applyConnectionBar(state, message, dotColor);
+
+  if (window.OficinaBootstrap && typeof window.OficinaBootstrap.setStatus === "function") {
+    try {
+      window.OficinaBootstrap.setStatus(String(state || "connecting"), String(message || ""), String(dotColor || ""));
+    } catch (error) {
+      logSyncError("Falha ao notificar bridge nativa", error);
+    }
+  }
+}
 
 function redirectToBlockedPage() {
   console.warn("[ofp-webview] Licença bloqueada detectada. Redirecionando para tela de bloqueio.");
@@ -106,37 +215,51 @@ function isRemoteVersionNewer(remoteVersion, localVersion) {
 
 async function checkRemoteVersion() {
   try {
+    console.debug("[ofp-webview] Iniciando checagem de versão remota.");
     const resp = await fetch("/version.json", { cache: "no-store" });
     const data = await resp.json();
     const remoteVersion = String((data && data.versao) || "").trim();
     const localVersion = String(document.body?.dataset?.appVersion || window.__OFP_RENDERED_VERSION__ || "").trim();
     const forceUpdate = Boolean(data && data.force_update);
 
+    console.debug(
+      `[ofp-webview] Version check -> local='${localVersion || "(vazio)"}', remote='${remoteVersion || "(vazio)"}', force=${forceUpdate}`
+    );
+
     if (!localVersion && remoteVersion) {
       window.__OFP_RENDERED_VERSION__ = remoteVersion;
       if (document.body && document.body.dataset) {
         document.body.dataset.appVersion = remoteVersion;
       }
+      console.info(`[ofp-webview] Versão local ausente. Usando versão remota '${remoteVersion}' como base inicial.`);
       return;
     }
 
     if (forceUpdate || (remoteVersion && localVersion && isRemoteVersionNewer(remoteVersion, localVersion))) {
       console.info(`[ofp-webview] Nova versão detectada (${remoteVersion} > ${localVersion}). Recarregando interface.`);
       showUpdateModal(remoteVersion, localVersion, forceUpdate);
+      return;
     }
-  } catch (_) {
+    console.debug("[ofp-webview] Nenhuma atualização obrigatória detectada.");
+  } catch (error) {
+    logSyncError("Falha na checagem de versão remota", error);
   }
 }
 
 async function checkLicenseStatus() {
   try {
+    console.debug("[ofp-webview] Iniciando checagem de status de licença.");
     const resp = await fetch("/api/licenca-status", { cache: "no-store" });
     const data = await resp.json();
+    const ativa = Boolean(data && (data.ativa || data.licenca_ativa));
+    const bloqueada = Boolean(data && data.bloqueada);
+    console.debug(`[ofp-webview] Licença -> ativa=${ativa}, bloqueada=${bloqueada}`);
     if (data && data.bloqueada) {
       console.warn("[ofp-webview] Endpoint de licença retornou bloqueio.");
       redirectToBlockedPage();
     }
-  } catch (_) {
+  } catch (error) {
+    logSyncError("Falha na checagem de licença", error);
   }
 }
 
@@ -146,8 +269,10 @@ async function isLicenseActiveForSync() {
     const data = await resp.json();
     const ativa = Boolean(data && (data.ativa || data.licenca_ativa));
     const bloqueada = Boolean(data && data.bloqueada);
+    console.debug(`[ofp-webview] Permissão para sync Firebase -> ativa=${ativa}, bloqueada=${bloqueada}`);
     return ativa && !bloqueada;
-  } catch (_) {
+  } catch (error) {
+    logSyncError("Falha ao avaliar licença para sync", error);
     return false;
   }
 }
@@ -161,9 +286,12 @@ async function loadFirebaseConfig() {
     const data = await resp.json();
     if (data && data.ok && data.config) {
       window.__OFP_FIREBASE_CONFIG__ = data.config;
+      console.info("[ofp-webview] Config Firebase carregada via /api/firebase-config.");
       return data.config;
     }
-  } catch (_) {
+    console.warn("[ofp-webview] /api/firebase-config retornou payload inválido ou incompleto.");
+  } catch (error) {
+    logSyncError("Falha ao carregar configuração Firebase", error);
   }
   return null;
 }
@@ -180,7 +308,11 @@ async function startHeartbeat(apkRef) {
       platform: isWebViewRuntime() ? "apk_webview" : "web_browser",
       current_path: window.location.pathname,
     });
-  } catch (_) {
+    console.debug("[ofp-webview] Heartbeat inicial enviado.");
+    setConnectionState("ok", "Conectado", "#22C55E");
+  } catch (error) {
+    logSyncError("Falha no heartbeat inicial", error);
+    setConnectionState("error", "Erro de Conexão", "#EF4444");
   }
 
   if (heartbeatId) {
@@ -194,31 +326,47 @@ async function startHeartbeat(apkRef) {
         current_path: window.location.pathname,
         status: "online",
       });
-    } catch (_) {
+    } catch (error) {
+      logSyncError("Falha no heartbeat periódico", error);
+      setConnectionState("error", "Erro de Conexão", "#EF4444");
     }
   }, 25000);
 }
 
 async function initFirebaseSync() {
   if (initialized) {
+    console.debug("[ofp-webview] initFirebaseSync ignorado: já inicializado.");
     return true;
   }
+
+  setConnectionState("connecting", "Conectando", "#F59E0B");
 
   const licencaAtiva = await isLicenseActiveForSync();
   if (!licencaAtiva) {
     console.warn("[ofp-webview] Comunicação Firebase bloqueada: licença inativa.");
+    setConnectionState("error", "Erro de Conexão", "#EF4444");
     return false;
   }
 
   const cfg = await loadFirebaseConfig();
   if (!cfg || !cfg.apiKey || !cfg.databaseURL) {
+    console.error("[ofp-webview] Configuração Firebase inválida. apiKey/databaseURL ausentes.", cfg);
+    setConnectionState("error", "Erro de Conexão", "#EF4444");
     return false;
   }
 
   syncChannel = String(cfg.syncChannel || "global").trim() || "global";
+  console.info(`[ofp-webview] Inicializando Firebase sync. channel='${syncChannel}'.`);
   const app = initializeApp(cfg);
   database = getDatabase(app);
   initialized = true;
+
+  if (statusBarTimer) {
+    window.clearInterval(statusBarTimer);
+  }
+  statusBarTimer = window.setInterval(() => {
+    applyConnectionBar(statusBarState, statusBarMessage, statusBarDotColor);
+  }, 60000);
 
   const desktopRef = ref(database, `sync_nodes/${syncChannel}/desktop`);
   const clientRef = ref(database, `sync_nodes/${syncChannel}/apk`);
@@ -229,6 +377,7 @@ async function initFirebaseSync() {
   onValue(desktopRef, (snap) => {
     const val = snap.val() || {};
     window.__OFP_DESKTOP_SYNC_STATE__ = val;
+    console.debug("[ofp-webview] Snapshot desktop recebido.", val);
     const lic = val.license || val.licenca || {};
     if ((lic && lic.blocked) || Boolean(val.license_bloqueada)) {
       console.warn("[ofp-webview] Bloqueio de licença recebido via Firebase.");
@@ -256,6 +405,8 @@ async function initFirebaseSync() {
     }
   });
 
+  console.info("[ofp-webview] Firebase sync inicializado com sucesso.");
+  setConnectionState("ok", "Conectado", "#22C55E");
   return true;
 }
 
@@ -266,6 +417,7 @@ function nextBridgeId(prefix = "apk") {
 
 window.ofpRequestDesktopSync = async function ofpRequestDesktopSync(reason = "sync_now") {
   if (!initialized || !database) {
+    console.warn("[ofp-webview] ofpRequestDesktopSync ignorado: Firebase não inicializado.");
     return false;
   }
   try {
@@ -277,14 +429,17 @@ window.ofpRequestDesktopSync = async function ofpRequestDesktopSync(reason = "sy
       path: window.location.pathname,
       ts: new Date().toISOString(),
     });
+    console.info(`[ofp-webview] Solicitação de sync enviada. reason='${reason}', channel='${syncChannel}'.`);
     return true;
-  } catch (_) {
+  } catch (error) {
+    logSyncError("Falha ao solicitar sync do desktop", error);
     return false;
   }
 };
 
 window.ofpPushBridgePayload = async function ofpPushBridgePayload(payload = {}, reason = "apk_data_push") {
   if (!initialized || !database) {
+    console.warn("[ofp-webview] ofpPushBridgePayload ignorado: Firebase não inicializado.");
     return false;
   }
   try {
@@ -297,26 +452,39 @@ window.ofpPushBridgePayload = async function ofpPushBridgePayload(payload = {}, 
       ts: new Date().toISOString(),
       dados: payload || {},
     });
+    console.info(`[ofp-webview] Payload bridge enviado. reason='${reason}', channel='${syncChannel}'.`);
     return true;
-  } catch (_) {
+  } catch (error) {
+    logSyncError("Falha ao enviar payload bridge", error);
     return false;
   }
 };
 
-initFirebaseSync().catch(() => {});
+initFirebaseSync().catch((error) => {
+  logSyncError("Falha fatal no initFirebaseSync", error);
+  setConnectionState("error", "Erro de Conexão", "#EF4444");
+});
 
-checkRemoteVersion().catch(() => {});
+checkRemoteVersion().catch((error) => {
+  logSyncError("Falha fatal no checkRemoteVersion inicial", error);
+});
 if (versionCheckId) {
   window.clearInterval(versionCheckId);
 }
 versionCheckId = window.setInterval(() => {
-  checkRemoteVersion().catch(() => {});
+  checkRemoteVersion().catch((error) => {
+    logSyncError("Falha no checkRemoteVersion periódico", error);
+  });
 }, 60000);
 
-checkLicenseStatus().catch(() => {});
+checkLicenseStatus().catch((error) => {
+  logSyncError("Falha fatal no checkLicenseStatus inicial", error);
+});
 if (licenseCheckId) {
   window.clearInterval(licenseCheckId);
 }
 licenseCheckId = window.setInterval(() => {
-  checkLicenseStatus().catch(() => {});
+  checkLicenseStatus().catch((error) => {
+    logSyncError("Falha no checkLicenseStatus periódico", error);
+  });
 }, 30000);
