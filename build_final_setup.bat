@@ -4,7 +4,7 @@ cd /d "%~dp0"
 
 set "VENV_PY=.venv\Scripts\python.exe"
 set "ISCC_EXE=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-set "SETUP_NAME=Setup_OficinaPesca_v1.0.52.exe"
+set "SETUP_NAME=Setup_OficinaPesca_v1.0.53.exe"
 set "SETUP_BASE=Setup_OficinaPesca_v1.0.28"
 set "ALT_OUTPUT_DIR=INSTALADOR_FINAL_RETRY"
 echo ============================================

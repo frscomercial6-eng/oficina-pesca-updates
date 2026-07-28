@@ -40,6 +40,9 @@ from config import (
 # Inicialização da variável global logger (Resolve o NameError)
 logger = get_logger()
 
+# Espaçamento vertical entre "CONDIÇÕES DA ORDEM DE SERVIÇO" e "TERMO DE GARANTIA".
+ESPACO_ENTRE_CONDICOES_E_TERMOS_OS = 52
+
 
 def _quebrar_linha(c, texto: str, largura_max: float, fonte: str = "Helvetica", tamanho: int = 10):
     """Quebra texto em múltiplas linhas respeitando largura_max no canvas PDF."""
@@ -4106,6 +4109,9 @@ class FrmOS(ctk.CTkToplevel):
                 c.drawRightString(largura - 50, y_pag - 15, "PRAZO:")
                 c.setFont("Helvetica-Bold", 10)
                 c.drawRightString(largura - 50, y_pag - 30, prazo_documento)
+
+            # Reserva espaço vertical para evitar sobreposição com o bloco de termos.
+            y_pag -= ESPACO_ENTRE_CONDICOES_E_TERMOS_OS
         else:
             blocos_obs = []
             for i, eq in enumerate(equipamentos_pdf, start=1):

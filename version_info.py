@@ -2,4 +2,4 @@
 # -*- coding: utf-8 -*-
 # Fonte única da verdade para a versão do sistema.
 # Para lançar uma nova versão, edite APENAS este arquivo.
-VERSION = "1.0.52"
+VERSION = "1.0.53"
