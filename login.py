@@ -1815,17 +1815,6 @@ label_versao.pack(pady=(0, 4))
 
 def _checar_versao_bg():
     global _url_update_disponivel, _auto_update_liberado, _mensagem_politica_update, _popup_update_exibido, _auto_update_disparada
-    if bloqueio_loop_update_ativo():
-        janela_login.after(
-            0,
-            lambda: label_versao.configure(
-                text="Sistema atualizado",
-                text_color="#2ecc71",
-                font=("Arial", 11, "bold"),
-            ),
-        )
-        return
-
     try:
         # Mantém registro histórico, mas sem bloquear a checagem no startup.
         deve_verificar_atualizacao(INTERVALO_DIAS_CHECK_VERSAO)
@@ -1847,6 +1836,14 @@ def _checar_versao_bg():
     versao_nova = str(info_versao.get("versao", "")).strip()
     novidades = str(info_versao.get("novidades", "")).strip()
     url_download = str(info_versao.get("url_download", "")).strip()
+
+    if versao_nova and not url_download:
+        # Fallback defensivo para manifests antigos sem URL explícita.
+        url_download = (
+            f"https://github.com/frscomercial6-eng/oficina-pesca-updates/"
+            f"releases/download/v{versao_nova}/Oficina_Pesca_Instalador.exe"
+        )
+
     disponivel = bool(versao_nova and eh_versao_mais_nova(versao_nova, APP_VERSION))
 
     if disponivel:

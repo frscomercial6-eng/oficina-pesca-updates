@@ -12,7 +12,7 @@ import time
 import zipfile
 
 DIV = "═" * 50
-VERSAO = "1.0.51"
+VERSAO = "1.0.52"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -208,8 +208,13 @@ def atualizar_versao_json(nova_versao):
         dados = json.load(f)
     versao_antiga = dados.get("versao", "")
     dados["versao"] = nova_versao
-    if "novidades" in dados and isinstance(dados["novidades"], str):
-        dados["novidades"] = f"v{nova_versao}: Atualização de versão automática."
+    dados["novidades"] = f"v{nova_versao}: Atualização de versão automática."
+    dados["url_download"] = release_url
+    dados["download_url"] = release_url
+    if not isinstance(dados.get("apk"), dict):
+        dados["apk"] = {}
+    dados["apk"]["versao"] = nova_versao
+    dados["apk"]["canal"] = "nativo"
     with open(caminho, "w", encoding="utf-8") as f:
         json.dump(dados, f, ensure_ascii=False, indent=2)
     if versao_antiga == nova_versao:

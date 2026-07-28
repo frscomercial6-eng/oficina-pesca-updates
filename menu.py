@@ -2586,8 +2586,6 @@ class FrmMenu(ctk.CTk):
 
     def _executar_check_versao_seguro(self):
         """Busca atualizações no GitHub de forma isolada após a carga inicial."""
-        if bloqueio_loop_update_ativo():
-            return
         if self._encerrando_aplicacao: return
         if self.winfo_exists(): #
             def worker():
@@ -3954,10 +3952,6 @@ class FrmMenu(ctk.CTk):
 
     def buscar_atualizacoes(self):
         try:
-            if bloqueio_loop_update_ativo():
-                messagebox.showinfo("Atualizações", "Sistema atualizado", parent=self)
-                return
-
             info_versao = obter_info_nova_versao() or {}
             versao_remota = str(info_versao.get("versao", "")).strip()
             url_download = str(
@@ -3966,6 +3960,12 @@ class FrmMenu(ctk.CTk):
                 or info_versao.get("download_url")
                 or ""
             ).strip()
+
+            if versao_remota and not url_download:
+                url_download = (
+                    f"https://github.com/frscomercial6-eng/oficina-pesca-updates/"
+                    f"releases/download/v{versao_remota}/Oficina_Pesca_Instalador.exe"
+                )
 
             if versao_remota and self._eh_versao_mais_nova(versao_remota, APP_VERSION):
                 if not url_download:
@@ -4013,7 +4013,17 @@ class FrmMenu(ctk.CTk):
             messagebox.showerror("Atualizações", f"Erro ao buscar atualizações: {e}", parent=self)
 
     def _iniciar_download_atualizacao(self, url_download: str, versao_alvo: str = ""):
-        if bloqueio_loop_update_ativo():
+        alvo = str(versao_alvo or "").strip()
+        if not alvo:
+            try:
+                info_versao = obter_info_nova_versao() or {}
+                versao_remota = str(info_versao.get("versao", "")).strip()
+                if versao_remota and self._eh_versao_mais_nova(versao_remota, APP_VERSION):
+                    alvo = versao_remota
+            except Exception:
+                pass
+
+        if bloqueio_loop_update_ativo(versao_alvo=alvo):
             messagebox.showinfo("Atualizações", "Sistema atualizado", parent=self)
             return
 
@@ -4023,7 +4033,7 @@ class FrmMenu(ctk.CTk):
                 app_executavel=sys.executable,
                 processo_pid=os.getpid(),
                 silenciosa=True,
-                versao_alvo=versao_alvo,
+                versao_alvo=alvo,
             )
 
             def _finalizar():
@@ -4220,8 +4230,6 @@ class FrmMenu(ctk.CTk):
 
     def verificar_atualizacao(self) -> dict:
         """Retorna dados de atualização de forma resiliente, sem interromper a UI."""
-        if bloqueio_loop_update_ativo():
-            return {}
         try:
             info_versao = obter_info_nova_versao() or {}
             if not isinstance(info_versao, dict):
@@ -4235,6 +4243,12 @@ class FrmMenu(ctk.CTk):
                 or info_versao.get("url")
                 or ""
             ).strip()
+
+            if versao and not url_download:
+                url_download = (
+                    f"https://github.com/frscomercial6-eng/oficina-pesca-updates/"
+                    f"releases/download/v{versao}/Oficina_Pesca_Instalador.exe"
+                )
 
             resultado = {
                 "versao": versao,

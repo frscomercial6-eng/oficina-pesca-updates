@@ -1561,22 +1561,36 @@ def obter_info_nova_versao() -> dict:
         assets = data.get("assets") if isinstance(data.get("assets"), list) else []
         url_download = ""
 
+        # Prioriza o instalador oficial e evita selecionar o bootstrapper (Atualizador.exe).
+        executaveis: list[tuple[str, str]] = []
         for asset in assets:
             if not isinstance(asset, dict):
                 continue
-            nome = str(asset.get("name") or "").strip().lower()
+            nome = str(asset.get("name") or "").strip()
             link = str(asset.get("browser_download_url") or "").strip()
-            if nome == "oficina_pesca_instalador.exe" and link:
+            if not nome or not link:
+                continue
+            nome_lower = nome.lower()
+            if nome_lower.endswith(".exe"):
+                executaveis.append((nome_lower, link))
+
+        # 1) Nome canônico esperado pela distribuição.
+        for nome, link in executaveis:
+            if nome == "oficina_pesca_instalador.exe":
                 url_download = link
                 break
 
+        # 2) Nome versionado do setup gerado pelo Inno Setup.
         if not url_download:
-            for asset in assets:
-                if not isinstance(asset, dict):
-                    continue
-                nome = str(asset.get("name") or "").strip().lower()
-                link = str(asset.get("browser_download_url") or "").strip()
-                if nome.endswith(".exe") and link:
+            for nome, link in executaveis:
+                if nome.startswith("setup_oficinapesca_v"):
+                    url_download = link
+                    break
+
+        # 3) Qualquer .exe que não seja o bootstrapper.
+        if not url_download:
+            for nome, link in executaveis:
+                if "atualizador" not in nome:
                     url_download = link
                     break
 
@@ -2958,7 +2972,19 @@ def executar_atualizacao(
             pass
 
     if alvo != VERSAO_TRAVA_LOOP_UPDATE and bloqueio_loop_update_ativo(versao_alvo=alvo):
-        return False, "Sistema atualizado"
+        # Revalida no remoto quando o alvo não foi informado para evitar falso
+        # "Sistema atualizado" em clientes antigos (ex.: 1.0.50).
+        if not alvo:
+            try:
+                info_remota = obter_info_nova_versao() or {}
+                versao_remota = str(info_remota.get("versao", "")).strip()
+                if versao_remota and eh_versao_mais_nova(versao_remota, APP_VERSION):
+                    alvo = versao_remota
+            except Exception:
+                pass
+
+        if bloqueio_loop_update_ativo(versao_alvo=alvo):
+            return False, "Sistema atualizado"
 
     url = str(url_download or "").strip()
     if not url:
