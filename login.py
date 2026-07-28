@@ -1437,6 +1437,10 @@ def _abrir_popup_aviso_atualizacao(versao: str, novidades: str = ""):
     _update_contagem_expirada = False
 
     def _iniciar_instalacao():
+        global _auto_update_disparada
+        if _auto_update_disparada:
+            return
+        _auto_update_disparada = True
         _fechar_aviso_atualizacao()
         _mostrar_popup_atualizacao("Preparando atualização...", 0.0)
         _executar_instalacao_update(confirmar_usuario=False)
@@ -1462,15 +1466,16 @@ def _abrir_popup_aviso_atualizacao(versao: str, novidades: str = ""):
         _update_contagem_expirada = True
         if _label_aviso_update and _label_aviso_update.winfo_exists():
             _label_aviso_update.configure(
-                text="Sem resposta. Deseja adiar ou instalar agora?",
+                text="Sem resposta. Iniciando atualização automática agora...",
                 text_color="#f1c40f",
             )
         if _label_timer_update and _label_timer_update.winfo_exists():
-            _label_timer_update.configure(text="")
+            _label_timer_update.configure(text="Preparando download e instalação automática.")
         if _btn_agora_update and _btn_agora_update.winfo_exists():
-            _btn_agora_update.configure(text="Instalar agora", command=_iniciar_instalacao)
+            _btn_agora_update.configure(state="disabled")
         if _btn_adiar_update and _btn_adiar_update.winfo_exists():
-            _btn_adiar_update.configure(text="Adiar", command=_adiar)
+            _btn_adiar_update.configure(state="disabled")
+        _janela_aviso_update.after(900, _iniciar_instalacao)
 
     if _janela_aviso_update and _janela_aviso_update.winfo_exists():
         try:
@@ -1516,7 +1521,7 @@ def _abrir_popup_aviso_atualizacao(versao: str, novidades: str = ""):
 
     _label_timer_update = ctk.CTkLabel(
         frame,
-        text="Esta janela fecha sozinha em 30 segundos.",
+        text="Atualização automática em 30 segundos (clique em Adiar para cancelar).",
         font=("Segoe UI", 12, "bold"),
         text_color="#f1c40f",
     )
@@ -1593,7 +1598,8 @@ def _atualizar_popup_atualizacao(mensagem: str, progresso: float | None = None):
 
 
 def _executar_instalacao_update(confirmar_usuario: bool = True):
-    if bloqueio_loop_update_ativo():
+    versao_alvo = str(_update_versao_detectada or "").strip()
+    if bloqueio_loop_update_ativo(versao_alvo=versao_alvo):
         messagebox.showinfo("Atualização", "Sistema atualizado", parent=janela_login)
         return
 
@@ -1667,7 +1673,7 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
                 if msg_final in {"Sistema atualizado", "Sem novas atualizações"}:
                     messagebox.showinfo("Atualização", msg_final, parent=janela_login)
                 else:
-                    messagebox.showinfo("Atualização", "Sem novas atualizações", parent=janela_login)
+                    messagebox.showerror("Atualização", msg_final or "Falha ao baixar/instalar atualização.", parent=janela_login)
 
         janela_login.after(0, _finalizar)
 

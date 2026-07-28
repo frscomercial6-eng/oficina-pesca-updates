@@ -1382,25 +1382,47 @@ def listar_os_rejeitados_abandono_dashboard(
 
 
 def obter_info_nova_versao() -> dict:
-    """ObtÃ©m dados da versÃ£o remota (JSON ou TXT). Retorna dict vazio em caso de falha."""
-    # Limpeza agressiva da URL para evitar caracteres de controle e prefixos indesejados
+    """Obtém dados da versão remota (GitHub Releases/Tags + fallback manifesto)."""
+    # Limpeza agressiva da URL para evitar caracteres de controle e prefixos indesejados.
     url_raw = str(URL_CHECK_VERSAO or "").strip()
-    # Usa Regex para garantir que pegamos apenas o link válido, removendo lixos como "url_check ="
     match = re.search(r'https?://[^\s]+', url_raw)
     url_limpa = match.group(0) if match else ""
-    
-    if not url_limpa or len(url_limpa) < 10:
-        return {}
+
+    owner = "frscomercial6-eng"
+    repo = "oficina-pesca-updates"
+
+    def _normalizar_versao(valor: str) -> str:
+        partes = [int(x) for x in re.findall(r"\d+", str(valor or "").strip().lower())]
+        if not partes:
+            return ""
+        return ".".join(str(x) for x in partes)
+
+    def _tuple_versao(valor: str) -> tuple[int, ...]:
+        partes = [int(x) for x in re.findall(r"\d+", str(valor or "").strip().lower())]
+        return tuple(partes) if partes else (0,)
+
+    def _montar_url_instalador_por_versao(versao: str) -> str:
+        v = _normalizar_versao(versao)
+        if not v:
+            return str(CENTRAL_UPDATE_DOWNLOAD_URL or "").strip()
+        return f"https://github.com/{owner}/{repo}/releases/download/v{v}/Oficina_Pesca_Instalador.exe"
+
+    def _corrigir_url_download_por_versao(url: str, versao: str) -> str:
+        u = str(url or "").strip()
+        v = _normalizar_versao(versao)
+        if not v:
+            return u
+        if not u:
+            return _montar_url_instalador_por_versao(v)
+        # Corrige manifests defasados que apontam para outra tag.
+        if "github.com" in u.lower() and "/releases/download/" in u.lower():
+            return re.sub(r"/releases/download/v[0-9]+(?:\.[0-9]+)*/", f"/releases/download/v{v}/", u, flags=re.IGNORECASE)
+        return u
 
     def _gerar_urls_remotas_oficiais() -> list[str]:
         # Mantém foco em manifesto remoto RAW oficial para compatibilidade com clientes em produção.
         base_fixa = "https://raw.githubusercontent.com/frscomercial6-eng/oficina-pesca-updates/main/"
-        candidatos_base = [
-            url_limpa,
-            str(CENTRAL_UPDATE_MANIFEST_URL or "").strip(),
-            str(URL_CHECK_VERSAO or "").strip(),
-            base_fixa + "config.json",
-        ]
+        candidatos_base = [url_limpa, str(CENTRAL_UPDATE_MANIFEST_URL or "").strip(), str(URL_CHECK_VERSAO or "").strip(), base_fixa + "config.json"]
 
         saida: list[str] = []
         vistos = set()
@@ -1462,9 +1484,11 @@ def obter_info_nova_versao() -> dict:
                     or data_json.get("latest_download")
                     or CENTRAL_UPDATE_DOWNLOAD_URL
                 )
+                versao_norm = _normalizar_versao(str(versao).strip())
+                url_download = _corrigir_url_download_por_versao(str(url_download).strip(), versao_norm)
 
                 saida = {
-                    "versao": str(versao).strip(),
+                    "versao": versao_norm or str(versao).strip(),
                     "novidades": str(novidades).strip(),
                     "url_download": str(url_download).strip(),
                 }
@@ -1508,27 +1532,121 @@ def obter_info_nova_versao() -> dict:
             or CENTRAL_UPDATE_DOWNLOAD_URL
             or ""
         )
+        versao_norm = _normalizar_versao(str(versao).strip())
+        url_download = _corrigir_url_download_por_versao(str(url_download).strip(), versao_norm)
 
         saida = {
-            "versao": str(versao).strip(),
+            "versao": versao_norm or str(versao).strip(),
             "novidades": str(novidades).strip(),
             "url_download": str(url_download).strip(),
         }
         return {k: v for k, v in saida.items() if v}
 
+    def _consultar_release_latest(headers: dict) -> dict:
+        import urllib.request
+
+        api = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+        req = urllib.request.Request(api, headers=headers)
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            payload = resp.read().decode("utf-8", errors="ignore")
+        data = json.loads(payload)
+        if not isinstance(data, dict):
+            return {}
+
+        versao = _normalizar_versao(str(data.get("tag_name") or data.get("name") or ""))
+        if not versao:
+            return {}
+
+        novidades = str(data.get("body") or data.get("name") or "").strip()
+        assets = data.get("assets") if isinstance(data.get("assets"), list) else []
+        url_download = ""
+
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            nome = str(asset.get("name") or "").strip().lower()
+            link = str(asset.get("browser_download_url") or "").strip()
+            if nome == "oficina_pesca_instalador.exe" and link:
+                url_download = link
+                break
+
+        if not url_download:
+            for asset in assets:
+                if not isinstance(asset, dict):
+                    continue
+                nome = str(asset.get("name") or "").strip().lower()
+                link = str(asset.get("browser_download_url") or "").strip()
+                if nome.endswith(".exe") and link:
+                    url_download = link
+                    break
+
+        url_download = _corrigir_url_download_por_versao(url_download or _montar_url_instalador_por_versao(versao), versao)
+        return {"versao": versao, "novidades": novidades, "url_download": url_download}
+
+    def _consultar_tags(headers: dict) -> dict:
+        import urllib.request
+
+        api = f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=30"
+        req = urllib.request.Request(api, headers=headers)
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            payload = resp.read().decode("utf-8", errors="ignore")
+        data = json.loads(payload)
+        if not isinstance(data, list):
+            return {}
+
+        candidatos = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            tag = str(item.get("name") or "").strip()
+            versao = _normalizar_versao(tag)
+            if not versao:
+                continue
+            candidatos.append((_tuple_versao(versao), versao))
+
+        if not candidatos:
+            return {}
+
+        candidatos.sort(reverse=True)
+        versao = candidatos[0][1]
+        return {
+            "versao": versao,
+            "novidades": f"Nova versão disponível: v{versao}",
+            "url_download": _montar_url_instalador_por_versao(versao),
+        }
+
     try:
         import urllib.request
 
+        headers = {
+            "User-Agent": f"OficinaPesca/{APP_VERSION}",
+            "Accept": "application/vnd.github+json",
+        }
+
+        # 1) Fonte principal: GitHub release mais recente.
+        try:
+            info = _consultar_release_latest(headers)
+            if info.get("versao"):
+                return info
+        except Exception:
+            pass
+
+        # 2) Fallback: tags do repositório quando release ainda não estiver completa.
+        try:
+            info = _consultar_tags(headers)
+            if info.get("versao"):
+                return info
+        except Exception:
+            pass
+
+        # 3) Fallback legado: manifestos RAW (config/version/versao txt/json).
         urls_tentativa = _gerar_urls_remotas_oficiais()
 
         ultimo_erro = ""
         for url in urls_tentativa:
             try:
-                req = urllib.request.Request(
-                    url,
-                    headers={"User-Agent": f"OficinaPesca/{APP_VERSION}"}
-                )
-                with urllib.request.urlopen(req, timeout=2) as resp:
+                req = urllib.request.Request(url, headers={"User-Agent": f"OficinaPesca/{APP_VERSION}"})
+                with urllib.request.urlopen(req, timeout=4) as resp:
                     payload = resp.read().decode("utf-8", errors="ignore")
                 info = _parse_manifesto(payload)
                 if info:
@@ -1618,6 +1736,11 @@ def registrar_update_aplicado_local(versao: str, origem: str = "desktop", status
 def bloqueio_loop_update_ativo(versao_alvo: str = "") -> bool:
     alvo = str(versao_alvo or "").strip()
     if alvo and eh_versao_mais_nova(alvo, APP_VERSION):
+        return False
+
+    # A trava emergencial valia apenas para a própria versão problemática.
+    # Se o cliente já está acima da versão de trava, nunca deve bloquear updates.
+    if _versao_em_tupla(APP_VERSION) > _versao_em_tupla(VERSAO_TRAVA_LOOP_UPDATE):
         return False
 
     # Trava de segurança emergencial: se o app local já chegou na 1.0.50,
