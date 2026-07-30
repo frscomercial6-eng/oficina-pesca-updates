@@ -532,6 +532,28 @@ def _limpar_apks_em_pasta(destino_dir: str) -> None:
 
 def _build_apk_android(versao: str) -> tuple[str, str]:
     print("📱 Compilando APK Nativo com a mesma versão do Desktop...")
+    google_services_origem = os.path.join(REPO_ROOT, "google-services.json")
+    google_services_destino = os.path.join(ANDROID_PROJECT_DIR, "app", "google-services.json")
+    if os.path.exists(google_services_origem):
+        os.makedirs(os.path.dirname(google_services_destino), exist_ok=True)
+        shutil.copy2(google_services_origem, google_services_destino)
+
+    sdk_root = os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or ""
+    local_properties = os.path.join(ANDROID_PROJECT_DIR, "local.properties")
+    if sdk_root:
+        sdk_root = sdk_root.replace("/", "\\")
+        conteudo_local_properties = f"sdk.dir={sdk_root}\n"
+        if not os.path.exists(local_properties):
+            with open(local_properties, "w", encoding="utf-8") as f:
+                f.write(conteudo_local_properties)
+        else:
+            atual, enc = _read_text_any(local_properties)
+            if f"sdk.dir={sdk_root}" not in atual.replace("/", "\\"):
+                novo = re.sub(r"(?m)^\s*sdk\.dir\s*=.*$", f"sdk.dir={sdk_root}", atual)
+                if novo == atual:
+                    novo = atual.rstrip("\r\n") + "\n" + conteudo_local_properties
+                _write_text(local_properties, novo, enc)
+
     _gerar_wrapper_gradle_android()
     gradle_cmd = _resolver_comando_gradle()
     env_gradle = os.environ.copy()
@@ -576,11 +598,11 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
     _validar_apk_gerado(destino_legacy_nome_fixo)
     _validar_apk_gerado(destino_legacy_versionado)
 
-    print(f"📦 APK copiado para dist: {destino_dist}")
-    print(f"📤 APK copiado para distribuição: {destino_pacote}")
-    print(f"📤 APK copiado para pasta legada do instalador: {destino_legacy}")
-    print(f"📤 APK copiado para {ANDROID_APK_LEGACY_DIR}: {destino_legacy_nome_fixo}")
-    print(f"📤 APK versionado copiado para {ANDROID_APK_LEGACY_DIR}: {destino_legacy_versionado}")
+    print(f"📦 APK Nativo copiado para dist: {destino_dist}")
+    print(f"📤 APK Nativo copiado para distribuição: {destino_pacote}")
+    print(f"📤 APK Nativo copiado para pasta legada do instalador: {destino_legacy}")
+    print(f"📤 APK Nativo copiado para {ANDROID_APK_LEGACY_DIR}: {destino_legacy_nome_fixo}")
+    print(f"📤 APK Nativo versionado copiado para {ANDROID_APK_LEGACY_DIR}: {destino_legacy_versionado}")
     return destino_dist, destino_pacote
 
 
@@ -1361,7 +1383,7 @@ def build(projeto, versao):
         _validar_pacote_distribuicao(destino_distribuicao, destino_bootstrapper)
         print(f"📤 Instalador copiado para distribuição: {destino_distribuicao}")
         print(f"📤 Bootstrapper copiado para distribuição: {destino_bootstrapper}")
-        print(f"📤 APK copiado para distribuição: {apk_distribuicao}")
+        print(f"📤 APK Nativo copiado para distribuição: {apk_distribuicao}")
         _gerar_log_saude_sistema(versao, apk_dist, instalador)
         return instalador, destino_distribuicao
     finally:

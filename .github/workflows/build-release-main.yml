@@ -41,6 +41,24 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Preparar local.properties do Android
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:ANDROID_SDK_ROOT)) {
+            if (-not [string]::IsNullOrWhiteSpace($env:ANDROID_HOME)) {
+              $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
+            } else {
+              throw "ANDROID_SDK_ROOT/ANDROID_HOME não definido após setup-android."
+            }
+          }
+          $sdkDir = ($env:ANDROID_SDK_ROOT -replace '/', '\\')
+          @("sdk.dir=$sdkDir") | Set-Content -Path "android_apk/local.properties" -Encoding utf8
+
+      - name: Garantir google-services.json no módulo Android
+        shell: pwsh
+        run: |
+          Copy-Item -Force "google-services.json" "android_apk/app/google-services.json"
+
       - name: Instalar pacotes Android necessários
         shell: pwsh
         run: |
@@ -107,14 +125,14 @@ jobs:
           path: build_ci.log
           if-no-files-found: ignore
 
-      - name: Upload artefatos finais da run (exe + zip + apk)
+      - name: Upload artefatos finais da run (exe + zip + apk nativo)
         uses: actions/upload-artifact@v4
         with:
           name: build-final-artifacts
           path: |
             PACOTE_ENVIO/Oficina_Pesca_Instalador.exe
             PACOTE_ENVIO/Oficina_Pesca_Portatil.zip
-            PACOTE_ENVIO/apk_celular/Oficina_Pesca_WebView.apk
+            PACOTE_ENVIO/apk_celular/Oficina_Pesca_Nativo.apk
           if-no-files-found: error
 
       - name: Ler versão do projeto
@@ -139,7 +157,7 @@ jobs:
           artifacts: >-
             PACOTE_ENVIO/Oficina_Pesca_Instalador.exe,
             PACOTE_ENVIO/Oficina_Pesca_Portatil.zip,
-            PACOTE_ENVIO/apk_celular/Oficina_Pesca_WebView.apk,
+            PACOTE_ENVIO/apk_celular/Oficina_Pesca_Nativo.apk,
             PACOTE_ENVIO/Atualizador.exe
           artifactErrorsFailBuild: true
           body: |
@@ -148,5 +166,5 @@ jobs:
             Artefatos publicados:
             - Instalador: Oficina_Pesca_Instalador.exe
             - Portátil: Oficina_Pesca_Portatil.zip
-            - APK: Oficina_Pesca_WebView.apk
+            - APK Nativo: Oficina_Pesca_Nativo.apk
             - Bootstrapper: Atualizador.exe
