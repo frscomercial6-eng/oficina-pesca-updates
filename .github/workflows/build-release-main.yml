@@ -32,28 +32,6 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Setup Java (Android/Gradle)
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Preparar local.properties do Android
-        shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:ANDROID_SDK_ROOT)) {
-            if (-not [string]::IsNullOrWhiteSpace($env:ANDROID_HOME)) {
-              $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
-            } else {
-              throw "ANDROID_SDK_ROOT/ANDROID_HOME não definido após setup-android."
-            }
-          }
-          $sdkDir = ($env:ANDROID_SDK_ROOT -replace '/', '\\')
-          @("sdk.dir=$sdkDir") | Set-Content -Path "android_apk/local.properties" -Encoding utf8
-
       - name: Garantir google-services.json no módulo Android
         shell: pwsh
         run: |
@@ -99,12 +77,6 @@ jobs:
             } | ConvertTo-Json -Depth 10
             Set-Content -Path $dest -Value $placeholder -Encoding utf8
           }
-
-      - name: Instalar pacotes Android necessários
-        shell: pwsh
-        run: |
-          cmd /c "echo y|sdkmanager --licenses >nul"
-          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Instalar Inno Setup
         shell: pwsh

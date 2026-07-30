@@ -613,6 +613,12 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
 
     _validar_apk_gerado(origem_apk)
 
+    staging_dir = os.path.join(BUILD_ROOT, "build", "apk_staging")
+    os.makedirs(staging_dir, exist_ok=True)
+    staging_apk = os.path.join(staging_dir, os.path.basename(origem_apk))
+    shutil.copy2(origem_apk, staging_apk)
+    _validar_apk_gerado(staging_apk)
+
     _limpar_apks_em_pasta(ANDROID_APK_DIST_DIR)
     _limpar_apks_em_pasta(ANDROID_APK_PACKAGE_DIR)
     _limpar_pasta_apk_legada()
@@ -624,7 +630,7 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
     destino_legacy_nome_fixo = os.path.join(ANDROID_APK_LEGACY_DIR, ANDROID_APK_NAME)
     destino_legacy_versionado = os.path.join(ANDROID_APK_LEGACY_DIR, nome_versionado)
 
-    shutil.copy2(origem_apk, destino_dist)
+    shutil.copy2(staging_apk, destino_dist)
     _validar_apk_gerado(destino_dist)
     if not os.path.basename(destino_dist).endswith(f"v{versao}.apk"):
         raise RuntimeError("APK versionado inválido para distribuição.")

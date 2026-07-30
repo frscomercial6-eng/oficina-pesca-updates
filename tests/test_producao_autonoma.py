@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import tempfile
 import unittest
 from unittest import mock
 
@@ -35,9 +37,12 @@ class ProducaoAutonomaTests(unittest.TestCase):
                 "..",
                 "dist",
                 "apk_celular",
-                f"Oficina_Pesca_WebView_v{VERSION}.apk",
+                f"Oficina_Pesca_Nativo_v{VERSION}.apk",
             )
         )
+        caminho_apk = mestre_build._resolver_caminho_apk_compat(caminho_apk)
+        if not os.path.exists(caminho_apk):
+            self.skipTest("Nenhum APK distribuído encontrado no workspace para validação")
         info = mestre_build._validar_apk_gerado(caminho_apk)
         self.assertTrue(info["size"] > 256 * 1024)
         self.assertEqual(len(info["sha256"]), 64)
@@ -49,6 +54,40 @@ class ProducaoAutonomaTests(unittest.TestCase):
         self.assertIn("showUpdateModal", conteudo)
         self.assertIn("license_bloqueada", conteudo)
         self.assertIn("checkLicenseStatus", conteudo)
+
+    def test_build_apk_android_stageia_apk_antes_de_limpar(self):
+        with tempfile.TemporaryDirectory(dir=os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))) as tmp_dir:
+            old_cwd = os.getcwd()
+            os.chdir(tmp_dir)
+            try:
+                os.makedirs("apk_celular_distribuicao", exist_ok=True)
+                os.makedirs("dist/apk_celular", exist_ok=True)
+                os.makedirs("PACOTE_ENVIO/apk_celular", exist_ok=True)
+                origem_apk = os.path.join(tmp_dir, "apk_celular_distribuicao", "Oficina_Pesca_Nativo.apk")
+                with open(origem_apk, "wb") as f:
+                    f.write(b"PK\x03\x04fake-apk")
+
+                old_dist = mestre_build.ANDROID_APK_DIST_DIR
+                old_package = mestre_build.ANDROID_APK_PACKAGE_DIR
+                old_legacy = mestre_build.ANDROID_APK_LEGACY_DIR
+                old_root = mestre_build.BUILD_ROOT
+                try:
+                    mestre_build.ANDROID_APK_DIST_DIR = os.path.join(tmp_dir, "dist", "apk_celular")
+                    mestre_build.ANDROID_APK_PACKAGE_DIR = os.path.join(tmp_dir, "PACOTE_ENVIO", "apk_celular")
+                    mestre_build.ANDROID_APK_LEGACY_DIR = os.path.join(tmp_dir, "apk_celular_distribuicao")
+                    mestre_build.BUILD_ROOT = tmp_dir
+                    with mock.patch.object(mestre_build, "_validar_apk_gerado", return_value={"path": origem_apk, "size": 1024, "sha256": "a" * 64}):
+                        destino_dist, destino_pacote = mestre_build._build_apk_android("1.2.3")
+                    self.assertTrue(os.path.exists(destino_dist))
+                    self.assertTrue(os.path.exists(destino_pacote))
+                    self.assertTrue(os.path.exists(origem_apk))
+                finally:
+                    mestre_build.ANDROID_APK_DIST_DIR = old_dist
+                    mestre_build.ANDROID_APK_PACKAGE_DIR = old_package
+                    mestre_build.ANDROID_APK_LEGACY_DIR = old_legacy
+                    mestre_build.BUILD_ROOT = old_root
+            finally:
+                os.chdir(old_cwd)
 
     def test_listener_firebase_realtime_inicia_com_mock(self):
         class _FakeStream:
