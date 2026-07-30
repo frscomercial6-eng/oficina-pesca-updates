@@ -57,7 +57,48 @@ jobs:
       - name: Garantir google-services.json no módulo Android
         shell: pwsh
         run: |
-          Copy-Item -Force "google-services.json" "android_apk/app/google-services.json"
+          $src = "google-services.json"
+          $dest = "android_apk/app/google-services.json"
+          New-Item -ItemType Directory -Path (Split-Path -Parent $dest) -Force | Out-Null
+
+          if (Test-Path $src) {
+            Copy-Item -Force $src $dest
+            Write-Host "google-services.json copiado do repositório para o módulo Android."
+          } else {
+            Write-Warning "google-services.json não encontrado no repositório. Gerando placeholder para o build no CI."
+            $placeholder = @{
+              project_info = @{
+                project_id = "oficina-pesca-ci"
+                project_number = "000000000000"
+                name = "oficina-pesca-ci"
+                firebase_url = "https://oficina-pesca-ci.firebaseio.com"
+                storage_bucket = "oficina-pesca-ci.appspot.com"
+              }
+              client = @(
+                @{
+                  client_info = @{
+                    mobilesdk_app_id = "1:000000000000:android:0000000000000000"
+                    android_client_info = @{
+                      package_name = "com.oficinapesca.mobile"
+                    }
+                  }
+                  oauth_client = @()
+                  api_key = @(
+                    @{
+                      current_key = "placeholder"
+                    }
+                  )
+                  services = @{
+                    appinvite_service = @{
+                      other_platform_oauth_client = @()
+                    }
+                  }
+                }
+              )
+              configuration_version = "1"
+            } | ConvertTo-Json -Depth 10
+            Set-Content -Path $dest -Value $placeholder -Encoding utf8
+          }
 
       - name: Instalar pacotes Android necessários
         shell: pwsh
