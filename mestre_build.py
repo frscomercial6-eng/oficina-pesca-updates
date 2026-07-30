@@ -592,43 +592,24 @@ def _limpar_apks_em_pasta(destino_dir: str) -> None:
 
 
 def _build_apk_android(versao: str) -> tuple[str, str]:
-    print("📱 Compilando APK Nativo com a mesma versão do Desktop...")
-    google_services_origem = os.path.join(REPO_ROOT, "google-services.json")
-    google_services_destino = os.path.join(ANDROID_PROJECT_DIR, "app", "google-services.json")
-    if os.path.exists(google_services_origem):
-        os.makedirs(os.path.dirname(google_services_destino), exist_ok=True)
-        shutil.copy2(google_services_origem, google_services_destino)
-
-    sdk_root = os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or ""
-    local_properties = os.path.join(ANDROID_PROJECT_DIR, "local.properties")
-    if sdk_root:
-        sdk_root = sdk_root.replace("/", "\\")
-        conteudo_local_properties = f"sdk.dir={sdk_root}\n"
-        if not os.path.exists(local_properties):
-            with open(local_properties, "w", encoding="utf-8") as f:
-                f.write(conteudo_local_properties)
-        else:
-            atual, enc = _read_text_any(local_properties)
-            if f"sdk.dir={sdk_root}" not in atual.replace("/", "\\"):
-                novo = re.sub(r"(?m)^\s*sdk\.dir\s*=.*$", f"sdk.dir={sdk_root}", atual)
-                if novo == atual:
-                    novo = atual.rstrip("\r\n") + "\n" + conteudo_local_properties
-                _write_text(local_properties, novo, enc)
-
-    _gerar_wrapper_gradle_android()
-    gradle_cmd = _resolver_comando_gradle()
-    env_gradle = os.environ.copy()
-    env_gradle["OFP_APK_VERSION"] = str(versao or "").strip()
-    subprocess.run([*gradle_cmd, "assembleDebug"], cwd=ANDROID_PROJECT_DIR, check=True, env=env_gradle)
-    _confirmar_version_name_apk(versao)
+    print("📱 Usando APK Nativo pré-compilado já presente no repositório...")
 
     candidatos_origem = [
         os.path.join(ANDROID_PROJECT_DIR, "build", "outputs", "apk", "debug", "app-debug.apk"),
         os.path.join(ANDROID_PROJECT_DIR, "app", "build", "outputs", "apk", "debug", "app-debug.apk"),
+        os.path.join(ANDROID_PROJECT_DIR, "app", "build", "outputs", "apk", "release", "app-release.apk"),
+        os.path.join(ANDROID_PROJECT_DIR, "app", "build", "outputs", "apk", "debug", "app-debug-unaligned.apk"),
+        os.path.join("dist", "apk_celular", f"Oficina_Pesca_Nativo_v{versao}.apk"),
+        os.path.join("dist", "apk_celular", "Oficina_Pesca_Nativo.apk"),
+        os.path.join("apk_celular_distribuicao", "Oficina_Pesca_Nativo.apk"),
+        os.path.join("apk_celular_distribuicao", f"Oficina_Pesca_Nativo_v{versao}.apk"),
+        os.path.join("apk_celular_distribuicao", "oficina_app_signed.apk"),
+        os.path.join(DISTRIBUTION_DIR, "apk_celular", "Oficina_Pesca_Nativo.apk"),
     ]
+
     origem_apk = next((c for c in candidatos_origem if os.path.exists(c)), "")
     if not origem_apk:
-        raise FileNotFoundError("Falha ao localizar APK para distribuição")
+        raise FileNotFoundError("Falha ao localizar APK pré-compilado para distribuição")
 
     _validar_apk_gerado(origem_apk)
 
@@ -643,7 +624,6 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
     destino_legacy_nome_fixo = os.path.join(ANDROID_APK_LEGACY_DIR, ANDROID_APK_NAME)
     destino_legacy_versionado = os.path.join(ANDROID_APK_LEGACY_DIR, nome_versionado)
 
-    # Distribuição só ocorre após validação do APK versionado recém-gerado.
     shutil.copy2(origem_apk, destino_dist)
     _validar_apk_gerado(destino_dist)
     if not os.path.basename(destino_dist).endswith(f"v{versao}.apk"):
