@@ -439,13 +439,74 @@ def _gerar_wrapper_gradle_android() -> str:
     return wrapper
 
 
-def _validar_apk_gerado(caminho_apk: str) -> dict:
+def _resolver_caminho_apk_compat(caminho_apk: str) -> str:
     caminho = os.path.abspath(str(caminho_apk or ""))
+    if caminho and os.path.exists(caminho):
+        return caminho
+
+    nome_base = os.path.basename(caminho).lower()
+    versao = None
+    match = re.search(r"v?(\d+(?:\.\d+){1,3})", nome_base)
+    if match:
+        versao = match.group(1)
+
+    diretorios = []
+    if os.path.dirname(caminho):
+        diretorios.append(os.path.dirname(caminho))
+    for rel in ["dist/apk_celular", "apk_celular_distribuicao", os.path.join(DISTRIBUTION_DIR, "apk_celular")]:
+        diretorios.append(os.path.abspath(os.path.join(REPO_ROOT, rel)))
+    diretorios.append(os.path.abspath(REPO_ROOT))
+
+    nomes_candidatos = []
+    if nome_base.endswith(".apk"):
+        base_sem_ext = os.path.splitext(os.path.basename(caminho))[0]
+        nomes_candidatos.append(base_sem_ext + ".apk")
+    if versao:
+        nomes_candidatos.extend([
+            f"Oficina_Pesca_Nativo_v{versao}.apk",
+            f"Oficina_Pesca_WebView_v{versao}.apk",
+            f"Oficina_Pesca_Nativo.apk",
+            f"Oficina_Pesca_WebView.apk",
+        ])
+    else:
+        nomes_candidatos.extend([
+            "Oficina_Pesca_Nativo.apk",
+            "Oficina_Pesca_WebView.apk",
+        ])
+
+    seen = set()
+    for diretorio in diretorios:
+        if not os.path.isdir(diretorio):
+            continue
+        for nome in nomes_candidatos:
+            if nome in seen:
+                continue
+            seen.add(nome)
+            candidato = os.path.join(diretorio, nome)
+            if os.path.exists(candidato):
+                return candidato
+        for nome_arq in sorted(os.listdir(diretorio)):
+            if not nome_arq.lower().endswith(".apk"):
+                continue
+            if "oficina" not in nome_arq.lower() and "pesca" not in nome_arq.lower():
+                continue
+            candidato = os.path.join(diretorio, nome_arq)
+            if os.path.exists(candidato):
+                return candidato
+    return caminho
+
+
+def _validar_apk_gerado(caminho_apk: str) -> dict:
+    caminho = _resolver_caminho_apk_compat(caminho_apk)
     if not caminho or not os.path.exists(caminho):
         raise FileNotFoundError("Falha ao localizar APK para distribuição")
 
     tamanho = int(os.path.getsize(caminho) or 0)
     if tamanho < 256 * 1024:
+        raise RuntimeError("Falha ao localizar APK para distribuição")
+
+    nome = os.path.basename(caminho).lower()
+    if not nome.endswith(".apk"):
         raise RuntimeError("Falha ao localizar APK para distribuição")
 
     with open(caminho, "rb") as f:
