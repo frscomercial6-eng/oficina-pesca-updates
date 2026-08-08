@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
+    # Garante que o pacote local "api" seja resolvido em ambientes como Render.
     sys.path.insert(0, str(ROOT))
 
 from api.main import app
