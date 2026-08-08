@@ -50,3 +50,6 @@ android_apk/build/
 android_apk/keystore.properties
 *.jks
 *.keystore
+
+# Render / deployment local artifacts
+.render/
