@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# -*- coding: utf-8 -*-
 import re
 APK_DOWNLOAD_URL = "https://github.com/frs-oficinadepesca/oficinadepesca/releases/latest/download/OficinaPesca.apk"
 
