@@ -29,6 +29,16 @@ from datetime import datetime
 # Corrige imports ausentes para web scraping
 from urllib.request import Request, urlopen
 from core.financeiro.calculos import OSCalculator, formatar_monetario
+from core.i18n import t
+from core.os_repository import (
+    garantir_colunas_orcamentos_aguardo as garantir_colunas_orcamentos_aguardo_repo,
+    obter_proximo_numero_orcamento_oficial as obter_proximo_numero_orcamento_oficial_repo,
+    salvar_orcamento_aguardo_oficial as salvar_orcamento_aguardo_oficial_repo,
+)
+from core.os_service import (
+    _subtotal_equipamento_payload as _subtotal_equipamento_payload_service,
+    salvar_os_completa as salvar_os_completa_service,
+)
 from status_os import normalizar_status_orcamento, STATUS_ORCAMENTO, STATUS_AGUARDANDO_ORCAMENTO
 from configuracao_fiscal import tentar_enviar_venda, consultar_nota_fiscal, imprimir_danfe_fiscal
 from validador_fiscal import (
@@ -127,72 +137,16 @@ def _sanitizar_nome_arquivo(nome: str) -> str:
 
 def obter_proximo_numero_orcamento_oficial():
     """Fonte única oficial da O.S. para sequência de numeração de orçamento."""
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'ultimo_orcamento'")
-            res = cursor.fetchone()
-            ultimo_config = int(res[0] or 0) if res else 0
-            cursor.execute("SELECT COALESCE(MAX(id), 0) FROM orcamentos_aguardo")
-            ultimo_banco = int((cursor.fetchone() or [0])[0] or 0)
-        return max(ultimo_config, ultimo_banco, 500) + 1
-    except Exception as e:
-        logger.exception("Erro ao carregar próximo número oficial de orçamento: %s", e)
-        return 501
+    return obter_proximo_numero_orcamento_oficial_repo()
 
 
 def salvar_orcamento_aguardo_oficial(os_id: int, dados: dict, sinal: float = 0.0, saldo: float = 0.0):
     """Persistência oficial de O.S. usada pela tela de O.S. e fluxos rápidos do PDV."""
-    if not isinstance(dados, dict):
-        raise ValueError("Dados inválidos para salvar O.S.")
-
-    status_final = normalizar_status_orcamento(dados.get("status", "AGUARDANDO"))
-
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO orcamentos_aguardo
-            (id, cliente, telefone_cliente_whatsapp, equipamento, defeito, resumo_equipamento_defeito,
-             valor_total, sinal, saldo, status, data, itens_detalhes, dados_adicionais)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                int(os_id),
-                str(dados.get("cliente", "")),
-                str(dados.get("telefone_cliente_whatsapp", "")),
-                str(dados.get("equipamento", "")),
-                str(dados.get("defeito", "")),
-                str(dados.get("resumo_equipamento_defeito", "")),
-                float(dados.get("total", 0.0) or 0.0),
-                float(sinal or 0.0),
-                float(saldo or 0.0),
-                str(status_final),
-                str(dados.get("data", "")),
-                str(dados.get("itens_json", "[]")),
-                str(dados.get("dados_adicionais", "{}")),
-            ),
-        )
-        cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('ultimo_orcamento', ?)", (int(os_id),))
-        conn.commit()
+    return salvar_orcamento_aguardo_oficial_repo(os_id, dados, sinal=sinal, saldo=saldo)
 
 
 def _subtotal_equipamento_payload(equipamento: dict) -> float:
-    itens_ativos = []
-    for item in (equipamento.get("itens") or []):
-        if not isinstance(item, (list, tuple)) or len(item) < 4:
-            continue
-        status_item = str(item[4] if len(item) > 4 else "ATIVO").strip().upper()
-        if status_item == "REPROVADO":
-            continue
-        itens_ativos.append(float(item[3] or 0))
-
-    return OSCalculator.calcular_total(
-        itens=itens_ativos,
-        desconto=equipamento.get("desconto", 0),
-        frete=equipamento.get("frete", 0),
-        adicional=equipamento.get("opcional", 0),
-    )
+    return _subtotal_equipamento_payload_service(equipamento)
 
 
 def salvar_os_completa(
@@ -205,150 +159,21 @@ def salvar_os_completa(
     forma_pagamento: str | None = None,
     on_save_callback=None,
 ):
-    cliente_final = str(cliente or "").strip().upper()
-    telefone_final = str(telefone or "").strip()
-    endereco_final = str(endereco or "").strip()
-    equipamentos_validos = [
-        eq for eq in (equipamentos or [])
-        if isinstance(eq, dict) and (eq.get("equipamento") or eq.get("defeito") or eq.get("itens"))
-    ]
-
-    if not cliente_final:
-        cliente_final = "CLIENTE NÃO INFORMADO"
-
-    itens_flat = []
-    total_os = 0.0
-    for eq in equipamentos_validos:
-        total_os += _subtotal_equipamento_payload(eq)
-        for item in eq.get("itens") or []:
-            if isinstance(item, (list, tuple)) and len(item) >= 4:
-                status_item = str(item[4] if len(item) > 4 else "ATIVO").strip().upper()
-                itens_flat.append([str(item[0]), str(item[1]), str(item[2]), str(item[3]), status_item])
-
-    primeiro_item = equipamentos_validos[0] if equipamentos_validos else {}
-    resumo_equipamento_defeito = f"{str(primeiro_item.get('equipamento', '') or '').strip().upper()} - {str(primeiro_item.get('defeito', '') or '').strip().upper()}".strip(" -")
-    status_final = normalizar_status_orcamento(status)
-
-    sinal = OSCalculator.calcular_sinal_por_forma(total_os, forma_pagamento) if status_final == 'APROVADO' else 0.0
-    saldo = float(total_os - sinal)
-
-    dados = {
-        "cliente": cliente_final,
-        "telefone_cliente_whatsapp": telefone_final,
-        "equipamento": primeiro_item.get("equipamento", ""),
-        "defeito": primeiro_item.get("defeito", ""),
-        "resumo_equipamento_defeito": resumo_equipamento_defeito,
-        "total": total_os,
-        "status": status_final,
-        "data": datetime.now().strftime("%d/%m/%Y"),
-        "itens_json": json.dumps(itens_flat),
-        "dados_adicionais": json.dumps({
-            "modo_os_por_cliente": True,
-            "cliente_telefone": telefone_final,
-            "cliente_endereco": endereco_final,
-            "resumo_equipamento_defeito": resumo_equipamento_defeito,
-            "equipamentos": equipamentos_validos,
-            "equipamento_ativo_idx": None,
-            "historico_itens_reprovados": [],
-            "opcional": float(primeiro_item.get("opcional", 0.0)),
-            "frete": float(primeiro_item.get("frete", 0.0)),
-            "desconto": float(primeiro_item.get("desconto", 0.0)),
-            "prazo": str(primeiro_item.get("prazo", "7 dias úteis")),
-            "obs": str(primeiro_item.get("obs", "")),
-            "forma_de_pagamento": forma_pagamento,
-        })
-    }
-
-    salvar_orcamento_aguardo_oficial(os_id, dados, sinal=sinal, saldo=saldo)
-
-    try:
-        enviar_registro_os_central_silencioso({
-            "id": int(os_id),
-            "cliente": dados["cliente"],
-            "status": dados["status"],
-            "total": float(dados["total"]),
-        }, operacao="upsert")
-    except Exception:
-        logger.exception("Falha ao enfileirar sincronização central da O.S. %s.", os_id)
-
-    if callable(on_save_callback):
-        on_save_callback()
-
-    return dados
+    return salvar_os_completa_service(
+        os_id=os_id,
+        cliente=cliente,
+        telefone=telefone,
+        endereco=endereco,
+        equipamentos=equipamentos,
+        status=status,
+        forma_pagamento=forma_pagamento,
+        on_save_callback=on_save_callback,
+    )
 
 
 # --- CONFIGURACOES DE CAMINHOS ---
 def _garantir_colunas_orcamentos_aguardo():
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            from reforma_tributaria import garantir_estrutura_reforma_tributaria
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS status_orcamento (
-                    status TEXT PRIMARY KEY,
-                    ativo INTEGER NOT NULL DEFAULT 1
-                )
-                """
-            )
-            for status in ("ORÇAMENTO", "AGUARDANDO ORÇAMENTO", "EM ANDAMENTO", "APROVADO", "FINALIZADO", "REPROVADO", "ENTREGUE"):
-                cursor.execute(
-                    "INSERT OR REPLACE INTO status_orcamento (status, ativo) VALUES (?, 1)",
-                    (status,),
-                )
-            cursor.execute("UPDATE orcamentos_aguardo SET status = ? WHERE UPPER(COALESCE(status,'')) = 'AGUARDANDO'", (STATUS_ORCAMENTO,))
-            cursor.execute("UPDATE orcamentos_aguardo SET status = ? WHERE UPPER(COALESCE(status,'')) = 'AGUARDANDO ORCAMENTO'", (STATUS_AGUARDANDO_ORCAMENTO,))
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS esquemas_vistas (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    fabricante TEXT,
-                    modelo TEXT,
-                    url TEXT UNIQUE,
-                    origem TEXT
-                )
-            """)
-            cursor.execute("PRAGMA table_info(orcamentos_aguardo)")
-            cols = {row[1] for row in cursor.fetchall()}
-            if "telefone_cliente_whatsapp" not in cols:
-                cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN telefone_cliente_whatsapp TEXT")
-            if "resumo_equipamento_defeito" not in cols:
-                cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN resumo_equipamento_defeito TEXT")
-            if "status_entrega" not in cols:
-                cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN status_entrega TEXT")
-            if "data_finalizacao" not in cols:
-                cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN data_finalizacao TEXT")
-            if "data_entrega" not in cols:
-                cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN data_entrega TEXT")
-            garantir_estrutura_reforma_tributaria(cursor)
-            cursor.execute(
-                """
-                UPDATE orcamentos_aguardo
-                SET resumo_equipamento_defeito = TRIM(
-                        COALESCE(NULLIF(equipamento, ''), '') ||
-                        CASE
-                            WHEN COALESCE(NULLIF(equipamento, ''), '') <> ''
-                             AND COALESCE(NULLIF(defeito, ''), '') <> '' THEN ' - '
-                            ELSE ''
-                        END ||
-                        COALESCE(NULLIF(defeito, ''), '')
-                    )
-                WHERE COALESCE(NULLIF(resumo_equipamento_defeito, ''), '') = ''
-                """
-            )
-            cursor.execute(
-                """
-                UPDATE orcamentos_aguardo
-                SET status_entrega = COALESCE(NULLIF(status_entrega, ''), 'PENDENTE'),
-                    data_finalizacao = COALESCE(NULLIF(data_finalizacao, ''), 'Vazio'),
-                    data_entrega = COALESCE(NULLIF(data_entrega, ''), 'Vazio')
-                WHERE status_entrega IS NULL OR status_entrega = ''
-                   OR data_finalizacao IS NULL OR data_finalizacao = ''
-                   OR data_entrega IS NULL OR data_entrega = ''
-                """
-            )
-            conn.commit()
-    except Exception as exc:
-        logger.info("Falha ao garantir colunas extras de orcamentos_aguardo: %s", exc)
+    return garantir_colunas_orcamentos_aguardo_repo()
 
 
 class FrmOS(ctk.CTkToplevel):
@@ -370,7 +195,7 @@ class FrmOS(ctk.CTkToplevel):
     def _selecionar_pagamento_simples(self):
         """Abre janela simples de pagamento e retorna {'condicao','metodo'} ou None."""
         dialogo = ctk.CTkToplevel(self)
-        dialogo.title("Pagamento da O.S.")
+        dialogo.title(t('titulo_pagamento_os'))
         dialogo.geometry("460x420")
         dialogo.resizable(False, False)
         dialogo.attributes("-topmost", True)
@@ -383,7 +208,7 @@ class FrmOS(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             dialogo,
-            text="Selecione a condição de pagamento",
+            text=t('label_condicao_pagamento'),
             font=("Arial", 14, "bold"),
             text_color="orange",
         ).pack(pady=(14, 8))

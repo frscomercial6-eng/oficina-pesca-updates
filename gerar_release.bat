@@ -1,6 +1,13 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0"
+setlocal
+set "SCRIPT_DIR=%~dp0infra\build\scripts"
+if exist "%SCRIPT_DIR%\gerar_release.bat" (
+  call "%SCRIPT_DIR%\gerar_release.bat"
+  exit /b %ERRORLEVEL%
+) else (
+  echo [ERRO] Script de release nao encontrado em %SCRIPT_DIR%
+  exit /b 1
+)
 
 set "VENV_PY=.venv\Scripts\python.exe"
 set "ISCC_EXE=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"

@@ -14,6 +14,7 @@ import customtkinter as ctk
 
 from config import CAMINHO_BANCO, get_db_connection
 from configuracao_fiscal import tentar_enviar_venda, consultar_nota_fiscal, imprimir_danfe_fiscal, verificar_status_motor_fiscal
+from core.i18n import t
 from dados_oficina import obter_dados_oficina
 from validador_fiscal import (
     obter_cliente_por_id,
@@ -130,7 +131,7 @@ def _mapear_tpag_fiscal(metodo_pagamento):
 class FrmPDV(ctk.CTkToplevel):
     def __init__(self, master, on_os_update_callback=None):
         super().__init__(master)
-        self.title("PDV - Venda de Balcao")
+        self.title(t('titulo_pdv'))
         self.geometry("1220x760")
         self.configure(fg_color="#0f1720")
         self.on_os_update_callback = on_os_update_callback
@@ -490,7 +491,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             painel_pagamento,
-            text="Pagamentos",
+            text=t('label_pagamentos'),
             font=("Arial", 12, "bold"),
             text_color="#e2e8f0",
         ).grid(row=0, column=0, sticky="w", pady=(0, 6))
@@ -526,7 +527,7 @@ class FrmPDV(ctk.CTkToplevel):
         self.ent_valor_pagamento.bind("<Return>", lambda _e: self._adicionar_pagamento_atual())
         ctk.CTkButton(
             linha_pagto,
-            text="Adicionar Pagamento",
+            text=t('btn_adicionar_pagamento', default='Adicionar Pagamento'),
             width=170,
             fg_color="#16a34a",
             command=self._adicionar_pagamento_atual,
@@ -544,7 +545,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             acoes_venda,
-            text="IMPRIMIR CUPOM",
+            text=t('btn_imprimir_cupom').upper(),
             width=128,
             height=34,
             fg_color="#0ea5e9",
@@ -553,7 +554,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             acoes_venda,
-            text="EMITIR NOTA",
+            text=t('btn_emitir_nota').upper(),
             width=108,
             height=34,
             fg_color="#f59e0b",
@@ -562,7 +563,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             acoes_venda,
-            text="CONSULTAR",
+            text=t('btn_consultar').upper(),
             width=104,
             height=34,
             fg_color="#2563eb",
@@ -571,7 +572,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             acoes_venda,
-            text="IMPRIMIR DANFE",
+            text=t('btn_imprimir_danfe_pdv').upper(),
             width=138,
             height=34,
             fg_color="#7c3aed",
@@ -580,7 +581,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             acoes_venda,
-            text="GERAR PDF",
+            text=t('btn_gerar_pdf').upper(),
             width=108,
             height=34,
             fg_color="#64748b",
@@ -653,7 +654,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         self.btn_finalizar = ctk.CTkButton(
             painel_resumo,
-            text="Finalizar (F1)",
+            text=f"{t('btn_finalizar')} (F1)",
             width=190,
             fg_color="#16a34a",
             command=self._finalizar_venda,

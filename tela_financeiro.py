@@ -8,6 +8,14 @@ from datetime import datetime
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from version_info import VERSION
 from core.financeiro.calculos import formatar_monetario, parse_monetario
+from core.financeiro.repository import (
+    editar_lancamento_financeiro,
+    estornar_lancamento_financeiro,
+    inserir_lancamento_financeiro,
+    listar_lancamentos_financeiro,
+)
+from core.financeiro.service import carregar_dados_financeiros
+from core.i18n import t
 from reforma_tributaria import garantir_estrutura_reforma_tributaria, ler_config_reforma_tributaria, salvar_config_reforma_tributaria
 
 from config import CAMINHO_BANCO, inicializar_banco, verify_password, get_db_connection
@@ -19,7 +27,7 @@ class FrmFinanceiro(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
         inicializar_banco()
-        self.title(f"FLUXO DE CAIXA - OFICINA DE PESCA v{VERSION}")
+        self.title(f"{t('titulo_financeiro')} - OFICINA DE PESCA v{VERSION}")
         self.geometry("1280x740")
         self.minsize(1120, 700)
         self.grab_set()
@@ -33,8 +41,8 @@ class FrmFinanceiro(ctk.CTkToplevel):
 
         header = ctk.CTkFrame(self, fg_color="#1f2a38", corner_radius=20)
         header.pack(fill="x", padx=20, pady=(20, 10))
-        ctk.CTkLabel(header, text="MOVIMENTACOES DE CAIXA", font=("Arial", 26, "bold"), text_color="orange").pack(side="left", padx=20, pady=20)
-        self.lbl_saldo = ctk.CTkLabel(header, text="SALDO GERAL EM CAIXA: R$ 0.00", font=("Arial", 18, "bold"), text_color="#2ecc71")
+        ctk.CTkLabel(header, text=t("titulo_financeiro"), font=("Arial", 26, "bold"), text_color="orange").pack(side="left", padx=20, pady=20)
+        self.lbl_saldo = ctk.CTkLabel(header, text=f"{t('saldo_geral_caixa', default='SALDO GERAL EM CAIXA')}: R$ 0.00", font=("Arial", 18, "bold"), text_color="#2ecc71")
         self.lbl_saldo.pack(side="right", padx=20, pady=20)
 
         content = ctk.CTkFrame(self, fg_color="#161b22")
@@ -42,27 +50,27 @@ class FrmFinanceiro(ctk.CTkToplevel):
 
         self.frame_botoes = ctk.CTkFrame(content, fg_color="#1f2a38", corner_radius=20)
         self.frame_botoes.pack(fill="x", pady=(0, 10), padx=10)
-        ctk.CTkButton(self.frame_botoes, text="+ LANCAR DESPESA", fg_color="#c0392b", width=170, command=self.lancar_saida).pack(side="left", padx=8, pady=15)
-        ctk.CTkButton(self.frame_botoes, text="+ LANCAR RECEITA", fg_color="#27ae60", width=170, command=self.lancar_entrada).pack(side="left", padx=8, pady=15)
-        ctk.CTkButton(self.frame_botoes, text="EDITAR", fg_color="#8e44ad", width=130, command=self.editar_lancamento).pack(side="left", padx=8, pady=15)
-        ctk.CTkButton(self.frame_botoes, text="ESTORNAR", fg_color="#7f8c8d", width=130, command=self.estornar_lancamento).pack(side="left", padx=8, pady=15)
-        ctk.CTkButton(self.frame_botoes, text="EXPORTAR CSV", fg_color="#2980b9", width=160, command=self.exportar_csv).pack(side="left", padx=8, pady=15)
-        ctk.CTkButton(self.frame_botoes, text="ATUALIZAR", fg_color="#34495e", width=140, command=self.carregar_dados).pack(side="right", padx=10, pady=15)
+        ctk.CTkButton(self.frame_botoes, text=f"+ {t('btn_lancar_despesa')}", fg_color="#c0392b", width=170, command=self.lancar_saida).pack(side="left", padx=8, pady=15)
+        ctk.CTkButton(self.frame_botoes, text=f"+ {t('btn_lancar_receita')}", fg_color="#27ae60", width=170, command=self.lancar_entrada).pack(side="left", padx=8, pady=15)
+        ctk.CTkButton(self.frame_botoes, text=t('btn_editar'), fg_color="#8e44ad", width=130, command=self.editar_lancamento).pack(side="left", padx=8, pady=15)
+        ctk.CTkButton(self.frame_botoes, text=t('btn_estornar'), fg_color="#7f8c8d", width=130, command=self.estornar_lancamento).pack(side="left", padx=8, pady=15)
+        ctk.CTkButton(self.frame_botoes, text=t('btn_exportar_csv'), fg_color="#2980b9", width=160, command=self.exportar_csv).pack(side="left", padx=8, pady=15)
+        ctk.CTkButton(self.frame_botoes, text=t('btn_atualizar'), fg_color="#34495e", width=140, command=self.carregar_dados).pack(side="right", padx=10, pady=15)
 
         filter_frame = ctk.CTkFrame(content, fg_color="#1f2a38", corner_radius=20)
         filter_frame.pack(fill="x", pady=(0, 10), padx=10)
-        ctk.CTkLabel(filter_frame, text="De:", font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(side="left", padx=(20, 8), pady=12)
+        ctk.CTkLabel(filter_frame, text=t('label_de'), font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(side="left", padx=(20, 8), pady=12)
         self.ent_data_inicio = ctk.CTkEntry(filter_frame, width=110, placeholder_text="01/04/2026")
         self.ent_data_inicio.insert(0, inicio_mes.strftime("%d/%m/%Y"))
         self.ent_data_inicio.pack(side="left", padx=5, pady=12)
-        ctk.CTkLabel(filter_frame, text="Ate:", font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(side="left", padx=(10, 8), pady=12)
+        ctk.CTkLabel(filter_frame, text=t('label_ate'), font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(side="left", padx=(10, 8), pady=12)
         self.ent_data_fim = ctk.CTkEntry(filter_frame, width=110, placeholder_text="30/04/2026")
         self.ent_data_fim.insert(0, hoje.strftime("%d/%m/%Y"))
         self.ent_data_fim.pack(side="left", padx=5, pady=12)
         self.ent_busca = ctk.CTkEntry(filter_frame, placeholder_text="Buscar descricao, categoria ou pagamento", width=330)
         self.ent_busca.pack(side="left", padx=12, pady=12)
-        ctk.CTkButton(filter_frame, text="Aplicar", fg_color="#2980b9", width=120, command=self.carregar_dados).pack(side="left", padx=6, pady=12)
-        ctk.CTkButton(filter_frame, text="Limpar", fg_color="#7f8c8d", width=100, command=self.limpar_filtros).pack(side="left", padx=6, pady=12)
+        ctk.CTkButton(filter_frame, text=t('btn_aplicar'), fg_color="#2980b9", width=120, command=self.carregar_dados).pack(side="left", padx=6, pady=12)
+        ctk.CTkButton(filter_frame, text=t('btn_limpar'), fg_color="#7f8c8d", width=100, command=self.limpar_filtros).pack(side="left", padx=6, pady=12)
 
         tabela_card = ctk.CTkFrame(content, fg_color="#1f2a38", corner_radius=20)
         tabela_card.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -77,13 +85,13 @@ class FrmFinanceiro(ctk.CTkToplevel):
             columns=("id", "data", "desc", "tipo", "valor", "categoria", "metodo"),
             show="headings"
         )
-        self.tab_caixa.heading("id", text="ID")
-        self.tab_caixa.heading("data", text="DATA")
-        self.tab_caixa.heading("desc", text="DESCRICAO")
-        self.tab_caixa.heading("tipo", text="TIPO")
-        self.tab_caixa.heading("valor", text="VALOR")
-        self.tab_caixa.heading("categoria", text="CATEGORIA")
-        self.tab_caixa.heading("metodo", text="PAGAMENTO")
+        self.tab_caixa.heading("id", text=t('col_id').upper())
+        self.tab_caixa.heading("data", text=t('col_data').upper())
+        self.tab_caixa.heading("desc", text=t('col_descricao').upper())
+        self.tab_caixa.heading("tipo", text=t('col_tipo').upper())
+        self.tab_caixa.heading("valor", text=t('col_valor').upper())
+        self.tab_caixa.heading("categoria", text=t('col_categoria').upper())
+        self.tab_caixa.heading("metodo", text=t('col_pagamento').upper())
         self.tab_caixa.column("id", width=60, anchor="center")
         self.tab_caixa.column("data", width=110, anchor="center")
         self.tab_caixa.column("desc", width=390)
@@ -108,7 +116,7 @@ class FrmFinanceiro(ctk.CTkToplevel):
 
         self.frame_pagamento = ctk.CTkFrame(content, fg_color="#1f2a38", corner_radius=20)
         self.frame_pagamento.pack(fill="x", pady=(0, 10), padx=10)
-        ctk.CTkLabel(self.frame_pagamento, text="RECEBIMENTOS NO PERIODO POR PAGAMENTO", font=("Arial", 12, "bold"), text_color="#bdc3c7").pack(anchor="w", padx=15, pady=(8, 0))
+        ctk.CTkLabel(self.frame_pagamento, text=t('recebimentos_pagamento', default='RECEBIMENTOS NO PERÍODO POR PAGAMENTO'), font=("Arial", 12, "bold"), text_color="#bdc3c7").pack(anchor="w", padx=15, pady=(8, 0))
         self.lbl_pix = ctk.CTkLabel(self.frame_pagamento, text="PIX\nR$ 0.00", font=("Arial", 13, "bold"), text_color="#000000", fg_color="#a8e6ff", corner_radius=8, width=220, height=56)
         self.lbl_pix.pack(side="left", padx=10, pady=12)
         self.lbl_dinheiro = ctk.CTkLabel(self.frame_pagamento, text="DINHEIRO\nR$ 0.00", font=("Arial", 13, "bold"), text_color="#000000", fg_color="#d2f8c8", corner_radius=8, width=220, height=56)
@@ -311,13 +319,14 @@ class FrmFinanceiro(ctk.CTkToplevel):
         if not metodo:
             return
         try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO fluxo_caixa (data, descricao, tipo, valor, categoria, metodo_pagamento) VALUES (?, ?, 'SAIDA', ?, ?, ?)",
-                    (datetime.now().strftime("%d/%m/%Y"), desc.upper(), valor, categoria.upper(), metodo)
-                )
-                conn.commit()
+            inserir_lancamento_financeiro(
+                datetime.now().strftime("%d/%m/%Y"),
+                desc.upper(),
+                "SAIDA",
+                valor,
+                categoria.upper(),
+                metodo,
+            )
             self.carregar_dados()
             messagebox.showinfo("Sucesso", "Despesa lancada com sucesso.", parent=self)
         except Exception as e:
@@ -336,13 +345,14 @@ class FrmFinanceiro(ctk.CTkToplevel):
         if not metodo:
             return
         try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO fluxo_caixa (data, descricao, tipo, valor, categoria, metodo_pagamento) VALUES (?, ?, 'ENTRADA', ?, ?, ?)",
-                    (datetime.now().strftime("%d/%m/%Y"), descricao.upper(), valor, categoria.upper(), metodo)
-                )
-                conn.commit()
+            inserir_lancamento_financeiro(
+                datetime.now().strftime("%d/%m/%Y"),
+                descricao.upper(),
+                "ENTRADA",
+                valor,
+                categoria.upper(),
+                metodo,
+            )
             self.carregar_dados()
             messagebox.showinfo("Sucesso", "Entrada lancada com sucesso.", parent=self)
         except Exception as e:
@@ -373,13 +383,7 @@ class FrmFinanceiro(ctk.CTkToplevel):
             return
 
         try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "UPDATE fluxo_caixa SET descricao = ?, valor = ?, categoria = ?, metodo_pagamento = ? WHERE id = ?",
-                    (descricao.upper(), valor, categoria.upper(), metodo, id_mov)
-                )
-                conn.commit()
+            editar_lancamento_financeiro(id_mov, descricao.upper(), valor, categoria.upper(), metodo)
             self.carregar_dados()
         except Exception as e:
             messagebox.showerror("Erro", f"Nao foi possivel editar: {e}", parent=self)
@@ -402,13 +406,14 @@ class FrmFinanceiro(ctk.CTkToplevel):
             return
 
         try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO fluxo_caixa (data, descricao, tipo, valor, categoria, metodo_pagamento) VALUES (?, ?, ?, ?, ?, ?)",
-                    (datetime.now().strftime("%d/%m/%Y"), descricao_estorno.upper(), tipo_estorno, valor, f"ESTORNO {categoria}".upper(), metodo)
-                )
-                conn.commit()
+            inserir_lancamento_financeiro(
+                datetime.now().strftime("%d/%m/%Y"),
+                descricao_estorno.upper(),
+                tipo_estorno,
+                valor,
+                f"ESTORNO {categoria}".upper(),
+                metodo,
+            )
             self.carregar_dados()
             messagebox.showinfo("Sucesso", "Estorno lancado com sucesso.", parent=self)
         except Exception as e:
@@ -451,54 +456,13 @@ class FrmFinanceiro(ctk.CTkToplevel):
 
         d_ini = dt_ini.strftime("%Y-%m-%d")
         d_fim = dt_fim.strftime("%Y-%m-%d")
-        busca = f"%{self.ent_busca.get().strip().upper()}%"
+        busca = self.ent_busca.get().strip()
 
         try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                data_sql = self._data_sql("data")
-
-                cursor.execute("SELECT COALESCE(SUM(CASE WHEN UPPER(tipo)='ENTRADA' THEN valor ELSE -valor END), 0) FROM fluxo_caixa")
-                saldo_total = parse_monetario(cursor.fetchone()[0])
-
-                try:
-                    cursor.execute("SELECT COALESCE(SUM(saldo), 0) FROM orcamentos_aguardo WHERE UPPER(status) = 'APROVADO'")
-                    saldo_receber = parse_monetario(cursor.fetchone()[0])
-                except sqlite3.Error:
-                    # Em bases antigas sem a tabela de orçamentos, mantém o financeiro funcional.
-                    saldo_receber = 0.0
-
-                cursor.execute(
-                    f"""
-                    SELECT id, data, descricao, tipo, valor, COALESCE(categoria, 'GERAL'), COALESCE(metodo_pagamento, '-')
-                    FROM fluxo_caixa
-                    WHERE {data_sql} BETWEEN ? AND ?
-                        AND (
-                            UPPER(descricao) LIKE ?
-                            OR UPPER(COALESCE(categoria, '')) LIKE ?
-                            OR UPPER(COALESCE(metodo_pagamento, '')) LIKE ?
-                        )
-                    ORDER BY id DESC
-                    """,
-                    (d_ini, d_fim, busca, busca, busca)
-                )
-                linhas = cursor.fetchall()
-
-                cursor.execute(
-                    f"""
-                    SELECT UPPER(COALESCE(metodo_pagamento, '-')), COALESCE(SUM(valor), 0)
-                    FROM fluxo_caixa
-                    WHERE {data_sql} BETWEEN ? AND ?
-                        AND UPPER(tipo) = 'ENTRADA'
-                    GROUP BY UPPER(COALESCE(metodo_pagamento, '-'))
-                    """,
-                    (d_ini, d_fim)
-                )
-                pagamentos = cursor.fetchall()
-
+            registros, saldo_total, pagamentos, texto_saldo, cor_saldo = carregar_dados_financeiros(d_ini, d_fim, busca=busca)
             entradas = 0.0
             saidas = 0.0
-            for row in linhas:
+            for row in registros:
                 id_mov, data, descricao, tipo, valor, categoria, metodo = row
                 valor = parse_monetario(valor)
                 if str(tipo).upper() == "ENTRADA":
@@ -515,7 +479,7 @@ class FrmFinanceiro(ctk.CTkToplevel):
                 )
 
             saldo_filtro = entradas - saidas
-            cor_saldo = "#2ecc71" if saldo_total >= 0 else "#e74c3c"
+            saldo_receber = 0.0
             total_pix = 0.0
             total_dinheiro = 0.0
             total_cartao = 0.0
@@ -529,7 +493,7 @@ class FrmFinanceiro(ctk.CTkToplevel):
                 elif "CART" in m:
                     total_cartao += v
 
-            self.lbl_saldo.configure(text=f"SALDO GERAL EM CAIXA: {formatar_monetario(saldo_total)}", text_color=cor_saldo)
+            self.lbl_saldo.configure(text=texto_saldo, text_color=cor_saldo)
             self.lbl_entradas.configure(text=f"ENTRADAS FILTRADAS\n{formatar_monetario(entradas)}")
             self.lbl_saidas.configure(text=f"SAIDAS FILTRADAS\n{formatar_monetario(saidas)}")
             self.lbl_saldo_resumo.configure(text=f"SALDO DO FILTRO\n{formatar_monetario(saldo_filtro)}", fg_color="#b7ef8a" if saldo_filtro >= 0 else "#ff9f9a")

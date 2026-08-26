@@ -1,3 +1,4 @@
+wheel
 fastapi
 uvicorn[standard]
 supabase
@@ -7,4 +8,4 @@ passlib[bcrypt]
 bcrypt
 PyJWT
 httpx
-pydantic
+pydantic>=2.0.0

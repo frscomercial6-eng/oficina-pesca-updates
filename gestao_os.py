@@ -9,6 +9,7 @@ from datetime import datetime
 from config import CAMINHO_BANCO, inicializar_banco, get_db_connection, enviar_registro_os_central_silencioso
 from util_recibo import gerar_recibo_entrega
 from status_os import normalizar_status_orcamento, is_status_aguardando_orcamento, is_status_orcamento
+from core.gestao_os_service import carregar_dados_orcamento, listar_orcamentos_gestao, mudar_status_orcamento
 
 import tela_os
 
@@ -222,9 +223,11 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
         def aplicar(novo_status):
             try:
                 status_final = normalizar_status_orcamento(novo_status)
-                with get_db_connection() as conn:
-                    cursor = conn.cursor()
-                    if str(status_final).upper() == "FINALIZADO":
+                if str(status_final).upper() == "FINALIZADO":
+                    from core.os_repository import garantir_colunas_orcamentos_aguardo
+                    garantir_colunas_orcamentos_aguardo()
+                    with get_db_connection() as conn:
+                        cursor = conn.cursor()
                         data_finalizacao = datetime.now().strftime("%d/%m/%Y")
                         cursor.execute(
                             """
@@ -236,9 +239,9 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
                             """,
                             (status_final, data_finalizacao, num_os),
                         )
-                    else:
-                        cursor.execute("UPDATE orcamentos_aguardo SET status = ? WHERE id = ?", (status_final, num_os))
-                    conn.commit()
+                        conn.commit()
+                else:
+                    mudar_status_orcamento(int(num_os), status_final)
                 try:
                     enviar_registro_os_central_silencioso(
                         {
@@ -286,47 +289,19 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
     def buscar_os(self):
         termo_bruto = self.ent_busca.get().strip()
         termo = termo_bruto.upper()
-        termo_digitos = re.sub(r"\D", "", termo_bruto)
         for item in self.tab.get_children():
             self.tab.delete(item)
 
         self.dados_os = None
 
         try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-
-                if termo:
-                    like_termo = f"%{termo}%"
-                    like_telefone = f"%{termo_digitos}%" if termo_digitos else like_termo
-                    cursor.execute(
-                        """
-                        SELECT oa.id, COALESCE(c.id, ''), oa.cliente, oa.equipamento, oa.defeito, oa.valor_total,
-                                         oa.sinal, oa.saldo, oa.status, oa.data, COALESCE(oa.itens_detalhes, ''),
-                                         COALESCE(oa.telefone_cliente_whatsapp, COALESCE(c.telefone, '')), COALESCE(oa.dados_adicionais, '')
-                        FROM orcamentos_aguardo oa
-                        LEFT JOIN clientes c ON UPPER(c.nome) = UPPER(oa.cliente)
-                        WHERE CAST(oa.id AS TEXT) LIKE ?
-                           OR UPPER(oa.cliente) LIKE ?
-                                    OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(oa.telefone_cliente_whatsapp, COALESCE(c.telefone, '')), '(', ''), ')', ''), '-', ''), ' ', '') LIKE ?
-                                    OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(oa.dados_adicionais, ''), '(', ''), ')', ''), '-', ''), ' ', '') LIKE ?
-                        ORDER BY oa.id DESC
-                        """,
-                        (like_termo, like_termo, like_telefone, like_termo)
-                    )
-                else:
-                    cursor.execute(
-                        """
-                        SELECT oa.id, COALESCE(c.id, ''), oa.cliente, oa.equipamento, oa.defeito, oa.valor_total,
-                               oa.sinal, oa.saldo, oa.status, oa.data, COALESCE(oa.itens_detalhes, ''),
-                               COALESCE(oa.telefone_cliente_whatsapp, COALESCE(c.telefone, '')), COALESCE(oa.dados_adicionais, '')
-                        FROM orcamentos_aguardo oa
-                        LEFT JOIN clientes c ON UPPER(c.nome) = UPPER(oa.cliente)
-                        ORDER BY oa.id DESC
-                        """
-                    )
-
-                rows = cursor.fetchall()
+            rows = listar_orcamentos_gestao()
+            if termo:
+                termo_digitos = re.sub(r"\D", "", termo_bruto)
+                rows = [
+                    row for row in rows
+                    if str(row[0]).startswith(termo_digitos) or termo in str(row[2]).upper() or termo_digitos in re.sub(r"\D", "", str(row[11] or ""))
+                ]
 
             for row in rows:
                 id_orc, id_cli, nome_cli, equipamento, defeito, total, sinal, saldo, status, data, itens_json, telefone_cli, dados_adicionais = row
@@ -421,18 +396,17 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
         num_os = item[0]
 
         try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT id, cliente, equipamento, defeito, valor_total, sinal, saldo, status, data, resumo_equipamento_defeito, COALESCE(dados_adicionais, '')
-                    FROM orcamentos_aguardo
-                    WHERE id = ?
-                    """,
-                    (num_os,)
+            reg = carregar_dados_orcamento(int(num_os))
+            if reg:
+                self.dados_os = (
+                    reg["id"], reg["cliente"], reg["equipamento"], reg["defeito"], reg["valor_total"],
+                    reg["sinal"], reg["saldo"], reg["status"], reg["data"], reg["resumo_equipamento_defeito"],
+                    json.dumps(reg["dados_adicionais"]),
                 )
-                self.dados_os = cursor.fetchone()
                 self.dados_os_precarregados = self._extrair_campos_os(self.dados_os)
+            else:
+                self.dados_os = None
+                self.dados_os_precarregados = None
 
             if hasattr(self.master, "_ultima_os_contexto"):
                 self.master._ultima_os_contexto = self.dados_os

@@ -9,18 +9,6 @@ APK_DOWNLOAD_URL = "https://github.com/frs-oficinadepesca/oficinadepesca/release
 #     def __init__(self, ...):
 #         ...
 #         ctk.CTkButton(self, text="📱 Baixar App Celular (APK)", fg_color="#27ae60", font=("Arial", 13, "bold"), command=lambda: webbrowser.open(APK_DOWNLOAD_URL)).pack(pady=(0, 10))
-import requests
-# Função para checar status do Firebase
-def checar_status_firebase():
-    try:
-        cfg = obter_firebase_web_config() if callable(obter_firebase_web_config) else {}
-        db_url = str((cfg or {}).get("databaseURL") or "").strip()
-        if not db_url:
-            return False
-        resp = requests.get(f"{db_url.rstrip('/')}/.json", timeout=3)
-        return resp.status_code == 200
-    except Exception:
-        return False
 import tela_os
 import firebase_admin
 from firebase_admin import credentials
@@ -130,6 +118,9 @@ from config import (
 )
 from reforma_tributaria import garantir_estrutura_reforma_tributaria
 from core.modulos import obter_modulos_habilitados
+from core.licenca import obter_info_licenca_visual
+from core.sincronizacao import checar_status_firebase
+from core.i18n import get_current_locale, set_default_locale, t
 from shutdown_utils import fechar_sistema
 from status_os import STATUS_AGUARDANDO_ORCAMENTO, STATUS_ORCAMENTO
 from configuracao_fiscal import ConfiguracaoFiscal, carregar_configuracao_fiscal, salvar_configuracao_fiscal, inicializar_motor_fiscal, verificar_status_motor_fiscal
@@ -206,36 +197,7 @@ verificar_e_criar_tabelas()
 
 def _obter_info_licenca_visual(role: str = "") -> tuple[str, str]:
     """Retorna texto e cor padronizados para exibição de licença na UI."""
-    try:
-        status = obter_status_acesso_centralizado() or {}
-        licenca_ativa = bool(status.get("licenca_ativa"))
-        trial_ativo = bool(status.get("trial_ativo"))
-        validade = str(status.get("validade") or "").strip().upper()
-
-        if trial_ativo:
-            tipo_exibicao = "Trial"
-            cor = "#f1c40f"
-        elif licenca_ativa:
-            tipo_exibicao = "Permanente" if validade == "PERMANENTE" else "Mensal"
-            cor = "#2ecc71"
-        else:
-            tipo = str(obter_tipo_licenca() or "").strip().upper()
-            if tipo == "TRIAL":
-                tipo_exibicao = "Trial"
-                cor = "#f1c40f"
-            elif tipo == "PERMANENTE":
-                tipo_exibicao = "Permanente"
-                cor = "#2ecc71"
-            elif tipo in {"MENSAL", "ATIVA", "TOKEN"}:
-                tipo_exibicao = "Mensal"
-                cor = "#2ecc71"
-            else:
-                tipo_exibicao = "Inativa"
-                cor = "#e74c3c"
-
-        return f"Licença: {tipo_exibicao}", cor
-    except Exception:
-        return "Licença: indisponível", "#6b7280"
+    return obter_info_licenca_visual(role=role)
 
 # 4º: SEGUE O RESTO DO CÓDIGO (CLASSES, ETC)
 # class FrmProdutos(ctk.CTkToplevel):
@@ -2549,7 +2511,8 @@ class FrmMenu(ctk.CTk):
         self._ultima_os_contexto = None
         self._encerrando_aplicacao = False
         self._aviso_motor_fiscal_inicio_exibido = False
-        self.title(f"Sistema Oficina de Pesca v{VERSION}")
+        self.locale = set_default_locale(os.getenv("OFICINA_LOCALE", get_current_locale()))
+        self.title(f"{t('titulo_sistema')} v{VERSION}")
         self.geometry("1100x750") #
         self.configure(fg_color="#0f1720")
         self._encerrando_aplicacao = False
@@ -2629,13 +2592,16 @@ class FrmMenu(ctk.CTk):
 
         # Elementos de Identidade Visual
         ctk.CTkLabel(self.sidebar, text="🎣", font=("Arial", 34), text_color="orange", fg_color="#0d1b2a").pack(pady=(10, 2))
-        ctk.CTkLabel(self.sidebar, text="OFICINA DE PESCA", font=("Arial", 12, "bold"), text_color="orange", fg_color="#0d1b2a", wraplength=190, justify="center").pack(padx=8, pady=(0, 2))
-        ctk.CTkLabel(self.sidebar, text=f"👤 {self.usuario.upper()}", font=("Arial", 10), text_color="#7f8c8d", fg_color="#0d1b2a").pack(padx=8, pady=(0, 2))
-        ctk.CTkLabel(self.sidebar, text=f"({self.role})", font=("Arial", 9), text_color="#555f6a", fg_color="#0d1b2a").pack(padx=8, pady=(0, 5))
+        self.lbl_titulo_oficina = ctk.CTkLabel(self.sidebar, text=t("titulo_oficina"), font=("Arial", 12, "bold"), text_color="orange", fg_color="#0d1b2a", wraplength=190, justify="center")
+        self.lbl_titulo_oficina.pack(padx=8, pady=(0, 2))
+        self.lbl_usuario_menu = ctk.CTkLabel(self.sidebar, text=f"👤 {self.usuario.upper()}", font=("Arial", 10), text_color="#7f8c8d", fg_color="#0d1b2a")
+        self.lbl_usuario_menu.pack(padx=8, pady=(0, 2))
+        self.lbl_role_menu = ctk.CTkLabel(self.sidebar, text=f"({self.role})", font=("Arial", 9), text_color="#555f6a", fg_color="#0d1b2a")
+        self.lbl_role_menu.pack(padx=8, pady=(0, 5))
 
         self.lbl_contador_licenca = ctk.CTkLabel(
             self.sidebar,
-            text="Licença: carregando...",
+            text=t("licenca_carregando", default="Licença: carregando..."),
             font=("Arial", 9, "bold"),
             text_color="#607d8b",
             fg_color="#0d1b2a",
@@ -2646,6 +2612,17 @@ class FrmMenu(ctk.CTk):
         self._atualizar_contador_licenca()
 
         self._adicionar_status_nuvem()
+
+        ctk.CTkLabel(self.sidebar, text=t("label_idioma", default="Idioma"), font=("Arial", 9, "bold"), text_color="#bdc3c7", fg_color="#0d1b2a").pack(padx=8, pady=(4, 2))
+        self._locale_var = ctk.StringVar(value=get_current_locale())
+        self._option_idioma = ctk.CTkOptionMenu(
+            self.sidebar,
+            values=["pt_BR", "es_UY", "en_US"],
+            variable=self._locale_var,
+            command=self._trocar_idioma,
+            width=120,
+        )
+        self._option_idioma.pack(padx=8, pady=(0, 6))
 
         ctk.CTkFrame(self.sidebar, height=1, fg_color="#1e3a5f").pack(fill="x", padx=12, pady=(0, 5))
 
@@ -2679,39 +2656,90 @@ class FrmMenu(ctk.CTk):
         # HIERARQUIA DE BOTÕES POR PERFIL
         botoes_menu = []
         if self.role in ("ADMIN", "OFICINA"):
-            botoes_menu.append(("🧑‍🤝‍🧑  PESCADORES", self.abrir_clientes, "#34495e"))
-            botoes_menu.append(("📋  NOVA O.S.", self.abrir_os, "#27ae60"))
-            botoes_menu.append(("🔍  CONSULTA", self.abrir_gestao_os, "#d35400"))
-            botoes_menu.append(("🧾  GERAR RECIBO", self.gerar_recibo_menu_lateral, "#8e6b3b"))
+            botoes_menu.append((f"🧑‍🤝‍🧑  {t('menu_clientes')}", self.abrir_clientes, "#34495e"))
+            botoes_menu.append((f"📋  {t('menu_nova_os')}", self.abrir_os, "#27ae60"))
+            botoes_menu.append((f"🔍  {t('menu_consulta')}", self.abrir_gestao_os, "#d35400"))
+            botoes_menu.append((f"🧾  {t('menu_relatorio')}", self.gerar_recibo_menu_lateral, "#8e6b3b"))
         
         if self.role in ("ADMIN", "VENDEDOR"):
-            botoes_menu.append(("🧾  PDV", self.abrir_pdv, "#1abc9c"))
-            botoes_menu.append(("📦  ESTOQUE", self.abrir_produtos, "#e67e22"))
+            botoes_menu.append((f"🧾  {t('menu_pdv')}", self.abrir_pdv, "#1abc9c"))
+            botoes_menu.append((f"📦  {t('menu_estoque')}", self.abrir_produtos, "#e67e22"))
         
         if self.role == "ADMIN":
-            botoes_menu.append(("💰  FINANCEIRO", self.abrir_caixa, "#16a085"))
+            botoes_menu.append((f"💰  {t('menu_financeiro')}", self.abrir_caixa, "#16a085"))
 
-        botoes_menu.append(("📱  APP CELULAR", self.abrir_app_celular_sidebar, "#25D366"))
+        botoes_menu.append((f"📱  APP CELULAR", self.abrir_app_celular_sidebar, "#25D366"))
 
         if self.role == "ADMIN":
             botoes_menu.extend([
-                ("👤  NOVO USUÁRIO", self.abrir_cadastro_usuario, "#2980b9"),
-                ("📊  RELATÓRIO", self.abrir_relatorio, "#6c3483"),
-                ("🏪  DADOS OFICINA", self.abrir_dados_oficina, "#7f8c8d"),
-                ("⬇️  BUSCAR ATUALIZAÇÕES", self.buscar_atualizacoes, "#2c3e50"),
+                (f"👤  {t('menu_novo_usuario')}", self.abrir_cadastro_usuario, "#2980b9"),
+                (f"📊  {t('menu_relatorio')}", self.abrir_relatorio, "#6c3483"),
+                (f"🏪  {t('menu_dados_oficina')}", self.abrir_dados_oficina, "#7f8c8d"),
+                (f"⬇️  {t('menu_buscar_atualizacoes')}", self.buscar_atualizacoes, "#2c3e50"),
             ])
 
         for texto, comando, cor in botoes_menu:
             self.add_btn(self.sidebar_buttons, texto, comando, cor)
 
         # Botão Sair fixo no rodapé
-        self.add_btn(self.sidebar, "🚪  SAIR", self.confirmar_saida, "#c0392b", side="bottom")
+        self.add_btn(self.sidebar, f"🚪  {t('menu_sair')}", self.confirmar_saida, "#c0392b", side="bottom")
 
         # Inicializa Dashboard Modular
         self.modulos_usuario = self._obter_modulos_usuario()
         self._criar_dashboard_modular()
         self._iniciar_auto_refresh_dashboard()
         self.after_idle(self._mostrar_menu_pronto)
+
+    def _trocar_idioma(self, valor: str):
+        try:
+            set_default_locale(valor)
+            self.locale = get_current_locale()
+            self.title(f"{t('titulo_sistema')} v{VERSION}")
+            if hasattr(self, "lbl_titulo_oficina") and self.lbl_titulo_oficina.winfo_exists():
+                self.lbl_titulo_oficina.configure(text=t("titulo_oficina"))
+            if hasattr(self, "lbl_usuario_menu") and self.lbl_usuario_menu.winfo_exists():
+                self.lbl_usuario_menu.configure(text=f"👤 {self.usuario.upper()}")
+            if hasattr(self, "lbl_role_menu") and self.lbl_role_menu.winfo_exists():
+                self.lbl_role_menu.configure(text=f"({self.role})")
+            if hasattr(self, "lbl_contador_licenca") and self.lbl_contador_licenca.winfo_exists():
+                self.lbl_contador_licenca.configure(text=t("licenca_carregando", default="Licença: carregando..."))
+            self._reconstruir_botoes_menu()
+            self._atualizar_status_nuvem()
+        except Exception:
+            pass
+
+    def _reconstruir_botoes_menu(self):
+        if not hasattr(self, "sidebar_buttons") or not self.sidebar_buttons.winfo_exists():
+            return
+        for child in self.sidebar_buttons.winfo_children():
+            child.destroy()
+
+        botoes_menu = []
+        if self.role in ("ADMIN", "OFICINA"):
+            botoes_menu.append((f"🧑‍🤝‍🧑  {t('menu_clientes')}", self.abrir_clientes, "#34495e"))
+            botoes_menu.append((f"📋  {t('menu_nova_os')}", self.abrir_os, "#27ae60"))
+            botoes_menu.append((f"🔍  {t('menu_consulta')}", self.abrir_gestao_os, "#d35400"))
+            botoes_menu.append((f"🧾  {t('menu_relatorio')}", self.gerar_recibo_menu_lateral, "#8e6b3b"))
+
+        if self.role in ("ADMIN", "VENDEDOR"):
+            botoes_menu.append((f"🧾  {t('menu_pdv')}", self.abrir_pdv, "#1abc9c"))
+            botoes_menu.append((f"📦  {t('menu_estoque')}", self.abrir_produtos, "#e67e22"))
+
+        if self.role == "ADMIN":
+            botoes_menu.append((f"💰  {t('menu_financeiro')}", self.abrir_caixa, "#16a085"))
+
+        botoes_menu.append((f"📱  APP CELULAR", self.abrir_app_celular_sidebar, "#25D366"))
+
+        if self.role == "ADMIN":
+            botoes_menu.extend([
+                (f"👤  {t('menu_novo_usuario')}", self.abrir_cadastro_usuario, "#2980b9"),
+                (f"📊  {t('menu_relatorio')}", self.abrir_relatorio, "#6c3483"),
+                (f"🏪  {t('menu_dados_oficina')}", self.abrir_dados_oficina, "#7f8c8d"),
+                (f"⬇️  {t('menu_buscar_atualizacoes')}", self.buscar_atualizacoes, "#2c3e50"),
+            ])
+
+        for texto, comando, cor in botoes_menu:
+            self.add_btn(self.sidebar_buttons, texto, comando, cor)
 
     def _iniciar_auto_refresh_dashboard(self):
         try:
@@ -2735,7 +2763,7 @@ class FrmMenu(ctk.CTk):
 
         self.lbl_status_nuvem = ctk.CTkLabel(
             self.sidebar,
-            text="Drive: Verificando...",
+            text=t("status_drive_verificando", default="Drive: Verificando..."),
             text_color="#f1c40f",
             font=("Arial", 9, "bold"),
             fg_color="#0d1b2a",
