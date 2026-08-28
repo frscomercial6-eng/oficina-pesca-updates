@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import configparser
 import json
 import os
 from functools import lru_cache
@@ -11,7 +12,23 @@ from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOCALES_DIR = BASE_DIR / "locales"
-DEFAULT_LOCALE = os.getenv("OFICINA_LOCALE", "pt_BR")
+
+
+def _ler_idioma_config_cfg() -> str | None:
+    """Le [idioma] idioma_atual em config.cfg, se o arquivo existir."""
+    caminho_cfg = BASE_DIR / "config.cfg"
+    if not caminho_cfg.exists():
+        return None
+    try:
+        cfg = configparser.ConfigParser()
+        cfg.read(caminho_cfg, encoding="utf-8")
+        valor = cfg.get("idioma", "idioma_atual", fallback="").strip()
+        return valor or None
+    except Exception:
+        return None
+
+
+DEFAULT_LOCALE = os.getenv("OFICINA_LOCALE", "").strip() or _ler_idioma_config_cfg() or "pt_BR"
 
 _CURRENT_LOCALE = DEFAULT_LOCALE
 

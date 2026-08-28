@@ -2667,7 +2667,7 @@ class FrmMenu(ctk.CTk):
         if self.role == "ADMIN":
             botoes_menu.append((f"💰  {t('menu_financeiro')}", self.abrir_caixa, "#16a085"))
 
-        botoes_menu.append((f"📱  APP CELULAR", self.abrir_app_celular_sidebar, "#25D366"))
+        botoes_menu.append((f"📱  {t('menu_app_celular', default='APP CELULAR')}", self.abrir_app_celular_sidebar, "#25D366"))
 
         if self.role == "ADMIN":
             botoes_menu.extend([
@@ -2689,9 +2689,26 @@ class FrmMenu(ctk.CTk):
         self._iniciar_auto_refresh_dashboard()
         self.after_idle(self._mostrar_menu_pronto)
 
+    def _salvar_idioma_cfg(self, idioma: str) -> None:
+        caminhos = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.cfg"),
+            os.path.join(os.getcwd(), "config.cfg"),
+        ]
+        caminho_cfg = next((c for c in caminhos if os.path.exists(c)), caminhos[0])
+
+        parser = configparser.ConfigParser()
+        if os.path.exists(caminho_cfg):
+            parser.read(caminho_cfg, encoding="utf-8")
+        if not parser.has_section("idioma"):
+            parser.add_section("idioma")
+        parser.set("idioma", "idioma_atual", idioma)
+        with open(caminho_cfg, "w", encoding="utf-8") as arquivo_cfg:
+            parser.write(arquivo_cfg)
+
     def _trocar_idioma(self, valor: str):
         try:
             set_default_locale(valor)
+            self._salvar_idioma_cfg(valor)
             self.locale = get_current_locale()
             self.title(f"{t('titulo_sistema')} v{VERSION}")
             if hasattr(self, "lbl_titulo_oficina") and self.lbl_titulo_oficina.winfo_exists():
@@ -2727,7 +2744,7 @@ class FrmMenu(ctk.CTk):
         if self.role == "ADMIN":
             botoes_menu.append((f"💰  {t('menu_financeiro')}", self.abrir_caixa, "#16a085"))
 
-        botoes_menu.append((f"📱  APP CELULAR", self.abrir_app_celular_sidebar, "#25D366"))
+        botoes_menu.append((f"📱  {t('menu_app_celular', default='APP CELULAR')}", self.abrir_app_celular_sidebar, "#25D366"))
 
         if self.role == "ADMIN":
             botoes_menu.extend([

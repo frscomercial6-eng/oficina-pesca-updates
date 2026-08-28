@@ -298,46 +298,6 @@ def _coletar_saude_sistema() -> dict:
             "google_drive_conectado": bool(google_drive_usuario_conectado()),
             "ok": backup_ok,
         },
-        "producao_autonoma": firebase_ok and backup_ok,
-    }
-
-
-def _coletar_saude_sistema() -> dict:
-    from config import (
-        obter_status_acesso_centralizado,
-        obter_firebase_web_config,
-        obter_config_backup_nuvem,
-        google_drive_usuario_conectado,
-    )
-
-    status_licenca = obter_status_acesso_centralizado()
-    firebase_cfg = obter_firebase_web_config()
-    backup_cfg = obter_config_backup_nuvem()
-
-    firebase_ok = bool(firebase_cfg.get("databaseURL") and firebase_cfg.get("syncChannel"))
-    backup_ok = bool(backup_cfg.get("habilitado"))
-
-    return {
-        "app": "oficina_pesca",
-        "versao": APP_VERSION,
-        "licenca": {
-            "ativa": bool(status_licenca.get("ativa")),
-            "bloqueada": bool(status_licenca.get("bloqueada")),
-            "mensagem": str(status_licenca.get("mensagem") or "").strip(),
-            "tipo": str(status_licenca.get("tipo") or "").strip(),
-            "validade": str(status_licenca.get("validade") or "").strip(),
-        },
-        "firebase": {
-            "ok": firebase_ok,
-            "database_url": str(firebase_cfg.get("databaseURL") or "").strip(),
-            "sync_channel": str(firebase_cfg.get("syncChannel") or "").strip(),
-        },
-        "backup": {
-            "habilitado": bool(backup_cfg.get("habilitado")),
-            "auto_sync": bool(backup_cfg.get("auto_sync")),
-            "google_drive_conectado": bool(google_drive_usuario_conectado()),
-            "ok": backup_ok,
-        },
         "producao_autonoma": bool(status_licenca.get("ativa")) and firebase_ok,
     }
 
@@ -689,23 +649,6 @@ async def api_licenca_status_por_email(email: str):
 @app.get("/api/health", tags=["Sistema"])
 async def api_health():
     return _coletar_saude_sistema()
-
-
-@app.get("/api/health", tags=["Sistema"])
-async def api_health():
-    return _coletar_saude_sistema()
-
-
-@app.get("/api/health", tags=["Sistema"])
-async def api_health():
-    return _coletar_saude_sistema()
-
-
-@app.get("/api/licenca-status", tags=["Sistema"])
-async def api_licenca_status():
-    from config import obter_status_acesso_centralizado
-
-    return obter_status_acesso_centralizado()
 
 
 @app.post("/api/cloud-backup", tags=["Backup"])
