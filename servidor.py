@@ -36,6 +36,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request, Form, status as ht
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from core.i18n import t
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -179,6 +180,7 @@ app.add_middleware(
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+templates.env.globals["t"] = t
 
 # Arquivos estáticos (CSS/JS)
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -1419,6 +1421,7 @@ app.add_middleware(
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+templates.env.globals["t"] = t
 
 # Arquivos estáticos (CSS/JS)
 STATIC_DIR = os.path.join(BASE_DIR, "static")

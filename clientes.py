@@ -9,6 +9,7 @@ from tkinter import messagebox, ttk
 from datetime import datetime
 from version_info import VERSION
 from config import CAMINHO_BANCO, inicializar_banco, get_db_connection, get_logger
+from core.i18n import t
 
 logger = get_logger(__name__)
 
@@ -19,7 +20,7 @@ class FrmClientes(ctk.CTkToplevel):
         super().__init__(master)
         self.ao_salvar = ao_salvar
         self.cliente_id = cliente_id
-        self.title(f"Ficha de Cadastro - Oficina de Pesca v{VERSION}")
+        self.title(f"{t('titulo_ficha_cadastro')} v{VERSION}")
         self.geometry("860x860")
         self.minsize(840, 820)
         self._aplicar_maximizacao()
@@ -35,8 +36,8 @@ class FrmClientes(ctk.CTkToplevel):
 
         self.f_header = ctk.CTkFrame(self.scroll, fg_color="#1f2a38", corner_radius=20)
         self.f_header.pack(pady=15, padx=20, fill="x")
-        ctk.CTkLabel(self.f_header, text="🎣 CADASTRO DE PESCADOR", font=("Arial", 24, "bold"), text_color="orange").pack(side="left", padx=20, pady=20)
-        ctk.CTkButton(self.f_header, text="🗂️ VER LISTA / HISTÓRICO", fg_color="#2980b9", width=180,
+        ctk.CTkLabel(self.f_header, text=f"🎣 {t('titulo_cadastro_pescador')}", font=("Arial", 24, "bold"), text_color="orange").pack(side="left", padx=20, pady=20)
+        ctk.CTkButton(self.f_header, text=f"🗂️ {t('btn_ver_lista_historico')}", fg_color="#2980b9", width=180,
                       command=self.abrir_lista_completa).pack(side="right", padx=20, pady=20)
 
         self.f_dados = ctk.CTkFrame(self.scroll, fg_color="#1f2a38", corner_radius=20)
@@ -44,28 +45,28 @@ class FrmClientes(ctk.CTkToplevel):
         self.f_dados.grid_columnconfigure(0, weight=1)
         self.f_dados.grid_columnconfigure(1, weight=1)
 
-        self.txt_nome = self.criar_campo("NOME COMPLETO:", 0, 0)
-        self.txt_fone = self.criar_campo("TELEFONE/WHATSAPP:", 1, 0)
-        self.txt_email = self.criar_campo("E-MAIL:", 2, 0)
+        self.txt_nome = self.criar_campo(t('label_nome_completo'), 0, 0)
+        self.txt_fone = self.criar_campo(t('label_telefone_whatsapp'), 1, 0)
+        self.txt_email = self.criar_campo(t('label_email'), 2, 0)
 
         # Campo de CEP com busca automática ao perder o foco
-        lbl_cep = ctk.CTkLabel(self.f_dados, text="CEP:", font=("Arial", 12, "bold"), text_color="#ecf0f1")
+        lbl_cep = ctk.CTkLabel(self.f_dados, text=t('label_cep'), font=("Arial", 12, "bold"), text_color="#ecf0f1")
         lbl_cep.grid(row=6, column=0, padx=20, pady=(20, 5), sticky="w")
         self.txt_cep = ctk.CTkEntry(self.f_dados, width=200)
         self.txt_cep.grid(row=7, column=0, padx=20, pady=(0, 10), sticky="ew")
         self.txt_cep.bind("<FocusOut>", self.buscar_cep)
 
         # CPF/CNPJ separado do CEP e tratado como identificador único de cliente.
-        lbl_cpf = ctk.CTkLabel(self.f_dados, text="CPF/CNPJ:", font=("Arial", 12, "bold"), text_color="#ecf0f1")
+        lbl_cpf = ctk.CTkLabel(self.f_dados, text=t('label_cpf_cnpj'), font=("Arial", 12, "bold"), text_color="#ecf0f1")
         lbl_cpf.grid(row=8, column=0, padx=20, pady=(4, 5), sticky="w")
         self.txt_cpf_cnpj = ctk.CTkEntry(self.f_dados, width=320)
         self.txt_cpf_cnpj.grid(row=9, column=0, padx=20, pady=(0, 10), sticky="ew")
 
-        self.txt_rua = self.criar_campo("LOGRADOURO (Rua/Av):", 0, 1)
-        self.txt_num = self.criar_campo("NÚMERO:", 1, 1)
-        self.txt_bairro = self.criar_campo("BAIRRO:", 2, 1)
-        self.txt_cidade = self.criar_campo("CIDADE:", 3, 1)
-        self.txt_estado = self.criar_campo("ESTADO:", 4, 1)
+        self.txt_rua = self.criar_campo(t('label_logradouro'), 0, 1)
+        self.txt_num = self.criar_campo(t('label_numero'), 1, 1)
+        self.txt_bairro = self.criar_campo(t('label_bairro'), 2, 1)
+        self.txt_cidade = self.criar_campo(t('label_cidade'), 3, 1)
+        self.txt_estado = self.criar_campo(t('label_estado'), 4, 1)
 
         if nome_inicial:
             self.txt_nome.insert(0, nome_inicial.upper())
@@ -76,9 +77,9 @@ class FrmClientes(ctk.CTkToplevel):
 
         botoes_frame = ctk.CTkFrame(self.scroll, fg_color="#1f2a38")
         botoes_frame.pack(pady=20, padx=20, fill="x")
-        texto_salvar = "💾 ATUALIZAR CADASTRO" if self.cliente_id else "💾 SALVAR CADASTRO"
+        texto_salvar = f"💾 {t('btn_atualizar_cadastro')}" if self.cliente_id else f"💾 {t('btn_salvar_cadastro')}"
         ctk.CTkButton(botoes_frame, text=texto_salvar, fg_color="#27ae60", height=50, font=("Arial", 18, "bold"), command=self.salvar_cliente).pack(side="left", expand=True, fill="x", padx=(0,10))
-        ctk.CTkButton(botoes_frame, text="🧹 LIMPAR", fg_color="#7f8c8d", height=50, font=("Arial", 18, "bold"), command=self.limpar_campos).pack(side="left", expand=True, fill="x", padx=(10,0))
+        ctk.CTkButton(botoes_frame, text=f"🧹 {t('btn_limpar').upper()}", fg_color="#7f8c8d", height=50, font=("Arial", 18, "bold"), command=self.limpar_campos).pack(side="left", expand=True, fill="x", padx=(10,0))
 
     def _aplicar_maximizacao(self):
         try:
@@ -183,9 +184,9 @@ class FrmClientes(ctk.CTkToplevel):
                             self.txt_num.focus_set()
                         self.after(0, _atualizar_ui)
                     else:
-                        self.after(0, lambda: messagebox.showwarning("CEP", "CEP não encontrado!", parent=self))
+                        self.after(0, lambda: messagebox.showwarning(t('msg_titulo_cep'), t('msg_cep_nao_encontrado'), parent=self))
                 except Exception:
-                    self.after(0, lambda: messagebox.showerror("Conexão", "Falha ao consultar CEP.", parent=self))
+                    self.after(0, lambda: messagebox.showerror(t('msg_titulo_conexao'), t('msg_falha_consultar_cep'), parent=self))
             threading.Thread(target=_thread_task, daemon=True).start()
 
     def salvar_cliente(self):
@@ -209,8 +210,8 @@ class FrmClientes(ctk.CTkToplevel):
 
                 if self.cliente_id and id_por_doc and id_por_doc != int(self.cliente_id):
                     messagebox.showwarning(
-                        "CPF/CNPJ já cadastrado",
-                        "Já existe outro cliente com este CPF/CNPJ. Use o registro existente para editar.",
+                        t('msg_titulo_cpf_cnpj_duplicado'),
+                        t('msg_cpf_cnpj_duplicado'),
                         parent=self,
                     )
                     return
@@ -249,12 +250,12 @@ class FrmClientes(ctk.CTkToplevel):
             if callable(self.ao_salvar):
                 self.ao_salvar(nome)
             if alvo_id:
-                messagebox.showinfo("Sucesso", "Cadastro atualizado com sucesso!", parent=self)
+                messagebox.showinfo(t('msg_titulo_sucesso'), t('msg_cadastro_atualizado_sucesso'), parent=self)
             else:
-                messagebox.showinfo("Sucesso", "Pescador cadastrado com sucesso!", parent=self)
+                messagebox.showinfo(t('msg_titulo_sucesso'), t('msg_pescador_cadastrado_sucesso'), parent=self)
             self.destroy()
         except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao salvar: {e}", parent=self)
+            messagebox.showerror(t('msg_titulo_erro'), t('msg_erro_ao_salvar').format(erro=e), parent=self)
 
     def abrir_lista_completa(self):
         JanelaListaClientes(self.master)
@@ -264,22 +265,22 @@ class JanelaListaClientes(ctk.CTkToplevel):
     def __init__(self, master, on_cliente_escolhido=None):
         super().__init__(master)
         self.on_cliente_escolhido = on_cliente_escolhido
-        self.title("Consulta e Histórico de Pescadores")
+        self.title(t('titulo_consulta_clientes'))
         self.geometry("1250x750")
         self.lift(); self.focus_force(); self.grab_set()
         self._aplicar_maximizacao()
         self.after(120, self._aplicar_maximizacao)
         
-        ctk.CTkLabel(self, text="🔎 CONSULTA DE CLIENTES E HISTÓRICO", font=("Arial", 20, "bold"), text_color="orange").pack(pady=15)
+        ctk.CTkLabel(self, text=f"🔎 {t('titulo_consulta_clientes_label')}", font=("Arial", 20, "bold"), text_color="orange").pack(pady=15)
 
         topo_busca = ctk.CTkFrame(self, fg_color="#1f2a38")
         topo_busca.pack(fill="x", padx=20, pady=5)
 
-        self.ent_busca = ctk.CTkEntry(topo_busca, placeholder_text="🔍 Digite o nome para pesquisar...", width=500, height=35)
+        self.ent_busca = ctk.CTkEntry(topo_busca, placeholder_text=f"🔍 {t('placeholder_buscar_nome')}", width=500, height=35)
         self.ent_busca.pack(side="left", pady=5)
         self.ent_busca.bind("<KeyRelease>", lambda e: self.carregar_dados())
-        ctk.CTkButton(topo_busca, text="Editar", width=120, fg_color="#2980b9", command=self.editar_cliente_selecionado).pack(side="left", padx=(10, 6), pady=5)
-        ctk.CTkButton(topo_busca, text="Excluir", width=120, fg_color="#c0392b", hover_color="#e74c3c", command=self.excluir_cliente_selecionado).pack(side="left", padx=(0, 6), pady=5)
+        ctk.CTkButton(topo_busca, text=t('btn_editar'), width=120, fg_color="#2980b9", command=self.editar_cliente_selecionado).pack(side="left", padx=(10, 6), pady=5)
+        ctk.CTkButton(topo_busca, text=t('btn_excluir'), width=120, fg_color="#c0392b", hover_color="#e74c3c", command=self.excluir_cliente_selecionado).pack(side="left", padx=(0, 6), pady=5)
 
         self.f_tab = ctk.CTkFrame(self)
         self.f_tab.pack(fill="both", expand=True, padx=20, pady=10)
@@ -287,12 +288,12 @@ class JanelaListaClientes(ctk.CTkToplevel):
         colunas = ("id", "nome", "whatsapp", "endereco", "bairro", "cidade")
         self.tabela = ttk.Treeview(self.f_tab, columns=colunas, show="headings")
         
-        self.tabela.heading("id", text="ID"); self.tabela.column("id", width=40)
-        self.tabela.heading("nome", text="NOME"); self.tabela.column("nome", width=250)
-        self.tabela.heading("whatsapp", text="WHATSAPP"); self.tabela.column("whatsapp", width=120)
-        self.tabela.heading("endereco", text="ENDEREÇO"); self.tabela.column("endereco", width=250)
-        self.tabela.heading("bairro", text="BAIRRO"); self.tabela.column("bairro", width=150)
-        self.tabela.heading("cidade", text="CIDADE"); self.tabela.column("cidade", width=120)
+        self.tabela.heading("id", text=t('col_id')); self.tabela.column("id", width=40)
+        self.tabela.heading("nome", text=t('col_nome')); self.tabela.column("nome", width=250)
+        self.tabela.heading("whatsapp", text=t('col_whatsapp')); self.tabela.column("whatsapp", width=120)
+        self.tabela.heading("endereco", text=t('col_endereco')); self.tabela.column("endereco", width=250)
+        self.tabela.heading("bairro", text=t('label_bairro').rstrip(':')); self.tabela.column("bairro", width=150)
+        self.tabela.heading("cidade", text=t('label_cidade').rstrip(':')); self.tabela.column("cidade", width=120)
 
         self.tabela.pack(side="left", fill="both", expand=True)
         scrol = ttk.Scrollbar(self.f_tab, orient="vertical", command=self.tabela.yview)
@@ -304,7 +305,7 @@ class JanelaListaClientes(ctk.CTkToplevel):
         self.f_hist = ctk.CTkFrame(self, fg_color="#2c3e50")
         self.f_hist.pack(fill="x", padx=20, pady=(0, 20))
         
-        ctk.CTkLabel(self.f_hist, text="📜 ÚLTIMO SERVIÇO DESTA PESSOA:", font=("Arial", 12, "bold"), text_color="white").pack(pady=5)
+        ctk.CTkLabel(self.f_hist, text=f"📜 {t('label_ultimo_servico')}", font=("Arial", 12, "bold"), text_color="white").pack(pady=5)
         self.txt_historico = ctk.CTkTextbox(self.f_hist, height=100, font=("Arial", 13), fg_color="#34495e", text_color="white")
         self.txt_historico.pack(fill="x", padx=10, pady=10)
 
@@ -358,7 +359,7 @@ class JanelaListaClientes(ctk.CTkToplevel):
     def editar_cliente_selecionado(self):
         cliente = self._obter_cliente_selecionado()
         if not cliente:
-            messagebox.showwarning("Clientes", "Selecione um cliente para editar.", parent=self)
+            messagebox.showwarning(t('msg_titulo_clientes'), t('msg_selecione_cliente_editar'), parent=self)
             return
         try:
             with get_db_connection() as conn:
@@ -372,7 +373,7 @@ class JanelaListaClientes(ctk.CTkToplevel):
                 )
                 dados = cursor.fetchone()
             if not dados:
-                messagebox.showwarning("Clientes", "Cliente não encontrado.", parent=self)
+                messagebox.showwarning(t('msg_titulo_clientes'), t('msg_cliente_nao_encontrado'), parent=self)
                 return
 
             def _apos_atualizar(_nome):
@@ -380,14 +381,14 @@ class JanelaListaClientes(ctk.CTkToplevel):
 
             FrmClientes(self, ao_salvar=_apos_atualizar, cliente_id=cliente["id"], dados_cliente=dados)
         except Exception as e:
-            messagebox.showerror("Clientes", f"Não foi possível editar o cliente: {e}", parent=self)
+            messagebox.showerror(t('msg_titulo_clientes'), t('msg_erro_editar_cliente').format(erro=e), parent=self)
 
     def excluir_cliente_selecionado(self):
         cliente = self._obter_cliente_selecionado()
         if not cliente:
-            messagebox.showwarning("Clientes", "Selecione um cliente para excluir.", parent=self)
+            messagebox.showwarning(t('msg_titulo_clientes'), t('msg_selecione_cliente_excluir'), parent=self)
             return
-        if not messagebox.askyesno("Excluir cliente", f"Deseja excluir o cliente {cliente['nome']}?", parent=self):
+        if not messagebox.askyesno(t('msg_titulo_excluir_cliente'), t('msg_confirmar_excluir_cliente').format(nome=cliente['nome']), parent=self):
             return
         try:
             with get_db_connection() as conn:
@@ -396,9 +397,9 @@ class JanelaListaClientes(ctk.CTkToplevel):
                 conn.commit()
             self.carregar_dados()
             self.txt_historico.delete("0.0", "end")
-            self.txt_historico.insert("0.0", "Cliente excluído com sucesso.")
+            self.txt_historico.insert("0.0", t('msg_cliente_excluido_sucesso'))
         except Exception as e:
-            messagebox.showerror("Clientes", f"Não foi possível excluir o cliente: {e}", parent=self)
+            messagebox.showerror(t('msg_titulo_clientes'), t('msg_erro_excluir_cliente').format(erro=e), parent=self)
 
     def selecionar_cliente_duplo_clique(self, _event=None):
         cliente = self._obter_cliente_selecionado()
@@ -421,13 +422,13 @@ class JanelaListaClientes(ctk.CTkToplevel):
                                   ORDER BY id DESC LIMIT 1""", (nome_cliente,))
                 h = cursor.fetchone()
             if h:
-                resumo = f"📅 DATA: {h[0]}  |  🎣 EQUIPAMENTO: {h[1]}\n🛠️ SERVIÇO: {h[2]}\n💰 VALOR: R$ {h[3]:.2f}"
+                resumo = f"📅 {t('label_data_resumo')} {h[0]}  |  🎣 {t('label_equipamento_resumo')} {h[1]}\n🛠️ {t('label_servico_resumo')} {h[2]}\n💰 {t('label_valor_resumo')} R$ {h[3]:.2f}"
                 self.txt_historico.insert("0.0", resumo)
             else:
-                self.txt_historico.insert("0.0", "Nenhum serviço registrado para este pescador.")
+                self.txt_historico.insert("0.0", t('msg_nenhum_servico_registrado'))
         except Exception as e:
             logger.exception("Erro ao buscar histórico do cliente: %s", e)
-            self.txt_historico.insert("0.0", "Erro ao buscar histórico.")
+            self.txt_historico.insert("0.0", t('msg_erro_buscar_historico'))
 
 if __name__ == "__main__":
     root = ctk.CTk()

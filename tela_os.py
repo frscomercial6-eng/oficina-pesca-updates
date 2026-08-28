@@ -300,7 +300,7 @@ class FrmOS(ctk.CTkToplevel):
         inicializar_banco()
         _garantir_colunas_orcamentos_aguardo()
         
-        self.title("SISTEMA FRS - OFICINA DE PESCA")
+        self.title(t('titulo_sistema_frs'))
         self.geometry("1000x650")
         self.resizable(True, True)
 
@@ -359,19 +359,19 @@ class FrmOS(ctk.CTkToplevel):
         self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         
-        ctk.CTkLabel(self.sidebar, text="MENU FRS", font=("Arial", 16, "bold")).pack(pady=20)
+        ctk.CTkLabel(self.sidebar, text=t('menu_frs_titulo').upper(), font=("Arial", 16, "bold")).pack(pady=20)
 
-        ctk.CTkButton(self.sidebar, text="🔍 PESQUISAR O.S.", fg_color="#2980b9", command=self.pesquisar_orcamento).pack(pady=10, padx=10, fill="x")
-        self.btn_salvar_os = ctk.CTkButton(self.sidebar, text="💾 SALVAR ENTRADA", fg_color="#16a085", command=self.salvar_entrada)
+        ctk.CTkButton(self.sidebar, text=f"🔍 {t('btn_pesquisar_os').upper()}", fg_color="#2980b9", command=self.pesquisar_orcamento).pack(pady=10, padx=10, fill="x")
+        self.btn_salvar_os = ctk.CTkButton(self.sidebar, text=f"💾 {t('btn_salvar_entrada').upper()}", fg_color="#16a085", command=self.salvar_entrada)
         self.btn_salvar_os.pack(pady=10, padx=10, fill="x")
         self._atualizar_rotulo_botao_salvar()
-        self.btn_recibo = ctk.CTkButton(self.sidebar, text="🧾 RECIBO ENTRADA", fg_color="#8e44ad", command=self.gerar_recibo_entrada)
+        self.btn_recibo = ctk.CTkButton(self.sidebar, text=f"🧾 {t('btn_recibo_entrada').upper()}", fg_color="#8e44ad", command=self.gerar_recibo_entrada)
         self.btn_recibo.pack(pady=10, padx=10, fill="x")
-        self.btn_pdf = ctk.CTkButton(self.sidebar, text="📄 GERAR ORÇAMENTO", fg_color="#e67e22", command=self.finalizar_e_abrir_pdf)
+        self.btn_pdf = ctk.CTkButton(self.sidebar, text=f"📄 {t('btn_gerar_orcamento').upper()}", fg_color="#e67e22", command=self.finalizar_e_abrir_pdf)
         self.btn_pdf.pack(pady=10, padx=10, fill="x")
         self.btn_emitir_nota_fiscal = ctk.CTkButton(
             self.sidebar,
-            text="🧾 EMITIR NOTA FISCAL",
+            text=f"🧾 {t('btn_emitir_nota_fiscal').upper()}",
             fg_color="#f39c12",
             hover_color="#d68910",
             command=self.emitir_nota_fiscal,
@@ -379,7 +379,7 @@ class FrmOS(ctk.CTkToplevel):
         self.btn_emitir_nota_fiscal.pack(pady=10, padx=10, fill="x")
         self.btn_consultar_nota_fiscal = ctk.CTkButton(
             self.sidebar,
-            text="🔎 CONSULTAR NOTA",
+            text=f"🔎 {t('btn_consultar_nota').upper()}",
             fg_color="#2563eb",
             hover_color="#1d4ed8",
             command=self.consultar_nota_fiscal,
@@ -387,7 +387,7 @@ class FrmOS(ctk.CTkToplevel):
         self.btn_consultar_nota_fiscal.pack(pady=10, padx=10, fill="x")
         self.btn_imprimir_danfe_fiscal = ctk.CTkButton(
             self.sidebar,
-            text="🖨 IMPRIMIR DANFE",
+            text=f"🖨 {t('btn_imprimir_danfe').upper()}",
             fg_color="#7c3aed",
             hover_color="#6d28d9",
             command=self.imprimir_danfe_fiscal,
@@ -395,7 +395,7 @@ class FrmOS(ctk.CTkToplevel):
         self.btn_imprimir_danfe_fiscal.pack(pady=10, padx=10, fill="x")
         self.btn_aprovar = ctk.CTkButton(
             self.sidebar,
-            text="✅ APROVAR",
+            text=f"✅ {t('btn_aprovar').upper()}",
             fg_color="#27ae60",
             hover_color="#2ecc71",
             command=lambda: self.aprovar_os(self.atualizar_total(), self.txt_cliente.get().strip().upper()),
@@ -403,13 +403,13 @@ class FrmOS(ctk.CTkToplevel):
         self.btn_aprovar.pack(pady=10, padx=10, fill="x")
         self.btn_reprovar = ctk.CTkButton(
             self.sidebar,
-            text="❌ REPROVADO",
+            text=f"❌ {t('btn_reprovado').upper()}",
             fg_color="#c0392b",
             hover_color="#e74c3c",
             command=self.clicar_reprovado,
         )
         self.btn_reprovar.pack(pady=10, padx=10, fill="x")
-        ctk.CTkButton(self.sidebar, text="📦 PRODUTOS", fg_color="#2980b9", command=self.abrir_estoque).pack(pady=10, padx=10, fill="x")
+        ctk.CTkButton(self.sidebar, text=f"📦 {t('btn_produtos').upper()}", fg_color="#2980b9", command=self.abrir_estoque).pack(pady=10, padx=10, fill="x")
 
         # Fix do Container Principal
         self.frame_conteudo = ctk.CTkFrame(self, fg_color="#161b22")
@@ -846,7 +846,7 @@ class FrmOS(ctk.CTkToplevel):
             logo = logo_var.get().strip()
 
             if not nome:
-                messagebox.showwarning("Atenção", "Informe o nome da oficina.", parent=janela)
+                messagebox.showwarning(t('msg_titulo_atencao'), t('msg_informe_nome_oficina'), parent=janela)
                 return
 
             try:
@@ -868,10 +868,10 @@ class FrmOS(ctk.CTkToplevel):
                 self.chave_pix = pix
                 self.logo_oficina = logo
 
-                messagebox.showinfo("Sucesso", "Dados da oficina atualizados no layout.", parent=janela)
+                messagebox.showinfo(t('msg_titulo_sucesso'), t('msg_dados_oficina_atualizados'), parent=janela)
                 janela.destroy()
             except Exception as e:
-                messagebox.showerror("Erro", f"Não foi possível salvar: {e}", parent=janela)
+                messagebox.showerror(t('msg_titulo_erro'), t('msg_erro_ao_salvar').format(erro=e), parent=janela)
 
         def _descobrir_oficina_udp(timeout_total=5.0):
             payload = json.dumps({
@@ -944,18 +944,18 @@ class FrmOS(ctk.CTkToplevel):
                     btn_localizar.configure(state="normal", text="LOCALIZAR OFICINA NA REDE")
                     if not url:
                         lbl_rede.configure(text="Oficina não localizada na rede.", text_color="#e74c3c")
-                        msg = "Não foi possível localizar a oficina automaticamente na rede."
+                        msg = t('msg_rede_nao_localizada')
                         if erro:
                             msg += f"\n\nDetalhe: {erro}"
-                        messagebox.showwarning("Rede Local", msg, parent=janela)
+                        messagebox.showwarning(t('msg_titulo_rede_local'), msg, parent=janela)
                         return
                     try:
                         caminho = _salvar_servidor_url_cfg(url)
                         lbl_rede.configure(text=f"Oficina localizada: {url}", text_color="#2ecc71")
-                        messagebox.showinfo("Rede Local", f"Oficina localizada com sucesso!\n\nServidor: {url}\nConfig salvo em: {caminho}", parent=janela)
+                        messagebox.showinfo(t('msg_titulo_rede_local'), t('msg_rede_localizada_sucesso').format(url=url, caminho=caminho), parent=janela)
                     except Exception as e:
                         lbl_rede.configure(text="Servidor encontrado, mas falha ao salvar.", text_color="#f39c12")
-                        messagebox.showwarning("Rede Local", f"Servidor encontrado: {url}\nFalha ao salvar config: {e}", parent=janela)
+                        messagebox.showwarning(t('msg_titulo_rede_local'), t('msg_rede_servidor_encontrado_falha_salvar').format(url=url, erro=e), parent=janela)
 
                 self.after(0, finalizar)
 
@@ -1051,7 +1051,7 @@ class FrmOS(ctk.CTkToplevel):
             return dados
         except Exception as e:
             logger.exception("Erro ao salvar O.S. %s.", getattr(self, "num_oc", "?"))
-            messagebox.showerror("Erro", f"Erro ao salvar: {e}")
+            messagebox.showerror(t('msg_titulo_erro'), t('msg_erro_ao_salvar').format(erro=e))
             return None
 
     def gerar_documento_pdf(self, tipo_documento=None, eh_os=False, forma_de_pagamento=None):
@@ -1097,7 +1097,7 @@ class FrmOS(ctk.CTkToplevel):
                 # Fallback para Windows se webbrowser falhar
                 subprocess.Popen(['start', '', caminho], shell=True)
             except Exception:
-                messagebox.showwarning("PDF", "Não foi possível abrir o PDF automaticamente. O arquivo foi salvo.", parent=self)
+                messagebox.showwarning(t('msg_titulo_pdf'), t('msg_pdf_nao_aberto'), parent=self)
         return caminho
 
     def _normalizar_telefone_whatsapp(self, telefone):
@@ -1135,8 +1135,8 @@ class FrmOS(ctk.CTkToplevel):
             return
 
         if not messagebox.askyesno(
-            "WhatsApp",
-            "PDF gerado com sucesso. Deseja abrir o WhatsApp para enviar ao cliente?",
+            t('msg_titulo_whatsapp'),
+            t('msg_pdf_gerado_whatsapp'),
             parent=self,
         ):
             return
@@ -1173,22 +1173,22 @@ class FrmOS(ctk.CTkToplevel):
             except Exception:
                 pass
             messagebox.showinfo(
-                "WhatsApp",
-                "Não foi possível abrir o WhatsApp automaticamente.\nO link foi copiado para a área de transferência.",
+                t('msg_titulo_whatsapp'),
+                t('msg_whatsapp_nao_aberto_copiado'),
                 parent=self,
             )
             return
 
         copiar_link = messagebox.askyesno(
-            "WhatsApp",
-            "Deseja copiar o link do WhatsApp também?",
+            t('msg_titulo_whatsapp'),
+            t('msg_copiar_link_whatsapp'),
             parent=self,
         )
         if copiar_link:
             try:
                 self.clipboard_clear()
                 self.clipboard_append(link)
-                messagebox.showinfo("WhatsApp", "Link copiado para a área de transferência.", parent=self)
+                messagebox.showinfo(t('msg_titulo_whatsapp'), t('msg_link_copiado'), parent=self)
             except Exception:
                 pass
 
@@ -1416,7 +1416,7 @@ class FrmOS(ctk.CTkToplevel):
             self._atualizar_rotulo_botao_salvar()
             self.atualizar_total()
         except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao carregar orçamento: {e}")
+            messagebox.showerror(t('msg_titulo_erro'), t('msg_erro_carregar_orcamento').format(erro=e))
 
     def _coletar_itens_tabela(self):
         itens = []
@@ -1705,7 +1705,7 @@ class FrmOS(ctk.CTkToplevel):
         equipamento = self.txt_equip.get().strip().upper()
         defeito = self.txt_defeito.get().strip().upper()
         if not equipamento or not defeito:
-            messagebox.showwarning("Item da O.S.", "Informe modelo/equipamento e defeito para adicionar o item.", parent=self)
+            messagebox.showwarning(t('msg_titulo_item_os'), t('msg_informe_modelo_defeito'), parent=self)
             return
 
         self._salvar_equipamento_ativo()
@@ -1745,7 +1745,7 @@ class FrmOS(ctk.CTkToplevel):
                 indice = -1
         if indice < 0 or indice >= len(self.os_equipamentos):
             return
-        if not messagebox.askyesno("Remover item", "Deseja remover este equipamento da O.S.?", parent=self):
+        if not messagebox.askyesno(t('msg_titulo_remover_item'), t('msg_remover_equipamento_confirmar'), parent=self):
             return
         self._salvar_equipamento_ativo()
         self.os_equipamentos.pop(indice)
@@ -1762,7 +1762,7 @@ class FrmOS(ctk.CTkToplevel):
                 self.salvar_documento(status="AGUARDANDO")
             except Exception as exc:
                 logger.exception("Falha ao persistir remoção de equipamento da O.S. %s.", getattr(self, "num_oc", ""))
-                messagebox.showwarning("Remover item", f"Item removido da tela, mas não foi possível atualizar o banco agora: {exc}", parent=self)
+                messagebox.showwarning(t('msg_titulo_remover_item'), t('msg_item_removido_falha_banco').format(erro=exc), parent=self)
 
     def _on_selecionar_equipamento(self, _event=None):
         selecao = self.tab_equipamentos.selection()
@@ -1798,7 +1798,7 @@ class FrmOS(ctk.CTkToplevel):
     # --- FUNÇÃO QUE A JANELA DE PRODUTOS CHAMA (Com a janelinha de quantidade) ---
     def adicionar_item_ao_orcamento(self, descricao, valor_unitario):
         if self.indice_equipamento_ativo is None:
-            messagebox.showwarning("Item da O.S.", "Selecione um equipamento da lista para lançar peças/serviços.", parent=self)
+            messagebox.showwarning(t('msg_titulo_item_os'), t('msg_selecione_equipamento_pecas'), parent=self)
             return
         # Traz a tela de OS para frente para a janelinha aparecer no lugar certo
         self.lift()
@@ -1815,7 +1815,7 @@ class FrmOS(ctk.CTkToplevel):
     def add_item(self):
         try:
             if self.indice_equipamento_ativo is None:
-                messagebox.showwarning("Item da O.S.", "Selecione um equipamento da lista antes de adicionar peças/serviços.", parent=self)
+                messagebox.showwarning(t('msg_titulo_item_os'), t('msg_selecione_equipamento_antes_pecas'), parent=self)
                 return
 
             d = self.txt_serv.get().upper()
@@ -1853,7 +1853,7 @@ class FrmOS(ctk.CTkToplevel):
             self.txt_val.delete(0, 'end')
             self.txt_serv.focus()
         except (ValueError, TypeError):
-            messagebox.showwarning("Erro", "Preencha Descrição, Qtd e Valor corretamente!")
+            messagebox.showwarning(t('msg_titulo_erro'), t('msg_preencha_descricao_qtd_valor'))
 
     def remover_item_selecionado(self, _event=None):
         # O botão REMOVER ITEM atua somente na tabela superior: ITENS DA O.S. (Envelope do Cliente).
@@ -1890,7 +1890,7 @@ class FrmOS(ctk.CTkToplevel):
         if indice < 0 or indice >= len(self.os_equipamentos):
             return
 
-        if not messagebox.askyesno("Remover item", "Deseja remover este equipamento da O.S.?", parent=self):
+        if not messagebox.askyesno(t('msg_titulo_remover_item'), t('msg_remover_equipamento_confirmar'), parent=self):
             return
 
         self._salvar_equipamento_ativo()
@@ -1909,15 +1909,15 @@ class FrmOS(ctk.CTkToplevel):
                 self.salvar_documento(status="AGUARDANDO")
             except Exception as exc:
                 logger.exception("Falha ao persistir remoção de equipamento da O.S. %s.", getattr(self, "num_oc", ""))
-                messagebox.showwarning("Remover item", f"Item removido da tela, mas não foi possível atualizar o banco agora: {exc}", parent=self)
+                messagebox.showwarning(t('msg_titulo_remover_item'), t('msg_item_removido_falha_banco').format(erro=exc), parent=self)
 
     def executar_exclusao_item(self):
         try:
             selecao = self.tabela.selection()
             if not selecao:
-                messagebox.showwarning("Remover item", "Selecione um item na tabela principal da O.S.", parent=self)
+                messagebox.showwarning(t('msg_titulo_remover_item'), t('msg_selecione_item_tabela_principal'), parent=self)
                 return
-            if not messagebox.askyesno("Remover item", "Deseja remover o item selecionado da O.S.?", parent=self):
+            if not messagebox.askyesno(t('msg_titulo_remover_item'), t('msg_remover_item_selecionado_os'), parent=self):
                 return
             self.tabela.delete(selecao[0])
             self._limpar_edicao_item()
@@ -1929,9 +1929,9 @@ class FrmOS(ctk.CTkToplevel):
         try:
             selecao = self.tabela.selection()
             if not selecao:
-                messagebox.showwarning("Remover peça", "Selecione uma peça/serviço na tabela principal da O.S.", parent=self)
+                messagebox.showwarning(t('msg_titulo_remover_peca'), t('msg_selecione_peca_tabela_principal'), parent=self)
                 return
-            if not messagebox.askyesno("Remover peça", "Deseja remover a peça/serviço selecionado?", parent=self):
+            if not messagebox.askyesno(t('msg_titulo_remover_peca'), t('msg_remover_peca_selecionada'), parent=self):
                 return
             self.tabela.delete(selecao[0])
             self._limpar_edicao_item()
@@ -1946,7 +1946,7 @@ class FrmOS(ctk.CTkToplevel):
             if foco:
                 selecionado = (foco,)
         if not selecionado:
-            messagebox.showwarning("Reprovar item", "Selecione um item para reprovar.", parent=self)
+            messagebox.showwarning(t('msg_titulo_reprovar_item'), t('msg_selecione_item_reprovar'), parent=self)
             return
 
         motivo = simpledialog.askstring(
@@ -1977,7 +1977,7 @@ class FrmOS(ctk.CTkToplevel):
             self._gerar_pdf_orcamento_reprovado_automatico(motivo=motivo_final)
         except Exception:
             logger.exception("Falha ao gerar PDF automático de orçamento reprovado.")
-        messagebox.showinfo("Reprovar item", "Item marcado como REPROVADO, mantido no histórico e orçamento atualizado.", parent=self)
+        messagebox.showinfo(t('msg_titulo_reprovar_item'), t('msg_item_reprovado_sucesso'), parent=self)
 
     def reativar_item_selecionado(self):
         selecionado = self.tab.selection()
@@ -1986,7 +1986,7 @@ class FrmOS(ctk.CTkToplevel):
             if foco:
                 selecionado = (foco,)
         if not selecionado:
-            messagebox.showwarning("Reativar item", "Selecione um item para reativar.", parent=self)
+            messagebox.showwarning(t('msg_titulo_reativar_item'), t('msg_selecione_item_reativar'), parent=self)
             return
 
         alterou = False
@@ -2000,7 +2000,7 @@ class FrmOS(ctk.CTkToplevel):
                 alterou = True
 
         if not alterou:
-            messagebox.showinfo("Reativar item", "Os itens selecionados já estão ativos.", parent=self)
+            messagebox.showinfo(t('msg_titulo_reativar_item'), t('msg_itens_ja_ativos'), parent=self)
             return
 
         self._reaplicar_zebra_tabela_itens()
@@ -2009,7 +2009,7 @@ class FrmOS(ctk.CTkToplevel):
             self.salvar_documento(status="AGUARDANDO")
         except Exception:
             pass
-        messagebox.showinfo("Reativar item", "Item reativado com sucesso e orçamento recalculado.", parent=self)
+        messagebox.showinfo(t('msg_titulo_reativar_item'), t('msg_item_reativado_sucesso'), parent=self)
 
     def _consultar_produto_por_nome(self, nome_produto: str):
         nome = str(nome_produto or "").strip().upper()
@@ -2028,8 +2028,8 @@ class FrmOS(ctk.CTkToplevel):
 
     def _oferecer_whatsapp_sem_estoque(self, nome_produto: str):
         enviar = messagebox.askyesno(
-            "Produto sem estoque",
-            f"{nome_produto} está sem estoque.\n\nDeseja abrir o WhatsApp para solicitar reposição?",
+            t('msg_titulo_produto_sem_estoque'),
+            t('msg_produto_sem_estoque').format(produto=nome_produto),
             parent=self,
         )
         if not enviar:
@@ -2050,16 +2050,16 @@ class FrmOS(ctk.CTkToplevel):
             webbrowser.open(link)
         except Exception:
             messagebox.showwarning(
-                "WhatsApp",
-                "Não foi possível abrir o WhatsApp automaticamente.",
+                t('msg_titulo_whatsapp'),
+                t('msg_whatsapp_nao_aberto'),
                 parent=self,
             )
             return
 
         if arquivo_ref and os.path.exists(arquivo_ref):
             anexar = messagebox.askyesno(
-                "Anexar arquivo",
-                "Existe PDF/imagem baixado desta peça. Deseja abrir a pasta para anexar no WhatsApp?",
+                t('msg_titulo_anexar_arquivo'),
+                t('msg_anexar_pdf_imagem'),
                 parent=self,
             )
             if anexar:
@@ -2186,7 +2186,7 @@ class FrmOS(ctk.CTkToplevel):
         )
         if faltantes:
             mensagem = formatar_mensagem_bloqueio_emissao(faltantes, tipo_documento="nfse")
-            messagebox.showwarning("O.S.", mensagem, parent=self)
+            messagebox.showwarning(t('msg_titulo_os'), mensagem, parent=self)
             return
 
         venda = {
@@ -2201,27 +2201,27 @@ class FrmOS(ctk.CTkToplevel):
         try:
             retorno = tentar_enviar_venda(venda)
             if bool(retorno and retorno.get("ok")):
-                messagebox.showinfo("O.S.", "NFS-e emitida com sucesso.", parent=self)
+                messagebox.showinfo(t('msg_titulo_os'), t('msg_nfse_emitida_sucesso'), parent=self)
             else:
                 msg = str((retorno or {}).get("mensagem") or "")
                 motivo = str((retorno or {}).get("motivo") or "retorno_fiscal_indisponivel")
-                corpo = msg or f"Validação concluída, mas o envio ao ACBr não foi concluído.\nMotivo: {motivo}"
+                corpo = msg or t('msg_envio_acbr_nao_concluido').format(motivo=motivo)
                 messagebox.showwarning(
-                    "O.S.",
+                    t('msg_titulo_os'),
                     corpo,
                     parent=self,
                 )
         except Exception as e:
-            messagebox.showerror("O.S.", f"Erro ao emitir nota fiscal: {e}", parent=self)
+            messagebox.showerror(t('msg_titulo_os'), t('msg_erro_emitir_nota').format(erro=e), parent=self)
 
     def consultar_nota_fiscal(self):
         referencia = str(int(self.num_oc or 0))
         retorno = consultar_nota_fiscal(referencia)
         if bool(retorno.get("ok")):
-            messagebox.showinfo("O.S.", f"Consulta de nota concluída com sucesso.\nReferência: {referencia}", parent=self)
+            messagebox.showinfo(t('msg_titulo_os'), t('msg_consulta_nota_sucesso').format(referencia=referencia), parent=self)
         else:
-            corpo = str(retorno.get("mensagem") or retorno.get("motivo") or "Falha na consulta fiscal.")
-            messagebox.showwarning("O.S.", corpo, parent=self)
+            corpo = str(retorno.get("mensagem") or retorno.get("motivo") or t('msg_falha_consulta_fiscal'))
+            messagebox.showwarning(t('msg_titulo_os'), corpo, parent=self)
 
     def imprimir_danfe_fiscal(self):
         itens = self._itens_para_emissao_fiscal()
@@ -2233,7 +2233,7 @@ class FrmOS(ctk.CTkToplevel):
         )
         if faltantes:
             mensagem = formatar_mensagem_bloqueio_emissao(faltantes, tipo_documento="nfse")
-            messagebox.showwarning("O.S.", mensagem, parent=self)
+            messagebox.showwarning(t('msg_titulo_os'), mensagem, parent=self)
             return
 
         venda = {
@@ -2247,7 +2247,7 @@ class FrmOS(ctk.CTkToplevel):
         retorno = imprimir_danfe_fiscal(venda)
         if bool(retorno.get("ok")):
             caminho = str(retorno.get("arquivo") or "")
-            messagebox.showinfo("O.S.", f"DANFE gerado com sucesso.\nArquivo: {caminho}", parent=self)
+            messagebox.showinfo(t('msg_titulo_os'), t('msg_danfe_gerado_sucesso').format(caminho=caminho), parent=self)
             if caminho and hasattr(os, "startfile"):
                 try:
                     os.startfile(caminho, "print")  # type: ignore[attr-defined]
@@ -2257,8 +2257,8 @@ class FrmOS(ctk.CTkToplevel):
                     except Exception:
                         pass
         else:
-            corpo = str(retorno.get("mensagem") or retorno.get("motivo") or "Falha ao gerar DANFE.")
-            messagebox.showwarning("O.S.", corpo, parent=self)
+            corpo = str(retorno.get("mensagem") or retorno.get("motivo") or t('msg_falha_gerar_danfe'))
+            messagebox.showwarning(t('msg_titulo_os'), corpo, parent=self)
 
     def _preencher_cliente(self, dados_cliente):
         nome, telefone, rua, numero, bairro, cidade, estado = dados_cliente
@@ -2413,14 +2413,14 @@ class FrmOS(ctk.CTkToplevel):
             msg += f"\nMotivo informado: {str(motivo).strip()}"
 
         if messagebox.askyesno(
-            "Orçamento Reprovado",
-            f"PDF gerado com sucesso em:\n{caminho_pdf}\n\nDeseja abrir o WhatsApp para envio rápido?",
+            t('msg_titulo_orcamento_reprovado'),
+            t('msg_pdf_gerado_whatsapp_caminho').format(caminho=caminho_pdf),
             parent=self,
         ):
             try:
                 self._abrir_whatsapp_envio_pdf(caminho_pdf, msg)
             except Exception:
-                messagebox.showwarning("WhatsApp", "Não foi possível abrir o WhatsApp automaticamente.", parent=self)
+                messagebox.showwarning(t('msg_titulo_whatsapp'), t('msg_whatsapp_nao_aberto'), parent=self)
 
         return caminho_pdf
 
@@ -2494,7 +2494,7 @@ class FrmOS(ctk.CTkToplevel):
         cliente = self.txt_cliente.get().strip().upper()
         telefone = self.txt_fone.get().strip()
         if not cliente or not telefone:
-            messagebox.showwarning("Recibo", "Informe nome e telefone/WhatsApp antes de gerar o recibo.", parent=self)
+            messagebox.showwarning(t('msg_titulo_recibo'), t('msg_informe_nome_telefone_recibo'), parent=self)
             return
         if self._gerando_recibo or self._salvando_documento:
             return
@@ -2528,25 +2528,25 @@ class FrmOS(ctk.CTkToplevel):
             worker()
         except Exception as e:
             self._alternar_estado_botao_recibo(False)
-            messagebox.showerror("Recibo", f"Não foi possível iniciar a geração do recibo: {e}", parent=self)
+            messagebox.showerror(t('msg_titulo_recibo'), t('msg_erro_iniciar_recibo').format(erro=e), parent=self)
 
     def _finalizar_recibo_entrada(self, caminho_pdf, recibo):
         self._alternar_estado_botao_recibo(False)
         if messagebox.askyesno(
-            "Recibo",
-            "Recibo gerado com sucesso. Deseja abrir o WhatsApp agora para enviar ao cliente?",
+            t('msg_titulo_recibo'),
+            t('msg_recibo_gerado_whatsapp'),
             parent=self,
         ):
             self._abrir_whatsapp_recibo_entrada(caminho_pdf, recibo)
         messagebox.showinfo(
-            "Recibo",
-            f"Recibo gerado com sucesso em:\n{caminho_pdf}",
+            t('msg_titulo_recibo'),
+            t('msg_recibo_gerado_caminho').format(caminho=caminho_pdf),
             parent=self,
         )
 
     def _falhar_recibo_entrada(self, erro):
         self._alternar_estado_botao_recibo(False)
-        messagebox.showerror("Recibo", f"Erro ao gerar recibo de entrada: {erro}", parent=self)
+        messagebox.showerror(t('msg_titulo_recibo'), t('msg_erro_gerar_recibo').format(erro=erro), parent=self)
 
     def preencher_cliente_da_consulta(self, cliente):
         if not isinstance(cliente, dict):
@@ -2577,7 +2577,7 @@ class FrmOS(ctk.CTkToplevel):
             janela = JanelaListaClientes(self, on_cliente_escolhido=self.preencher_cliente_da_consulta)
             janela.focus_force()
         except Exception as e:
-            messagebox.showerror("Clientes", f"Não foi possível abrir consulta de clientes: {e}", parent=self)
+            messagebox.showerror(t('msg_titulo_clientes'), t('msg_erro_abrir_consulta_clientes').format(erro=e), parent=self)
 
     def buscar_cliente(self, event=None, abrir_cadastro=True):
         nome = self.txt_cliente.get().strip().upper()
@@ -2591,10 +2591,10 @@ class FrmOS(ctk.CTkToplevel):
             else:
                 self.txt_fone.delete(0, 'end')
                 self.txt_end_cliente.delete(0, 'end')
-                if abrir_cadastro and messagebox.askyesno("Cliente não cadastrado", f"{nome} não está cadastrado. Deseja abrir o cadastro agora?", parent=self):
+                if abrir_cadastro and messagebox.askyesno(t('msg_titulo_cliente_nao_cadastrado'), t('msg_cliente_nao_cadastrado_perguntar').format(nome=nome), parent=self):
                     self._abrir_cadastro_cliente(nome)
         except Exception as e:
-            messagebox.showerror("Erro", f"Erro: {e}", parent=self)
+            messagebox.showerror(t('msg_titulo_erro'), t('msg_erro_generico').format(erro=e), parent=self)
         finally:
             self._cliente_em_validacao = False
 
@@ -3302,7 +3302,7 @@ class FrmOS(ctk.CTkToplevel):
             try:
                 webbrowser.open(url_diagrama)
             except Exception:
-                messagebox.showwarning("Diagrama", "Não foi possível abrir o link automaticamente.", parent=win)
+                messagebox.showwarning(t('msg_titulo_diagrama'), t('msg_link_nao_aberto'), parent=win)
                 return
             
             # Salvamento automático sem perguntar
@@ -3449,7 +3449,7 @@ class FrmOS(ctk.CTkToplevel):
             if pdf_gerado:
                 self._lancar_financeiro_pos_aprovacao(total, cliente, forma_pagamento, metodo_pagamento)
         except Exception as e:
-            messagebox.showerror("Aprovação", f"Erro ao aprovar O.S.: {e}")
+            messagebox.showerror(t('msg_titulo_aprovacao'), t('msg_erro_aprovar_os').format(erro=e))
 
     # Tooltip for alert icon
     _current_alert_tooltip = None
@@ -3841,7 +3841,7 @@ class FrmOS(ctk.CTkToplevel):
         return escolha.get("metodo")
 
     def clicar_reprovado(self):
-        if messagebox.askyesno("Reprovar", "Marcar como REPROVADO?", parent=self):
+        if messagebox.askyesno(t('msg_titulo_reprovar'), t('msg_marcar_reprovado_confirmar'), parent=self):
             self.salvar_documento(status="REPROVADO")
             with get_db_connection() as conn:
                 cursor = conn.cursor()
@@ -3864,7 +3864,7 @@ class FrmOS(ctk.CTkToplevel):
                 self._gerar_pdf_orcamento_reprovado_automatico(motivo="REPROVADO PELO CLIENTE")
             except Exception:
                 logger.exception("Falha ao gerar PDF automático de orçamento reprovado da O.S. %s.", self.num_oc)
-            messagebox.showinfo("FRS", "Orçamento marcado como REPROVADO e histórico preservado.", parent=self)
+            messagebox.showinfo("FRS", t('msg_orcamento_reprovado_sucesso'), parent=self)
 
     def pesquisar_orcamento(self):
         try:
@@ -3878,7 +3878,7 @@ class FrmOS(ctk.CTkToplevel):
                 pass
             janela.focus_force()
         except Exception as e:
-            messagebox.showerror("Erro", f"Não foi possível abrir a pesquisa de O.S.: {e}", parent=self)
+            messagebox.showerror(t('msg_titulo_erro'), t('msg_erro_abrir_pesquisa_os').format(erro=e), parent=self)
 
     def salvar_entrada(self):
         cliente = self.txt_cliente.get().strip().upper()
@@ -3889,15 +3889,15 @@ class FrmOS(ctk.CTkToplevel):
         self._auditar_salvar_entrada("inicio")
 
         if not cliente or not telefone:
-            messagebox.showwarning("Atenção", "Informe nome e telefone/WhatsApp do cliente.", parent=self)
+            messagebox.showwarning(t('msg_titulo_atencao'), t('msg_informe_nome_telefone_cliente'), parent=self)
             self._auditar_salvar_entrada("validacao_falhou", motivo="cliente_ou_telefone_ausente")
             return
         if not telefone_normalizado:
-            messagebox.showwarning("Atenção", "Telefone inválido para salvar entrada.", parent=self)
+            messagebox.showwarning(t('msg_titulo_atencao'), t('msg_telefone_invalido'), parent=self)
             self._auditar_salvar_entrada("validacao_falhou", motivo="telefone_invalido")
             return
         if not self._entrada_tem_equipamento():
-            messagebox.showwarning("Atenção", "Informe ao menos equipamento/defeito antes de salvar entrada.", parent=self)
+            messagebox.showwarning(t('msg_titulo_atencao'), t('msg_informe_equipamento_defeito'), parent=self)
             self._auditar_salvar_entrada("validacao_falhou", motivo="equipamento_ausente")
             return
         if self._salvando_documento:
@@ -3927,15 +3927,15 @@ class FrmOS(ctk.CTkToplevel):
                 self._salvar_equipamento_ativo()
                 self._atualizar_lista_equipamentos_ui()
                 self.atualizar_total()
-                messagebox.showinfo("Atualização", f"Orçamento/O.S. {numero_salvo} atualizado com sucesso.", parent=self)
+                messagebox.showinfo(t('msg_titulo_atualizacao'), t('msg_orcamento_atualizado_sucesso').format(numero=numero_salvo), parent=self)
             else:
                 self._orcamento_em_edicao = True
                 self._atualizar_rotulo_botao_salvar()
                 self._restaurar_formulario_pos_salvamento()
-                messagebox.showinfo("Entrada", f"Entrada da O.S. {numero_salvo} salva com sucesso.", parent=self)
+                messagebox.showinfo(t('msg_titulo_entrada'), t('msg_entrada_salva_sucesso').format(numero=numero_salvo), parent=self)
         except Exception as e:
             self._auditar_salvar_entrada("erro", erro=str(e))
-            messagebox.showerror("Erro", str(e), parent=self)
+            messagebox.showerror(t('msg_titulo_erro'), str(e), parent=self)
         finally:
             self._alternar_estado_botao_salvar(False)
 
@@ -3947,13 +3947,13 @@ class FrmOS(ctk.CTkToplevel):
         try:
             from menu import FrmProdutos
             FrmProdutos(self)
-        except Exception as e: messagebox.showerror("Erro", f"Erro: {e}")
+        except Exception as e: messagebox.showerror(t('msg_titulo_erro'), t('msg_erro_generico').format(erro=e))
 
     def finalizar_e_abrir_pdf(self):
         cliente = self.txt_cliente.get().strip().upper()
         telefone = self.txt_fone.get().strip()
         if not cliente or not telefone:
-            messagebox.showwarning("Atenção", "Informe nome e telefone/WhatsApp antes de gerar o documento.", parent=self)
+            messagebox.showwarning(t('msg_titulo_atencao'), t('msg_informe_nome_telefone_documento'), parent=self)
             return
         if self._gerando_orcamento:
             return
@@ -3966,7 +3966,7 @@ class FrmOS(ctk.CTkToplevel):
             if caminho_pdf:
                 self._oferecer_envio_whatsapp(caminho_pdf, self.tipo_documento)
         except Exception as e:
-            messagebox.showerror("Erro", str(e), parent=self)
+            messagebox.showerror(t('msg_titulo_erro'), str(e), parent=self)
         finally:
             self._gerando_orcamento = False
             if hasattr(self, 'btn_pdf'):
