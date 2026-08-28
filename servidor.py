@@ -28,7 +28,7 @@ import argparse
 import socket
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import uvicorn
@@ -436,7 +436,7 @@ def _dias_por_plano(plano: str) -> Optional[int]:
     return mapa.get(str(plano or "").strip().upper())
 
 
-def _registrar_licenca_hub_db(chave: str, validade: str, hwid: str) -> None:
+def _registrar_licenca_hub_db(chave: str, validade: str, hwid: str, email: str = "", cliente: str = "", tipo: str = "", plano: str = "") -> None:
     with get_db_connection() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -454,11 +454,85 @@ def _registrar_licenca_hub_db(chave: str, validade: str, hwid: str) -> None:
         cols = {row[1] for row in cur.fetchall()}
         if "chave_instalacao" not in cols:
             cur.execute("ALTER TABLE licencas_geradas ADD COLUMN chave_instalacao TEXT DEFAULT ''")
+        if "email" not in cols:
+            cur.execute("ALTER TABLE licencas_geradas ADD COLUMN email TEXT DEFAULT ''")
+        if "cliente" not in cols:
+            cur.execute("ALTER TABLE licencas_geradas ADD COLUMN cliente TEXT DEFAULT ''")
+        if "tipo" not in cols:
+            cur.execute("ALTER TABLE licencas_geradas ADD COLUMN tipo TEXT DEFAULT ''")
+        if "plano" not in cols:
+            cur.execute("ALTER TABLE licencas_geradas ADD COLUMN plano TEXT DEFAULT ''")
         cur.execute(
-            "INSERT INTO licencas_geradas (chave, data_expiracao, chave_instalacao, data_geracao) VALUES (?, ?, ?, DATE('now'))",
-            (chave, validade, hwid),
+            "INSERT INTO licencas_geradas (chave, data_expiracao, chave_instalacao, data_geracao, email, cliente, tipo, plano) "
+            "VALUES (?, ?, ?, DATE('now'), ?, ?, ?, ?)",
+            (chave, validade, hwid, str(email or "").strip().lower(), str(cliente or "").strip(), str(tipo or "").strip().upper(), str(plano or "").strip().upper()),
         )
         conn.commit()
+
+
+def _status_licenca_por_email(email: str) -> dict:
+    """Consulta a licenca mais recente gerada pelo Hub para o e-mail informado."""
+    email_norm = str(email or "").strip().lower()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_norm):
+        return {"ok": False, "ativa": False, "mensagem": "E-mail invalido."}
+
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS licencas_geradas (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                chave            TEXT NOT NULL,
+                data_expiracao   TEXT NOT NULL,
+                chave_instalacao TEXT NOT NULL DEFAULT '',
+                data_geracao     TEXT NOT NULL,
+                email            TEXT DEFAULT '',
+                cliente          TEXT DEFAULT '',
+                tipo             TEXT DEFAULT '',
+                plano            TEXT DEFAULT ''
+            )
+            """
+        )
+        cur.execute("PRAGMA table_info(licencas_geradas)")
+        cols = {row[1] for row in cur.fetchall()}
+        if "email" not in cols:
+            cur.execute("ALTER TABLE licencas_geradas ADD COLUMN email TEXT DEFAULT ''")
+            conn.commit()
+            return {"ok": True, "ativa": False, "mensagem": "Nenhuma licenca encontrada para este e-mail."}
+
+        cur.execute(
+            "SELECT data_expiracao, cliente, tipo, plano, data_geracao FROM licencas_geradas "
+            "WHERE lower(email) = ? ORDER BY id DESC LIMIT 1",
+            (email_norm,),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return {"ok": True, "ativa": False, "mensagem": "Nenhuma licenca encontrada para este e-mail."}
+
+    validade, cliente, tipo, plano, data_geracao = row
+    validade = str(validade or "").strip()
+
+    if validade.upper() == "PERMANENTE":
+        ativa = True
+    else:
+        try:
+            ativa = date.fromisoformat(validade) >= date.today()
+        except ValueError:
+            ativa = False
+
+    mensagem = "Licenca ativa." if ativa else f"Licenca expirada em {validade}." if validade else "Licenca inativa."
+
+    return {
+        "ok": True,
+        "ativa": ativa,
+        "mensagem": mensagem,
+        "cliente": str(cliente or "").strip(),
+        "tipo": str(tipo or "").strip(),
+        "plano": str(plano or "").strip(),
+        "validade": validade,
+        "data_geracao": str(data_geracao or "").strip(),
+    }
 
 
 def _registrar_licenca_hub_log(payload: dict) -> None:
@@ -606,6 +680,12 @@ async def api_licenca_status():
     return obter_status_acesso_centralizado()
 
 
+@app.get("/api/licencas/status-email", tags=["Licencas"])
+async def api_licenca_status_por_email(email: str):
+    """Consultado pelo APK mobile para liberar acesso a partir do e-mail cadastrado."""
+    return _status_licenca_por_email(email)
+
+
 @app.get("/api/health", tags=["Sistema"])
 async def api_health():
     return _coletar_saude_sistema()
@@ -721,7 +801,15 @@ async def api_gerar_licenca_oficina_hub(request: Request, body: HubLicencaIn):
     )
     hash_pub = gerar_hash_publico_licenca(chave)
 
-    _registrar_licenca_hub_db(chave, validade, hwid)
+    _registrar_licenca_hub_db(
+        chave,
+        validade,
+        hwid,
+        email=str(body.email or ""),
+        cliente=str(body.cliente or ""),
+        tipo=tipo,
+        plano=str(body.plano or ""),
+    )
     _registrar_licenca_hub_log(
         {
             "ts": datetime.now().isoformat(),

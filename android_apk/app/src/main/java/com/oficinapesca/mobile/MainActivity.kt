@@ -22,6 +22,23 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(Color.parseColor("#0E1524"))
         })
 
+        val emailValidado = getSharedPreferences(IdentificacaoActivity.PREFS_NAME, MODE_PRIVATE)
+            .getString(IdentificacaoActivity.KEY_EMAIL_VALIDADO, null)
+
+        if (emailValidado.isNullOrBlank()) {
+            Log.i(TAG, "Nenhuma licença validada neste dispositivo. Exibindo tela de identificação.")
+            startActivity(
+                Intent(this, IdentificacaoActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    intent.getStringExtra(IdentificacaoActivity.EXTRA_EMAIL_DESKTOP)?.let { emailDesktop ->
+                        putExtra(IdentificacaoActivity.EXTRA_EMAIL_DESKTOP, emailDesktop)
+                    }
+                }
+            )
+            finish()
+            return
+        }
+
         StartupConnectionState.setConnecting()
         startActivity(
             Intent(this, SistemaPrincipalActivity::class.java).apply {
