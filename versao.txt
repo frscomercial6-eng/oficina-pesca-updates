@@ -1,4 +1,4 @@
-versao=1.0.34
-novidades=v1.0.34: Push para o Drive para licenca manual e atualizacao critica dos endpoints da InfinitePay.
+versao=1.0.54
+novidades=v1.0.54: Codigo de negocio protegido com Nuitka e atualizacao de versao.
 url_download=https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe
 download_url=https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe

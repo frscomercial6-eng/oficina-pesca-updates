@@ -1,8 +1,13 @@
 # Build outputs
 INSTALADOR_FINAL/
 PACOTE_ENVIO/
-build/
-dist/
+/build/
+/dist/
+apk_celular_distribuicao/
+infra/releases/
+infra/build/artifacts/
+infra/dist/
+*.py.bak
 
 # Python caches and local environments
 __pycache__/
