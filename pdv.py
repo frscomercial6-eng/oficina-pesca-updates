@@ -64,7 +64,9 @@ _patch_ctklabel_destroy_safely()
 
 def _to_float(valor):
     try:
-        return float(str(valor).replace(",", "."))
+        txt = str(valor).strip()
+        txt = txt.replace(".", "").replace(",", ".") if "," in txt else txt
+        return float(txt)
     except Exception:
         return 0.0
 
@@ -981,14 +983,50 @@ class FrmPDV(ctk.CTkToplevel):
             if not valores:
                 return "break"
             row = (int(valores[0]), str(valores[1]), _to_float(valores[2]), int(float(valores[3] or 0)))
-            self._preencher_item_preselecionado(row)
-            win.destroy()
+            # Quantidade atual informada no PDV (padrao 1) e aplicada ao produto.
+            qtd = int(_to_float(self.ent_qtd.get() or 1) or 1)
+            if qtd <= 0:
+                qtd = 1
+            # Integra o produto DIRETAMENTE ao carrinho principal do PDV:
+            # _adicionar_item_no_carrinho insere a linha no tree_carrinho e
+            # chama _renderizar_carrinho -> _atualizar_resumo (recalcula totais).
+            if self._adicionar_item_no_carrinho(row=row, qtd=qtd):
+                win.destroy()
+                self._preparar_proximo_item()
             return "break"
 
         ent_filtro.bind("<KeyRelease>", lambda _e: carregar_lista())
         ent_filtro.bind("<Return>", confirmar_selecao)
         tree.bind("<Double-1>", confirmar_selecao)
         tree.bind("<Return>", confirmar_selecao)
+
+        # Rodapé com botão de confirmação explícito (fluxo via mouse).
+        rodape = ctk.CTkFrame(win, fg_color="transparent")
+        rodape.pack(fill="x", padx=12, pady=(0, 12))
+        ctk.CTkLabel(
+            rodape,
+            text="Duplo clique, ENTER ou botão para adicionar ao carrinho.",
+            font=("Arial", 10),
+            text_color="#94a3b8",
+        ).pack(side="left")
+        ctk.CTkButton(
+            rodape,
+            text="Fechar",
+            width=110,
+            height=34,
+            fg_color="#374151",
+            hover_color="#4b5563",
+            command=win.destroy,
+        ).pack(side="right", padx=(0, 8))
+        ctk.CTkButton(
+            rodape,
+            text="Adicionar ao carrinho",
+            width=200,
+            height=34,
+            fg_color="#16a34a",
+            hover_color="#15803d",
+            command=lambda: confirmar_selecao(),
+        ).pack(side="right")
 
         carregar_lista()
         ent_filtro.focus_force()
