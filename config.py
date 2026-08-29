@@ -1637,23 +1637,7 @@ def obter_info_nova_versao() -> dict:
             "Accept": "application/vnd.github+json",
         }
 
-        # 1) Fonte principal: GitHub release mais recente.
-        try:
-            info = _consultar_release_latest(headers)
-            if info.get("versao"):
-                return info
-        except Exception:
-            pass
-
-        # 2) Fallback: tags do repositório quando release ainda não estiver completa.
-        try:
-            info = _consultar_tags(headers)
-            if info.get("versao"):
-                return info
-        except Exception:
-            pass
-
-        # 3) Fallback legado: manifestos RAW (config/version/versao txt/json).
+        # 1) Fonte principal: manifesto RAW oficial controlado pelo release.
         urls_tentativa = _gerar_urls_remotas_oficiais()
 
         ultimo_erro = ""
@@ -1667,6 +1651,22 @@ def obter_info_nova_versao() -> dict:
                     return info
             except Exception as e:
                 ultimo_erro = str(e)
+
+        # 2) Fallback: GitHub release mais recente.
+        try:
+            info = _consultar_release_latest(headers)
+            if info.get("versao"):
+                return info
+        except Exception:
+            pass
+
+        # 3) Fallback: tags do repositório quando release ainda não estiver completa.
+        try:
+            info = _consultar_tags(headers)
+            if info.get("versao"):
+                return info
+        except Exception:
+            pass
 
         if ultimo_erro:
             print(f"❌ ERRO CRÍTICO NA BUSCA DE ATUALIZAÇÃO: {ultimo_erro}")
