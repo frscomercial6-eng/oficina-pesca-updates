@@ -4020,24 +4020,17 @@ class FrmMenu(ctk.CTk):
                     )
                     return
 
-                confirmar = messagebox.askyesno(
-                    "Atualizações",
-                    f"Nova versão disponível: {versao_remota}\n"
-                    f"Versão atual: {APP_VERSION}\n\n"
-                    "Deseja baixar e instalar agora?\n"
-                    "O sistema pode ser fechado para concluir a atualização.",
+                # Mensagem ÚNICA do fluxo de atualização: confirma e avisa
+                # que o sistema será encerrado antes de instalar.
+                confirmar = messagebox.askokcancel(
+                    "Atualização",
+                    "Uma nova versão está disponível. O sistema será encerrado para aplicar a atualização.",
                     parent=self,
                 )
                 if not confirmar:
                     return
 
-                messagebox.showinfo(
-                    "Atualizações",
-                    "Iniciando download da atualização...",
-                    parent=self,
-                )
-                # Chamada explícita do fluxo de atualização após o aviso informativo.
-                self.after(10, lambda: self._iniciar_download_atualizacao(url_download, versao_remota))
+                self._iniciar_download_atualizacao(url_download, versao_remota)
                 return
 
             if versao_remota:
@@ -4082,11 +4075,10 @@ class FrmMenu(ctk.CTk):
 
             def _finalizar():
                 if ok:
-                    messagebox.showinfo(
-                        "Atualizações",
-                        "Download concluído e instalador iniciado com sucesso.",
-                        parent=self,
-                    )
+                    # Instalador disparado de forma desacoplada; o launcher
+                    # aguarda este processo encerrar ANTES de executar o
+                    # instalador baixado. Fecha TODO o sistema agora.
+                    fechar_sistema(self)
                 else:
                     msg_final = str(msg or "").strip()
                     if msg_final in {"Sistema atualizado", "Sem novas atualizações"}:

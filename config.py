@@ -3137,6 +3137,7 @@ def executar_atualizacao(
                 "/VERYSILENT",
                 "/SUPPRESSMSGBOXES",
                 "/NOCANCEL",
+                "/NORESTART",
                 "/CLOSEAPPLICATIONS",
                 "/FORCECLOSEAPPLICATIONS",
                 "/NORESTARTAPPLICATIONS",
@@ -3173,8 +3174,17 @@ def executar_atualizacao(
         if pid_txt:
             script_lines.extend(
                 [
+                    'rem 1) Aguarda o encerramento GRACIOSO do proprio aplicativo,',
+                    'rem    que se fecha sozinho apos disparar este launcher.',
+                    'for /l %%I in (1,1,30) do (',
+                    '  tasklist /FI "PID eq %PARENT_PID%" | find "%PARENT_PID%" >nul',
+                    '  if errorlevel 1 goto :pid_encerrado',
+                    '  ping 127.0.0.1 -n 2 >nul',
+                    ')',
+                    'echo [%date% %time%] Aplicativo ainda ativo apos espera graciosa; forcando encerramento do PID %PARENT_PID%>>"%UPDATE_ERR_LOG%"',
+                    'rem 2) Fallback: encerra forcadamente apenas se o app nao saiu sozinho.',
                     'taskkill /PID %PARENT_PID% /T /F >nul 2>nul',
-                    'for /l %%I in (1,1,25) do (',
+                    'for /l %%I in (1,1,15) do (',
                     '  tasklist /FI "PID eq %PARENT_PID%" | find "%PARENT_PID%" >nul',
                     '  if errorlevel 1 goto :pid_encerrado',
                     '  ping 127.0.0.1 -n 2 >nul',
@@ -3221,12 +3231,50 @@ def executar_atualizacao(
         with open(launcher_script, "w", encoding="utf-8") as fscript:
             fscript.write("\r\n".join(script_lines) + "\r\n")
 
-        creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-        subprocess.Popen(
-            ["cmd", "/c", launcher_script],
-            cwd=base_tmp,
-            creationflags=creationflags,
-        )
+        def _disparar_launcher() -> str:
+            """Dispara o launcher .cmd desacoplado com fallbacks de parâmetros válidos.
+
+            A v1.0.54 usava DETACHED_PROCESS | CREATE_NEW_CONSOLE — combinação
+            mutuamente exclusiva no Windows, que fazia o CreateProcess falhar
+            com "[WinError 87] Parâmetro incorreto". Cada tentativa abaixo usa
+            parâmetros válidos e independentes.
+            """
+            tentativas = [
+                (
+                    "cmd.exe /d /c com CREATE_NEW_CONSOLE",
+                    lambda: subprocess.Popen(
+                        ["cmd.exe", "/d", "/c", launcher_script],
+                        cwd=base_tmp,
+                        creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+                    ),
+                ),
+                (
+                    "cmd.exe /d /c sem flags",
+                    lambda: subprocess.Popen(
+                        ["cmd.exe", "/d", "/c", launcher_script],
+                        cwd=base_tmp,
+                    ),
+                ),
+                (
+                    "os.startfile (ShellExecute)",
+                    lambda: os.startfile(launcher_script),  # type: ignore[attr-defined]
+                ),
+            ]
+            ultimo_erro: Exception | None = None
+            for descricao, acao in tentativas:
+                try:
+                    acao()
+                    log_upd.info("[update] Launcher disparado com sucesso via: %s", descricao)
+                    return descricao
+                except OSError as exc:
+                    ultimo_erro = exc
+                    _registrar_erro_update(f"Falha ao disparar launcher via {descricao}: {exc}")
+                    log_upd.warning("[update] Falha ao disparar launcher via %s: %s", descricao, exc)
+            if ultimo_erro is not None:
+                raise ultimo_erro
+            raise OSError("Nenhuma estratégia válida para disparar o launcher do instalador.")
+
+        _disparar_launcher()
 
         registrar_update_aplicado_local(
             versao_alvo or APP_VERSION,

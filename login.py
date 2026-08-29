@@ -1387,13 +1387,6 @@ _auto_update_disparada = False
 _janela_update = None
 _label_update = None
 _barra_update = None
-_janela_aviso_update = None
-_label_aviso_update = None
-_label_timer_update = None
-_btn_agora_update = None
-_btn_adiar_update = None
-_update_contagem_regressiva = 0
-_update_contagem_expirada = False
 _update_versao_detectada = ""
 _update_novidades_detectadas = ""
 
@@ -1410,194 +1403,39 @@ def _fechar_popup_atualizacao():
     _barra_update = None
 
 
-def _fechar_aviso_atualizacao():
-    global _janela_aviso_update, _label_aviso_update, _label_timer_update, _btn_agora_update, _btn_adiar_update
-    try:
-        if _janela_aviso_update and _janela_aviso_update.winfo_exists():
-            _janela_aviso_update.destroy()
-    except Exception:
-        pass
-    _janela_aviso_update = None
-    _label_aviso_update = None
-    _label_timer_update = None
-    _btn_agora_update = None
-    _btn_adiar_update = None
+def _avisar_atualizacao_unica(versao: str, novidades: str = ""):
+    """Exibe UMA única mensagem de atualização por sessão.
 
+    Substitui o antigo popup com contagem regressiva (que abria janelas
+    duplicadas). Ao confirmar, o download é feito e o sistema é totalmente
+    encerrado ANTES de o instalador baixado ser executado: o launcher (.cmd)
+    aguarda este processo terminar e só então roda o instalador.
+    """
+    global _popup_update_exibido, _update_versao_detectada, _update_novidades_detectadas
 
-def _abrir_popup_aviso_atualizacao(versao: str, novidades: str = ""):
-    global _janela_aviso_update, _label_aviso_update, _label_timer_update, _btn_agora_update, _btn_adiar_update
-    global _update_contagem_regressiva, _update_contagem_expirada, _update_versao_detectada, _update_novidades_detectadas
-
+    if _popup_update_exibido or _auto_update_disparada:
+        return
     if not janela_login.winfo_exists():
         return
 
+    _popup_update_exibido = True
     _update_versao_detectada = str(versao or "").strip()
     _update_novidades_detectadas = str(novidades or "").strip()
-    _update_contagem_regressiva = 30
-    _update_contagem_expirada = False
 
-    def _iniciar_instalacao():
-        global _auto_update_disparada
-        if _auto_update_disparada:
-            return
-        _auto_update_disparada = True
-        _fechar_aviso_atualizacao()
-        _mostrar_popup_atualizacao("Preparando atualização...", 0.0)
-        _executar_instalacao_update(confirmar_usuario=False)
-
-    def _adiar():
-        _fechar_aviso_atualizacao()
-
-    def _tick_contagem():
-        global _update_contagem_regressiva, _update_contagem_expirada
-        if not _janela_aviso_update or not _janela_aviso_update.winfo_exists():
-            return
-
-        if _update_contagem_regressiva > 0:
-            if _label_timer_update and _label_timer_update.winfo_exists():
-                _label_timer_update.configure(text=f"Esta janela fecha sozinha em {_update_contagem_regressiva} segundos.")
-            _update_contagem_regressiva -= 1
-            _janela_aviso_update.after(1000, _tick_contagem)
-            return
-
-        if _update_contagem_expirada:
-            return
-
-        _update_contagem_expirada = True
-        if _label_aviso_update and _label_aviso_update.winfo_exists():
-            _label_aviso_update.configure(
-                text="Sem resposta. Iniciando atualização automática agora...",
-                text_color="#f1c40f",
-            )
-        if _label_timer_update and _label_timer_update.winfo_exists():
-            _label_timer_update.configure(text="Preparando download e instalação automática.")
-        if _btn_agora_update and _btn_agora_update.winfo_exists():
-            _btn_agora_update.configure(state="disabled")
-        if _btn_adiar_update and _btn_adiar_update.winfo_exists():
-            _btn_adiar_update.configure(state="disabled")
-        _janela_aviso_update.after(900, _iniciar_instalacao)
-
-    if _janela_aviso_update and _janela_aviso_update.winfo_exists():
-        try:
-            _janela_aviso_update.lift()
-            _janela_aviso_update.focus_force()
-        except Exception:
-            pass
+    resposta = messagebox.askokcancel(
+        "Atualização",
+        "Uma nova versão está disponível. O sistema será encerrado para aplicar a atualização.",
+        parent=janela_login,
+    )
+    if not resposta:
+        # Usuário optou por atualizar depois: não insiste nesta sessão.
         return
 
-    _janela_aviso_update = ctk.CTkToplevel(janela_login)
-    _janela_aviso_update.title("Nova atualização disponível")
-    _janela_aviso_update.geometry("560x260")
-    _janela_aviso_update.resizable(False, False)
-    _janela_aviso_update.transient(janela_login)
-    _janela_aviso_update.grab_set()
-    _janela_aviso_update.configure(fg_color="#111827")
-    _janela_aviso_update.protocol("WM_DELETE_WINDOW", _adiar)
-
-    frame = ctk.CTkFrame(_janela_aviso_update, fg_color="#1f2937", corner_radius=20)
-    frame.pack(fill="both", expand=True, padx=18, pady=18)
-
-    _label_aviso_update = ctk.CTkLabel(
-        frame,
-        text="Uma nova atualização da FRS Solutions está disponível. Deseja atualizar agora?",
-        wraplength=480,
-        justify="center",
-        font=("Segoe UI", 16, "bold"),
-        text_color="#f8fafc",
-    )
-    _label_aviso_update.pack(pady=(20, 12), padx=18)
-
-    detalhes = f"Versão detectada: {_update_versao_detectada}"
-    if _update_novidades_detectadas:
-        detalhes = f"{detalhes}\n{_update_novidades_detectadas}"
-    ctk.CTkLabel(
-        frame,
-        text=detalhes,
-        wraplength=480,
-        justify="center",
-        font=("Segoe UI", 11),
-        text_color="#9ca3af",
-    ).pack(pady=(0, 10), padx=18)
-
-    _label_timer_update = ctk.CTkLabel(
-        frame,
-        text="Atualização automática em 30 segundos (clique em Adiar para cancelar).",
-        font=("Segoe UI", 12, "bold"),
-        text_color="#f1c40f",
-    )
-    _label_timer_update.pack(pady=(0, 10))
-
-    botoes = ctk.CTkFrame(frame, fg_color="transparent")
-    botoes.pack(pady=(8, 0))
-
-    _btn_adiar_update = ctk.CTkButton(
-        botoes,
-        text="Adiar",
-        width=160,
-        height=40,
-        fg_color="#374151",
-        hover_color="#4b5563",
-        command=_adiar,
-    )
-    _btn_adiar_update.grid(row=0, column=0, padx=10)
-
-    _btn_agora_update = ctk.CTkButton(
-        botoes,
-        text="Agora",
-        width=160,
-        height=40,
-        fg_color="#16a34a",
-        hover_color="#15803d",
-        command=_iniciar_instalacao,
-    )
-    _btn_agora_update.grid(row=0, column=1, padx=10)
-
-    janela_login.after(1000, _tick_contagem)
-
-
-def _mostrar_popup_atualizacao(mensagem: str, progresso: float | None = None):
-    global _janela_update, _label_update, _barra_update
-    if not janela_login.winfo_exists():
-        return
-
-    def _interno():
-        nonlocal progresso, mensagem
-        global _janela_update, _label_update, _barra_update
-        if _janela_update is None or not _janela_update.winfo_exists():
-            _janela_update = ctk.CTkToplevel(janela_login)
-            _janela_update.title("Atualização em andamento")
-            _janela_update.geometry("460x180")
-            _janela_update.resizable(False, False)
-            _janela_update.transient(janela_login)
-            _janela_update.grab_set()
-            _janela_update.configure(fg_color="#161b22")
-            try:
-                _janela_update.lift()
-                _janela_update.focus_force()
-            except Exception:
-                pass
-
-            frame = ctk.CTkFrame(_janela_update, fg_color="#1f2a38", corner_radius=18)
-            frame.pack(fill="both", expand=True, padx=18, pady=18)
-            _label_update = ctk.CTkLabel(frame, text=mensagem, font=("Segoe UI", 14, "bold"), wraplength=380, justify="center", text_color="#f1c40f")
-            _label_update.pack(pady=(14, 12), padx=16)
-            _barra_update = ctk.CTkProgressBar(frame, width=360)
-            _barra_update.set(0.0)
-            _barra_update.pack(pady=(0, 10))
-        else:
-            if _label_update and _label_update.winfo_exists():
-                _label_update.configure(text=mensagem)
-            if _barra_update and _barra_update.winfo_exists() and progresso is not None:
-                _barra_update.set(max(0.0, min(float(progresso or 0.0), 1.0)))
-
-    janela_login.after(0, _interno)
-
-
-def _atualizar_popup_atualizacao(mensagem: str, progresso: float | None = None):
-    _mostrar_popup_atualizacao(mensagem, progresso)
+    _executar_instalacao_update(confirmar_usuario=False)
 
 
 def _executar_instalacao_update(confirmar_usuario: bool = True):
+    global _auto_update_disparada
     versao_alvo = str(_update_versao_detectada or "").strip()
     if bloqueio_loop_update_ativo(versao_alvo=versao_alvo):
         messagebox.showinfo("Atualização", "Sistema atualizado", parent=janela_login)
@@ -1607,14 +1445,20 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
         messagebox.showwarning("Atualização", "Link de atualização indisponível no momento.", parent=janela_login)
         return
 
+    if _auto_update_disparada:
+        return
+    _auto_update_disparada = True
+
     if confirmar_usuario:
-        confirmar = messagebox.askyesno(
+        # Fluxo legado (compatibilidade). O caminho principal (_avisar_atualizacao_unica)
+        # já exibe a mensagem única antes de chamar esta função.
+        confirmar = messagebox.askokcancel(
             "Atualização",
-            "Deseja baixar e instalar a nova versão agora?\n\n"
-            "O sistema será fechado para concluir a atualização.",
+            "Uma nova versão está disponível. O sistema será encerrado para aplicar a atualização.",
             parent=janela_login,
         )
         if not confirmar:
+            _auto_update_disparada = False
             return
 
     risco_banco, msg_risco = avaliar_risco_banco_antes_atualizacao()
@@ -1625,25 +1469,33 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
             parent=janela_login,
         )
         if not confirmado_risco:
+            _auto_update_disparada = False
             return
 
-    _mostrar_popup_atualizacao("Verificando atualizações...", 0.05)
+    def _status(mensagem: str):
+        try:
+            label_versao.configure(
+                text=mensagem,
+                text_color="#2ecc71",
+                font=("Arial", 11, "bold"),
+            )
+        except Exception:
+            pass
+
+    _status("Preparando atualização...")
+
+    def _progresso(valor: float, mensagem: str = ""):
+        texto = str(mensagem or "").strip() or "Baixando atualização..."
+        pct = float(valor or 0.0)
+        try:
+            janela_login.after(
+                0,
+                lambda: _status(f"{texto} ({int(pct * 100)}%)" if 0 < pct < 1 else texto),
+            )
+        except Exception:
+            pass
 
     def _worker_update():
-        def _progresso(valor: float, mensagem: str = ""):
-            try:
-                janela_login.after(
-                    0,
-                    lambda: _atualizar_popup_atualizacao(
-                        "Baixando nova versão..." if str(mensagem or "").lower().startswith("baixando") else (
-                            "Instalando..." if str(mensagem or "").lower().startswith("download concluído") else (str(mensagem or "") or "Atualizando...")
-                        ),
-                        float(valor or 0.0),
-                    )
-                )
-            except Exception:
-                pass
-
         ok, msg = executar_atualizacao(
             _url_update_disponivel,
             app_executavel=sys.executable,
@@ -1654,28 +1506,29 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
         )
 
         def _finalizar():
+            global _auto_update_disparada
             if ok:
-                _atualizar_popup_atualizacao("Instalando...", 1.0)
-                # Ordem profissional: fecha app principal para o Atualizador assumir o processo.
+                _status("Atualização baixada. Encerrando o sistema para instalar...")
+                # Fechamento TOTAL da aplicação ANTES de o instalador executar:
+                # o launcher (.cmd) aguarda este processo terminar e só então
+                # dispara o instalador baixado.
                 try:
-                    _fechar_aviso_atualizacao()
-                    janela_login.after(250, janela_login.destroy)
+                    janela_login.after(400, lambda: fechar_sistema(janela_login))
                 except Exception:
-                    pass
-                try:
-                    janela_login.quit()
-                except Exception:
-                    pass
+                    fechar_sistema(janela_login)
             else:
-                _atualizar_popup_atualizacao(str(msg or "Sem novas atualizações"), 0.0)
-                janela_login.after(1800, _fechar_popup_atualizacao)
+                _auto_update_disparada = False
+                _status("")
                 msg_final = str(msg or "").strip()
                 if msg_final in {"Sistema atualizado", "Sem novas atualizações"}:
                     messagebox.showinfo("Atualização", msg_final, parent=janela_login)
                 else:
                     messagebox.showerror("Atualização", msg_final or "Falha ao baixar/instalar atualização.", parent=janela_login)
 
-        janela_login.after(0, _finalizar)
+        try:
+            janela_login.after(0, _finalizar)
+        except Exception:
+            _finalizar()
 
     threading.Thread(target=_worker_update, daemon=True, name="ofp-update-ui").start()
 
@@ -1852,18 +1705,22 @@ def _checar_versao_bg():
         _mensagem_politica_update = "Atualização automática liberada."
 
         def _mostrar():
-            global _url_update_disponivel, _auto_update_liberado, _mensagem_politica_update, _popup_update_exibido, _auto_update_disparada
+            global _url_update_disponivel, _auto_update_liberado, _mensagem_politica_update
             texto_update = f"Nova versão {versao_nova} disponível."
             if novidades:
                 texto_update = f"{texto_update} {novidades}".strip()
-            label_versao.configure(
-                text=texto_update,
-                text_color="#2ecc71",
-                font=("Arial", 11, "bold"),
-            )
-            if not _popup_update_exibido and _url_update_disponivel:
-                _popup_update_exibido = True
-                _abrir_popup_aviso_atualizacao(versao_nova, novidades)
+            try:
+                label_versao.configure(
+                    text=texto_update,
+                    text_color="#2ecc71",
+                    font=("Arial", 11, "bold"),
+                )
+            except Exception:
+                pass
+            # Exibe UMA única mensagem de atualização; ao confirmar, o app é
+            # totalmente encerrado antes de o instalador ser executado.
+            if _url_update_disponivel:
+                _avisar_atualizacao_unica(versao_nova, novidades)
         janela_login.after(0, _mostrar)
     else:
         janela_login.after(0, _fechar_popup_atualizacao)
