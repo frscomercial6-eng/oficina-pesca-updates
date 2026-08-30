@@ -6,14 +6,16 @@ import json
 import re
 from tkinter import messagebox, ttk
 from datetime import datetime
-from config import CAMINHO_BANCO, inicializar_banco, get_db_connection, enviar_registro_os_central_silencioso
+from config import CAMINHO_BANCO, inicializar_banco, get_db_connection, enviar_registro_os_central_silencioso, get_logger
 from util_recibo import gerar_recibo_entrega
 from status_os import normalizar_status_orcamento, is_status_aguardando_orcamento, is_status_orcamento
 from core.gestao_os_service import carregar_dados_orcamento, listar_orcamentos_gestao, mudar_status_orcamento
+from core.i18n import t  # NOVO: import do sistema de i18n
 
 import tela_os
 
 caminho_banco = CAMINHO_BANCO
+logger = get_logger()
 
 
 def _garantir_colunas_entrega():
@@ -49,14 +51,14 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
 
         header = ctk.CTkFrame(self, fg_color="#1f2a38", corner_radius=20)
         header.pack(fill="x", padx=20, pady=(20, 10))
-        ctk.CTkLabel(header, text="📋 CONSULTA DE O.S.", font=("Arial", 22, "bold"), text_color="orange").pack(side="left", padx=20, pady=20)
-        ctk.CTkButton(header, text="Atualizar", fg_color="#2980b9", width=120, command=self.buscar_os).pack(side="right", padx=20, pady=20)
+        ctk.CTkLabel(header, text=t("ui_consulta_de_o_s"), font=("Arial", 22, "bold"), text_color="orange").pack(side="left", padx=20, pady=20)
+        ctk.CTkButton(header, text=t("btn_atualizar"), fg_color="#2980b9", width=120, command=self.buscar_os).pack(side="right", padx=20, pady=20)
 
         f_busca = ctk.CTkFrame(self, fg_color="#1f2a38", corner_radius=20)
         f_busca.pack(pady=10, padx=20, fill="x")
-        self.ent_busca = ctk.CTkEntry(f_busca, placeholder_text="Buscar por Nº da O.S., nome do cliente ou WhatsApp", width=300)
+        self.ent_busca = ctk.CTkEntry(f_busca, placeholder_text=t("ui_buscar_por_n_da_o_s_nome_do_cliente_ou_whatsapp"), width=300)
         self.ent_busca.pack(side="left", padx=(20, 10), pady=10, fill="x", expand=True)
-        ctk.CTkButton(f_busca, text="PESQUISAR", fg_color="#2980b9", width=120, command=self.buscar_os).pack(side="left", padx=(0, 20), pady=10)
+        ctk.CTkButton(f_busca, text=t("ui_pesquisar"), fg_color="#2980b9", width=120, command=self.buscar_os).pack(side="left", padx=(0, 20), pady=10)
         self.ent_busca.bind("<Return>", lambda _e: self.buscar_os())
         self.ent_busca.bind("<KeyRelease>", lambda _e: self.buscar_os())
 
@@ -64,14 +66,14 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
         self.f_botoes = ctk.CTkFrame(self, fg_color="#1f2a38", corner_radius=20)
         self.f_botoes.pack(pady=(0, 6), padx=20, fill="x")
         ctk.CTkButton(
-            self.f_botoes, text="🔄 ALTERAR STATUS", fg_color="#7d4e00", hover_color="#a86500",
+            self.f_botoes, text=t("ui_alterar_status"), fg_color="#7d4e00", hover_color="#a86500",
             width=180, command=self.alterar_status_orcamento
         ).pack(side="left", padx=(20, 10), pady=10)
         ctk.CTkButton(
-            self.f_botoes, text="📂 ABRIR O.S.", fg_color="#2980b9", width=140,
+            self.f_botoes, text=t("ui_abrir_o_s"), fg_color="#2980b9", width=140,
             command=self.abrir_orcamento_selecionado
         ).pack(side="left", padx=(0, 10), pady=10)
-        self.lbl_info = ctk.CTkLabel(self.f_botoes, text="Selecione um orçamento...", justify="left",
+        self.lbl_info = ctk.CTkLabel(self.f_botoes, text=t("ui_selecione_um_or_amento"), justify="left",
                                      font=("Arial", 12), text_color="#bdc3c7")
         self.lbl_info.pack(side="left", padx=15, pady=10)
 
@@ -88,17 +90,17 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
             show="headings",
             height=12
         )
-        self.tab.heading("id", text="Nº OC")
-        self.tab.heading("id_cliente", text="ID / NOME")
-        self.tab.heading("whatsapp", text="WhatsApp")
-        self.tab.heading("equipamento", text="Equipamento")
-        self.tab.heading("defeito", text="Defeito")
-        self.tab.heading("valor_total", text="ValorTotal")
-        self.tab.heading("sinal", text="Sinal")
-        self.tab.heading("saldo", text="Saldo")
-        self.tab.heading("status", text="Status")
-        self.tab.heading("data", text="Data")
-        self.tab.heading("descricao", text="PEÇAS / SERVIÇOS")
+        self.tab.heading("id", text=t("ui_n_oc"))
+        self.tab.heading("id_cliente", text=t("ui_id_nome"))
+        self.tab.heading("whatsapp", text=t("msg_titulo_whatsapp"))
+        self.tab.heading("equipamento", text=t("ui_equipamento"))
+        self.tab.heading("defeito", text=t("ui_defeito"))
+        self.tab.heading("valor_total", text=t("ui_valortotal"))
+        self.tab.heading("sinal", text=t("ui_sinal"))
+        self.tab.heading("saldo", text=t("ui_saldo"))
+        self.tab.heading("status", text=t("ui_status"))
+        self.tab.heading("data", text=t("col_data"))
+        self.tab.heading("descricao", text=t("ui_pe_as_servi_os"))
 
         self.tab.column("id", width=60, anchor="center")
         self.tab.column("id_cliente", width=150, anchor="w")
@@ -217,7 +219,7 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
 
         ctk.CTkLabel(dialogo, text=f"Orçamento Nº {num_os}", font=("Arial", 14, "bold"),
                      text_color="orange").pack(pady=(18, 6))
-        ctk.CTkLabel(dialogo, text="Selecione o novo status:", font=("Arial", 12),
+        ctk.CTkLabel(dialogo, text=t("ui_selecione_o_novo_status"), font=("Arial", 12),
                      text_color="#ecf0f1").pack(pady=(0, 12))
 
         def aplicar(novo_status):
@@ -279,7 +281,7 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
 
         ctk.CTkButton(
             f_btns,
-            text="APLICAR STATUS",
+            text=t("ui_aplicar_status"),
             width=240,
             fg_color="#1a6b30",
             hover_color="#27ae60",
@@ -304,7 +306,11 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
                 ]
 
             for row in rows:
-                id_orc, id_cli, nome_cli, equipamento, defeito, total, sinal, saldo, status, data, itens_json, telefone_cli, dados_adicionais = row
+                try:
+                    id_orc, id_cli, nome_cli, equipamento, defeito, total, sinal, saldo, status, data, itens_json, telefone_cli, dados_adicionais = row
+                except ValueError:
+                    logger.warning("Linha de O.S. com formato inesperado ignorada: %s", row[:4])
+                    continue
                 id_nome = f"{id_cli} - {nome_cli}" if id_cli else str(nome_cli or "")
                 descricao_fmt = self._formatar_itens(itens_json)
                 telefone = str(telefone_cli or "").strip()
@@ -346,7 +352,7 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
             if rows:
                 self.lbl_info.configure(text=f"{len(rows)} O.S.(s) encontrada(s). Filtro dinâmico por nº, cliente e WhatsApp ativo.")
             else:
-                self.lbl_info.configure(text="Nenhuma O.S. encontrada para o filtro informado.")
+                self.lbl_info.configure(text=t("ui_nenhuma_o_s_encontrada_para_o_filtro_informado"))
         except Exception as e:
             self.lbl_info.configure(text=f"Erro ao consultar orçamentos: {e}")
 
@@ -412,7 +418,7 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
                 self.master._ultima_os_contexto = self.dados_os
 
             if not self.dados_os:
-                self.lbl_info.configure(text="Não foi possível carregar os detalhes do orçamento selecionado.")
+                self.lbl_info.configure(text=t("ui_n_o_foi_poss_vel_carregar_os_detalhes_do_or_amento_seleciona"))
                 return
 
             status = (self.dados_os[7] or "").upper()

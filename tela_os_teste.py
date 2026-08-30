@@ -34,8 +34,11 @@ from config import (
     obter_google_ai_key_mestre, enviar_arquivo_para_drive_usuario, enviar_registro_os_central_silencioso,
     localizar_ou_criar_pasta_drive, localizar_ou_criar_planilha, buscar_linha_por_fabricante_modelo,
     adicionar_linha_planilha, ler_links_alertas_conhecimento, salvar_link_alerta_conhecimento,
-    obter_modo_operacao
+        obter_modo_operacao
 )
+
+# NOVO: import do sistema de i18n
+from core.i18n import t
 
 # Inicialização da variável global logger (Resolve o NameError)
 logger = get_logger()
@@ -336,16 +339,16 @@ class FrmOS(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             dialogo,
-            text="Selecione a condição de pagamento",
+            text=t("label_condicao_pagamento"),
             font=("Arial", 14, "bold"),
             text_color="orange",
         ).pack(pady=(14, 8))
 
-        ctk.CTkLabel(dialogo, text="Condição", font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(anchor="w", padx=20)
+        ctk.CTkLabel(dialogo, text=t("ui_condi_o"), font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(anchor="w", padx=20)
         f_cond = ctk.CTkFrame(dialogo, fg_color="#161b22")
         f_cond.pack(fill="x", padx=20, pady=(4, 10))
 
-        lbl_cond = ctk.CTkLabel(dialogo, text="Condição: não selecionada", text_color="#95a5a6")
+        lbl_cond = ctk.CTkLabel(dialogo, text=t("ui_condi_o_n_o_selecionada"), text_color="#95a5a6")
         lbl_cond.pack(anchor="w", padx=20, pady=(0, 10))
 
         def escolher_condicao(valor, texto):
@@ -353,15 +356,15 @@ class FrmOS(ctk.CTkToplevel):
             lbl_cond.configure(text=f"Condição: {texto}", text_color="#2ecc71")
             atualizar_estado_confirmar()
 
-        ctk.CTkButton(f_cond, text="50% entrada", width=130, command=lambda: escolher_condicao("50%_sinal", "50% entrada")).pack(side="left", padx=4)
-        ctk.CTkButton(f_cond, text="100% à vista", width=130, command=lambda: escolher_condicao("100%_total", "100% à vista")).pack(side="left", padx=4)
-        ctk.CTkButton(f_cond, text="100% na entrega", width=130, command=lambda: escolher_condicao("100%_entrega", "100% na entrega")).pack(side="left", padx=4)
+        ctk.CTkButton(f_cond, text=t("ui_50_entrada"), width=130, command=lambda: escolher_condicao("50%_sinal", "50% entrada")).pack(side="left", padx=4)
+        ctk.CTkButton(f_cond, text=t("ui_100_vista"), width=130, command=lambda: escolher_condicao("100%_total", "100% à vista")).pack(side="left", padx=4)
+        ctk.CTkButton(f_cond, text=t("ui_100_na_entrega"), width=130, command=lambda: escolher_condicao("100%_entrega", "100% na entrega")).pack(side="left", padx=4)
 
-        ctk.CTkLabel(dialogo, text="Forma de pagamento", font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(anchor="w", padx=20) #
+        ctk.CTkLabel(dialogo, text=t("ui_forma_de_pagamento"), font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(anchor="w", padx=20) #
         f_met = ctk.CTkFrame(dialogo, fg_color="#161b22") #
         f_met.pack(fill="x", padx=20, pady=(4, 10)) #
         
-        lbl_met = ctk.CTkLabel(dialogo, text="Forma: não selecionada", text_color="#95a5a6")
+        lbl_met = ctk.CTkLabel(dialogo, text=t("ui_forma_n_o_selecionada"), text_color="#95a5a6")
         lbl_met.pack(anchor="w", padx=20, pady=(0, 14))
 
         def escolher_metodo(valor):
@@ -369,9 +372,9 @@ class FrmOS(ctk.CTkToplevel):
             lbl_met.configure(text=f"Forma: {valor}", text_color="#2ecc71")
             atualizar_estado_confirmar()
 
-        ctk.CTkButton(f_met, text="PIX", width=130, command=lambda: escolher_metodo("PIX")).pack(side="left", padx=4)
-        ctk.CTkButton(f_met, text="Cartão", width=130, command=lambda: escolher_metodo("CARTÃO")).pack(side="left", padx=4)
-        ctk.CTkButton(f_met, text="Dinheiro", width=130, command=lambda: escolher_metodo("DINHEIRO")).pack(side="left", padx=4)
+        ctk.CTkButton(f_met, text=t("ui_pix"), width=130, command=lambda: escolher_metodo("PIX")).pack(side="left", padx=4)
+        ctk.CTkButton(f_met, text=t("ui_cart_o"), width=130, command=lambda: escolher_metodo("CARTÃO")).pack(side="left", padx=4)
+        ctk.CTkButton(f_met, text=t("ui_dinheiro"), width=130, command=lambda: escolher_metodo("DINHEIRO")).pack(side="left", padx=4)
 
         botoes = ctk.CTkFrame(dialogo, fg_color="#161b22")
         botoes.pack(fill="x", padx=20, pady=(4, 10))
@@ -379,9 +382,9 @@ class FrmOS(ctk.CTkToplevel):
         def confirmar():
             dialogo.destroy()
 
-        btn_confirmar = ctk.CTkButton(botoes, text="Confirmar", fg_color="#27ae60", state="disabled", command=confirmar)
+        btn_confirmar = ctk.CTkButton(botoes, text=t("btn_confirmar"), fg_color="#27ae60", state="disabled", command=confirmar)
         btn_confirmar.pack(side="left", padx=(0, 8), fill="x", expand=True)
-        ctk.CTkButton(botoes, text="Cancelar", fg_color="#7f8c8d", command=dialogo.destroy).pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(botoes, text=t("btn_cancelar"), fg_color="#7f8c8d", command=dialogo.destroy).pack(side="left", fill="x", expand=True)
 
         def atualizar_estado_confirmar():
             if resultado["condicao"] and resultado["metodo"]:
@@ -430,7 +433,7 @@ class FrmOS(ctk.CTkToplevel):
 
         self._lbl_teste = ctk.CTkLabel(
             self,
-            text="TELA_OS_TESTE - MODO MINIMO (SEM BANCO/THREADS/ASSETS)",
+            text=t("ui_tela_os_teste_modo_minimo_sem_banco_threads_assets"),
             font=("Arial", 16, "bold"),
             text_color="#1f2937",
         )
@@ -485,7 +488,7 @@ class FrmOS(ctk.CTkToplevel):
         header.grid(row=0, column=0, sticky="ew", padx=10, pady=(0, 5))
         self.lbl_oc = ctk.CTkLabel(header, text=f"ORÇAMENTO Nº: {self.num_oc}", font=("Arial", 24, "bold"), text_color="orange")
         self.lbl_oc.pack(side="left", padx=15, pady=15)
-        ctk.CTkLabel(header, text="Registro rápido: cliente + equipamentos. Orçamento por item quando necessário.", font=("Arial", 10), text_color="#bdc3c7").pack(side="left", padx=15)
+        ctk.CTkLabel(header, text=t("ui_registro_r_pido_cliente_equipamentos_or_amento_por_item_quan"), font=("Arial", 10), text_color="#bdc3c7").pack(side="left", padx=15)
         self.atualizar_identificacao_documento(self.status_documento)
 
         # LAYOUT ÚNICO: CTkScrollableFrame substituindo TabView
@@ -499,11 +502,11 @@ class FrmOS(ctk.CTkToplevel):
         f_dados.grid_columnconfigure(1, weight=1)
         f_dados.grid_columnconfigure(2, weight=3)
 
-        ctk.CTkLabel(f_dados, text="CLIENTE", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=0, padx=(15, 5), pady=(10, 2), sticky="w")
-        ctk.CTkLabel(f_dados, text="BUSCA", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=1, padx=(0, 15), pady=(10, 2), sticky="e")
-        ctk.CTkLabel(f_dados, text="TELEFONE / WHATSAPP", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=2, padx=(0, 15), pady=(10, 2), sticky="w")
+        ctk.CTkLabel(f_dados, text=t("ui_cliente_1"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=0, padx=(15, 5), pady=(10, 2), sticky="w")
+        ctk.CTkLabel(f_dados, text=t("ui_busca"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=1, padx=(0, 15), pady=(10, 2), sticky="e")
+        ctk.CTkLabel(f_dados, text=t("ui_telefone_whatsapp"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=2, padx=(0, 15), pady=(10, 2), sticky="w")
 
-        self.txt_cliente = ctk.CTkEntry(f_dados, placeholder_text="NOME DO CLIENTE", width=300)
+        self.txt_cliente = ctk.CTkEntry(f_dados, placeholder_text=t("ui_nome_do_cliente"), width=300)
         self.txt_cliente.grid(row=1, column=0, padx=(15, 5), pady=(0, 12), sticky="ew")
         self.txt_cliente.bind("<Return>", self.buscar_cliente)
         self.txt_cliente.bind("<FocusOut>", self.buscar_cliente)
@@ -511,11 +514,11 @@ class FrmOS(ctk.CTkToplevel):
         self.btn_lupa = ctk.CTkButton(f_dados, text="🔍", width=50, fg_color="#2980b9", command=self.abrir_consulta_clientes)
         self.btn_lupa.grid(row=1, column=1, padx=(0, 15), pady=(0, 12), sticky="e")
 
-        self.txt_fone = ctk.CTkEntry(f_dados, placeholder_text="TELEFONE / WHATSAPP", width=250)
+        self.txt_fone = ctk.CTkEntry(f_dados, placeholder_text=t("ui_telefone_whatsapp"), width=250)
         self.txt_fone.grid(row=1, column=2, padx=(0, 15), pady=(0, 12), sticky="ew")
 
         # Mantido apenas para compatibilidade com fluxos legados (campo oculto no novo UX).
-        self.txt_end_cliente = ctk.CTkEntry(f_dados, placeholder_text="ENDEREÇO COMPLETO", width=400)
+        self.txt_end_cliente = ctk.CTkEntry(f_dados, placeholder_text=t("ui_endere_o_completo"), width=400)
 
         # Bloco 2: Dados do Equipamento
         f_equip = ctk.CTkFrame(self.main_scroll, fg_color="#1f2a38", corner_radius=20)
@@ -524,15 +527,15 @@ class FrmOS(ctk.CTkToplevel):
         f_equip.grid_columnconfigure(1, weight=1)
         f_equip.grid_columnconfigure(2, weight=3)
 
-        ctk.CTkLabel(f_equip, text="MODELO / EQUIPAMENTO", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=0, padx=(15, 5), pady=(10, 2), sticky="w")
-        ctk.CTkLabel(f_equip, text="DIAGRAMA", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=1, padx=(0, 5), pady=(10, 2), sticky="w")
-        ctk.CTkLabel(f_equip, text="DEFEITO RELATADO", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=2, padx=(0, 15), pady=(10, 2), sticky="w")
+        ctk.CTkLabel(f_equip, text=t("ui_modelo_equipamento"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=0, padx=(15, 5), pady=(10, 2), sticky="w")
+        ctk.CTkLabel(f_equip, text=t("ui_diagrama"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=1, padx=(0, 5), pady=(10, 2), sticky="w")
+        ctk.CTkLabel(f_equip, text=t("ui_defeito_relatado"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=2, padx=(0, 15), pady=(10, 2), sticky="w")
 
         f_modelo = ctk.CTkFrame(f_equip, fg_color="#1f2a38")
         f_modelo.grid(row=1, column=0, padx=(15, 5), pady=(0, 10), sticky="ew")
         f_modelo.grid_columnconfigure(0, weight=1)
 
-        self.txt_equip = ctk.CTkEntry(f_modelo, placeholder_text="MODELO / EQUIPAMENTO", width=300)
+        self.txt_equip = ctk.CTkEntry(f_modelo, placeholder_text=t("ui_modelo_equipamento"), width=300)
         self.txt_equip.grid(row=0, column=0, padx=(0, 4), pady=0, sticky="ew")
         self.txt_equip.bind("<KeyRelease>", self._agendar_vigilancia_preventiva)
         self.txt_equip.bind("<FocusOut>", self._iniciar_vigilancia_preventiva)
@@ -544,27 +547,27 @@ class FrmOS(ctk.CTkToplevel):
         self.lbl_alerta_preventivo.bind("<Leave>", self._ocultar_tooltip_alerta_preventivo)
         self.lbl_alerta_preventivo.bind("<Button-1>", self._mostrar_tooltip_alerta_preventivo)
         
-        self.btn_buscar_vista = ctk.CTkButton(f_equip, text="🔎 BUSCAR DIAGRAMA", width=150, fg_color="#8e44ad", hover_color="#9b59b6", 
+        self.btn_buscar_vista = ctk.CTkButton(f_equip, text=t("ui_buscar_diagrama"), width=150, fg_color="#8e44ad", hover_color="#9b59b6", 
                                               command=lambda: self.buscar_vista_equipamento(self.txt_equip.get()))
         self.btn_buscar_vista.grid(row=1, column=1, padx=(0, 5), pady=(0, 10), sticky="ew")
-        self.txt_defeito = ctk.CTkEntry(f_equip, placeholder_text="DEFEITO RELATADO", width=400)
+        self.txt_defeito = ctk.CTkEntry(f_equip, placeholder_text=t("ui_defeito_relatado"), width=400)
         self.txt_defeito.grid(row=1, column=2, padx=(0, 15), pady=(0, 10), sticky="ew")
         self.txt_defeito.bind("<Return>", lambda _e: self._adicionar_equipamento())
 
         f_lista_equip = ctk.CTkFrame(self.main_scroll, fg_color="#1f2a38", corner_radius=20)
         f_lista_equip.pack(fill="x", pady=5, padx=10)
-        ctk.CTkLabel(f_lista_equip, text="ITENS DA O.S. (ENVELOPE DO CLIENTE)", font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(anchor="w", padx=15, pady=(10, 6))
+        ctk.CTkLabel(f_lista_equip, text=t("ui_itens_da_o_s_envelope_do_cliente"), font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(anchor="w", padx=15, pady=(10, 6))
         barra_equip = ctk.CTkFrame(f_lista_equip, fg_color="#1f2a38")
         barra_equip.pack(fill="x", padx=10, pady=(0, 8))
-        ctk.CTkButton(barra_equip, text="➕ ADICIONAR ITEM", fg_color="#27ae60", width=160, command=self._adicionar_equipamento).pack(side="left", padx=(0, 8), pady=4)
-        ctk.CTkButton(barra_equip, text="🗑 REMOVER ITEM", fg_color="#c0392b", width=150, command=self._remover_equipamento_ativo).pack(side="left", padx=(0, 8), pady=4)
+        ctk.CTkButton(barra_equip, text=t("ui_adicionar_item"), fg_color="#27ae60", width=160, command=self._adicionar_equipamento).pack(side="left", padx=(0, 8), pady=4)
+        ctk.CTkButton(barra_equip, text=t("ui_remover_item_1"), fg_color="#c0392b", width=150, command=self._remover_equipamento_ativo).pack(side="left", padx=(0, 8), pady=4)
 
         self.tab_equipamentos = ttk.Treeview(f_lista_equip, columns=("idx", "equip", "def", "subtotal", "status"), show="headings", height=5)
         self.tab_equipamentos.heading("idx", text="#")
-        self.tab_equipamentos.heading("equip", text="Equipamento")
-        self.tab_equipamentos.heading("def", text="Defeito")
-        self.tab_equipamentos.heading("subtotal", text="Subtotal")
-        self.tab_equipamentos.heading("status", text="Status")
+        self.tab_equipamentos.heading("equip", text=t("ui_equipamento"))
+        self.tab_equipamentos.heading("def", text=t("ui_defeito"))
+        self.tab_equipamentos.heading("subtotal", text=t("ui_subtotal"))
+        self.tab_equipamentos.heading("status", text=t("ui_status"))
         self.tab_equipamentos.column("idx", width=40, anchor="center")
         self.tab_equipamentos.column("equip", width=280)
         self.tab_equipamentos.column("def", width=340)
@@ -577,7 +580,7 @@ class FrmOS(ctk.CTkToplevel):
         # Checklist
         f_check = ctk.CTkFrame(self.main_scroll, fg_color="#1f2a38", corner_radius=20)
         f_check.pack(fill="x", pady=5, padx=10)
-        ctk.CTkLabel(f_check, text="ACOMPANHA:", font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(side="left", padx=15, pady=10)
+        ctk.CTkLabel(f_check, text=t("ui_acompanha"), font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(side="left", padx=15, pady=10)
         self._chk_widgets = []
         for text, var in [("CAPA", self.check_capa), ("LINHA", self.check_linha), ("MANIVELA", self.check_manivela), ("CAIXA", self.check_caixa)]:
             chk = ctk.CTkCheckBox(f_check, text=text, variable=var, onvalue="SIM", offvalue="NÃO", text_color="#ecf0f1")
@@ -587,11 +590,11 @@ class FrmOS(ctk.CTkToplevel):
         # Bloco 3: Tabela de Peças e Serviços (Treeview)
         f_item = ctk.CTkFrame(self.main_scroll, fg_color="#1f2a38", corner_radius=20)
         f_item.pack(fill="x", pady=5, padx=10)
-        ctk.CTkLabel(f_item, text="DESCRIÇÃO", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=0, padx=(15, 5), pady=(8, 0), sticky="w")
-        ctk.CTkLabel(f_item, text="QTD", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=1, padx=3, pady=(8, 0), sticky="w")
-        ctk.CTkLabel(f_item, text="VALOR UNIT.", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=2, padx=3, pady=(8, 0), sticky="w")
-        ctk.CTkLabel(f_item, text="AÇÕES", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=3, columnspan=3, padx=(5, 15), pady=(8, 0), sticky="w")
-        self.txt_serv = ctk.CTkEntry(f_item, placeholder_text="DESCRIÇÃO DA PEÇA/SERVIÇO", width=400)
+        ctk.CTkLabel(f_item, text=t("ui_descri_o"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=0, padx=(15, 5), pady=(8, 0), sticky="w")
+        ctk.CTkLabel(f_item, text=t("ui_qtd"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=1, padx=3, pady=(8, 0), sticky="w")
+        ctk.CTkLabel(f_item, text=t("ui_valor_unit"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=2, padx=3, pady=(8, 0), sticky="w")
+        ctk.CTkLabel(f_item, text=t("ui_a_es"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=3, columnspan=3, padx=(5, 15), pady=(8, 0), sticky="w")
+        self.txt_serv = ctk.CTkEntry(f_item, placeholder_text=t("ui_descri_o_da_pe_a_servi_o"), width=400)
         self.txt_serv.grid(row=1, column=0, padx=(15, 5), pady=(2, 10), sticky="ew")
         self.txt_serv.bind("<KeyRelease>", self.sugerir_preco)
         self.txt_serv.bind("<Return>", lambda _e: self.add_item())
@@ -599,19 +602,19 @@ class FrmOS(ctk.CTkToplevel):
         self.txt_qtd.insert(0, "1")
         self.txt_qtd.grid(row=1, column=1, padx=3, pady=(2, 10))
         self.txt_qtd.bind("<Return>", lambda _e: self.add_item())
-        self.txt_val = ctk.CTkEntry(f_item, placeholder_text="R$ UNIT", width=100)
+        self.txt_val = ctk.CTkEntry(f_item, placeholder_text=t("ui_r_unit"), width=100)
         self.txt_val.grid(row=1, column=2, padx=3, pady=(2, 10))
         self.txt_val.bind("<Return>", lambda _e: self.add_item())
-        self.btn_add = ctk.CTkButton(f_item, text="ADD", fg_color="#27ae60", width=90, command=self.add_item)
+        self.btn_add = ctk.CTkButton(f_item, text=t("ui_add"), fg_color="#27ae60", width=90, command=self.add_item)
         self.btn_add.grid(row=1, column=3, padx=(5, 15), pady=(2, 10))
         f_item.grid_columnconfigure(0, weight=1)
 
         self.tab = ttk.Treeview(self.main_scroll, columns=("d","q","u","t","s"), show="headings", height=8, displaycolumns=("d","q","u","t"))
-        self.tab.heading("d", text="DESCRIÇÃO")
-        self.tab.heading("q", text="QTD")
-        self.tab.heading("u", text="UNIT")
-        self.tab.heading("t", text="TOTAL")
-        self.tab.heading("s", text="STATUS")
+        self.tab.heading("d", text=t("ui_descri_o"))
+        self.tab.heading("q", text=t("ui_qtd"))
+        self.tab.heading("u", text=t("ui_unit"))
+        self.tab.heading("t", text=t("ui_total"))
+        self.tab.heading("s", text=t("ui_status_1"))
         self.tab.column("d", width=520)
         self.tab.column("q", width=80, anchor="center")
         self.tab.column("u", width=120, anchor="center")
@@ -629,7 +632,7 @@ class FrmOS(ctk.CTkToplevel):
 
         self.botao_remover = tk.Button(
             self.main_scroll,
-            text="REMOVER",
+            text=t("ui_remover"),
             width=12,
             bg="#c0392b",
             fg="#ffffff",
@@ -642,7 +645,7 @@ class FrmOS(ctk.CTkToplevel):
 
         self.lbl_hist_itens = ctk.CTkLabel(
             self.main_scroll,
-            text="Histórico de itens reprovados/removidos: 0",
+            text=t("ui_hist_rico_de_itens_reprovados_removidos_0"),
             font=("Arial", 10, "bold"),
             text_color="#f59e0b",
             anchor="w",
@@ -658,35 +661,35 @@ class FrmOS(ctk.CTkToplevel):
         footer_frame.grid_columnconfigure(3, weight=2) # Total Geral (ocupa mais espaço à direita)
 
         # Labels dos campos financeiros
-        ctk.CTkLabel(footer_frame, text="OPCIONAL", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=0, padx=5, pady=(8, 0), sticky="w")
-        ctk.CTkLabel(footer_frame, text="FRETE", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=1, padx=5, pady=(8, 0), sticky="w")
-        ctk.CTkLabel(footer_frame, text="DESCONTO", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=2, padx=5, pady=(8, 0), sticky="w")
-        ctk.CTkLabel(footer_frame, text="TOTAL GERAL", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=3, padx=10, pady=(8, 0), sticky="e")
+        ctk.CTkLabel(footer_frame, text=t("ui_opcional"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=0, padx=5, pady=(8, 0), sticky="w")
+        ctk.CTkLabel(footer_frame, text=t("ui_frete"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=1, padx=5, pady=(8, 0), sticky="w")
+        ctk.CTkLabel(footer_frame, text=t("ui_desconto"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=2, padx=5, pady=(8, 0), sticky="w")
+        ctk.CTkLabel(footer_frame, text=t("ui_total_geral"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(row=0, column=3, padx=10, pady=(8, 0), sticky="e")
 
         # Campos Opcional, Frete, Desconto na linha de entrada (row=1)
-        self.ent_opcional = ctk.CTkEntry(footer_frame, placeholder_text="OPCIONAL (R$)", width=100) # Largura reduzida
+        self.ent_opcional = ctk.CTkEntry(footer_frame, placeholder_text=t("ui_opcional_r"), width=100) # Largura reduzida
         self.ent_opcional.grid(row=1, column=0, padx=5, pady=(2, 10), sticky="ew")
         self.ent_opcional.bind("<KeyRelease>", lambda e: self.atualizar_total())
         self.ent_opcional.configure(state="normal")
 
-        self.ent_frete = ctk.CTkEntry(footer_frame, placeholder_text="FRETE (R$)", width=100) # Largura reduzida
+        self.ent_frete = ctk.CTkEntry(footer_frame, placeholder_text=t("ui_frete_r"), width=100) # Largura reduzida
         self.ent_frete.grid(row=1, column=1, padx=5, pady=(2, 10), sticky="ew")
         self.ent_frete.bind("<KeyRelease>", lambda e: self.atualizar_total())
         self.ent_frete.configure(state="normal")
 
-        self.ent_desc = ctk.CTkEntry(footer_frame, placeholder_text="DESCONTO (R$)", width=100) # Largura reduzida
+        self.ent_desc = ctk.CTkEntry(footer_frame, placeholder_text=t("ui_desconto_r"), width=100) # Largura reduzida
         self.ent_desc.grid(row=1, column=2, padx=5, pady=(2, 10), sticky="ew")
         self.ent_desc.bind("<KeyRelease>", lambda e: self.atualizar_total())
         self.ent_desc.configure(state="normal")
 
-        self.lbl_total = ctk.CTkLabel(footer_frame, text="TOTAL O.S.: R$ 0.00", font=("Arial", 14, "bold"), text_color="#2ecc71")
+        self.lbl_total = ctk.CTkLabel(footer_frame, text=t("ui_total_o_s_r_0_00"), font=("Arial", 14, "bold"), text_color="#2ecc71")
         self.lbl_total.grid(row=1, column=3, padx=10, pady=(2, 10), sticky="e") # Alinhado à direita
 
         # Prazo de Entrega com rótulo explícito
-        ctk.CTkLabel(footer_frame, text="PRAZO DE ENTREGA", font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(
+        ctk.CTkLabel(footer_frame, text=t("ui_prazo_de_entrega"), font=("Arial", 10, "bold"), text_color="#bdc3c7").grid(
             row=2, column=0, columnspan=4, padx=10, pady=(2, 2), sticky="w"
         )
-        self.txt_prazo = ctk.CTkEntry(footer_frame, placeholder_text="PRAZO DE ENTREGA")
+        self.txt_prazo = ctk.CTkEntry(footer_frame, placeholder_text=t("ui_prazo_de_entrega"))
         self.txt_prazo.grid(row=3, column=0, columnspan=4, padx=10, pady=(0, 10), sticky="ew") # Ocupa todas as colunas
         self.txt_prazo.insert(0, "7 dias úteis")
 
@@ -698,7 +701,7 @@ class FrmOS(ctk.CTkToplevel):
 
         self.lbl_obs = ctk.CTkLabel(
             self.f_obs,
-            text="OBSERVAÇÃO",
+            text=t("ui_observa_o"),
             font=("Arial", 10),
             text_color="#bdc3c7",
         )
@@ -808,24 +811,24 @@ class FrmOS(ctk.CTkToplevel):
         janela.grab_set()
         janela.focus_force()
 
-        ctk.CTkLabel(janela, text="Configurar Layout da Oficina", font=("Arial", 20, "bold"), text_color="orange").pack(pady=(20, 12))
+        ctk.CTkLabel(janela, text=t("ui_configurar_layout_da_oficina"), font=("Arial", 20, "bold"), text_color="orange").pack(pady=(20, 12))
 
         form = ctk.CTkFrame(janela)
         form.pack(fill="both", expand=True, padx=20, pady=10)
 
-        ent_nome = ctk.CTkEntry(form, placeholder_text="Nome da oficina")
+        ent_nome = ctk.CTkEntry(form, placeholder_text=t("ui_nome_da_oficina"))
         ent_nome.pack(fill="x", padx=15, pady=(15, 8))
         ent_nome.insert(0, self.nome_oficina)
 
-        ent_endereco = ctk.CTkEntry(form, placeholder_text="Endereço")
+        ent_endereco = ctk.CTkEntry(form, placeholder_text=t("ui_endere_o"))
         ent_endereco.pack(fill="x", padx=15, pady=8)
         ent_endereco.insert(0, self.endereco_oficina)
 
-        ent_fone = ctk.CTkEntry(form, placeholder_text="Telefone")
+        ent_fone = ctk.CTkEntry(form, placeholder_text=t("ui_telefone"))
         ent_fone.pack(fill="x", padx=15, pady=8)
         ent_fone.insert(0, self.telefone_oficina)
 
-        ent_pix = ctk.CTkEntry(form, placeholder_text="Chave PIX")
+        ent_pix = ctk.CTkEntry(form, placeholder_text=t("ui_chave_pix"))
         ent_pix.pack(fill="x", padx=15, pady=8)
         ent_pix.insert(0, self.chave_pix)
 
@@ -844,7 +847,7 @@ class FrmOS(ctk.CTkToplevel):
             if caminho:
                 logo_var.set(caminho)
 
-        ctk.CTkButton(f_logo, text="Imagem", width=90, fg_color="#2980b9", command=escolher_logo).pack(side="left", padx=(8, 0))
+        ctk.CTkButton(f_logo, text=t("ui_imagem"), width=90, fg_color="#2980b9", command=escolher_logo).pack(side="left", padx=(8, 0))
 
         def salvar():
             nome = ent_nome.get().strip()
@@ -937,8 +940,8 @@ class FrmOS(ctk.CTkToplevel):
             return cfg_path
 
         def localizar_oficina_rede_cfg():
-            btn_localizar.configure(state="disabled", text="LOCALIZANDO...")
-            lbl_rede.configure(text="Buscando servidor na rede local...", text_color="#f1c40f")
+            btn_localizar.configure(state="disabled", text=t("ui_localizando"))
+            lbl_rede.configure(text=t("ui_buscando_servidor_na_rede_local"), text_color="#f1c40f")
 
             def worker():
                 url = ""
@@ -949,9 +952,9 @@ class FrmOS(ctk.CTkToplevel):
                     erro = str(e)
 
                 def finalizar():
-                    btn_localizar.configure(state="normal", text="LOCALIZAR OFICINA NA REDE")
+                    btn_localizar.configure(state="normal", text=t("ui_localizar_oficina_na_rede"))
                     if not url:
-                        lbl_rede.configure(text="Oficina não localizada na rede.", text_color="#e74c3c")
+                        lbl_rede.configure(text=t("ui_oficina_n_o_localizada_na_rede"), text_color="#e74c3c")
                         msg = "Não foi possível localizar a oficina automaticamente na rede."
                         if erro:
                             msg += f"\n\nDetalhe: {erro}"
@@ -962,7 +965,7 @@ class FrmOS(ctk.CTkToplevel):
                         lbl_rede.configure(text=f"Oficina localizada: {url}", text_color="#2ecc71")
                         messagebox.showinfo("Rede Local", f"Oficina localizada com sucesso!\n\nServidor: {url}\nConfig salvo em: {caminho}", parent=janela)
                     except Exception as e:
-                        lbl_rede.configure(text="Servidor encontrado, mas falha ao salvar.", text_color="#f39c12")
+                        lbl_rede.configure(text=t("ui_servidor_encontrado_mas_falha_ao_salvar"), text_color="#f39c12")
                         messagebox.showwarning("Rede Local", f"Servidor encontrado: {url}\nFalha ao salvar config: {e}", parent=janela)
 
                 self.after(0, finalizar)
@@ -974,7 +977,7 @@ class FrmOS(ctk.CTkToplevel):
         bloco_rede.pack(fill="x", padx=15, pady=(4, 10))
         ctk.CTkLabel(
             bloco_rede,
-            text="Configuração Técnica de Rede",
+            text=t("ui_configura_o_t_cnica_de_rede"),
             text_color="orange",
             font=("Arial", 13, "bold"),
         ).pack(anchor="w", padx=10, pady=(8, 2))
@@ -988,12 +991,12 @@ class FrmOS(ctk.CTkToplevel):
         f_srv = ctk.CTkFrame(bloco_rede, fg_color="#1f2937")
         f_srv.pack(fill="x", padx=10, pady=5)
 
-        btn_localizar = ctk.CTkButton(f_srv, text="LOCALIZAR OFICINA NA REDE", command=localizar_oficina_rede_cfg)
+        btn_localizar = ctk.CTkButton(f_srv, text=t("ui_localizar_oficina_na_rede"), command=localizar_oficina_rede_cfg)
         btn_localizar.pack(side="left", padx=5)
         lbl_rede = ctk.CTkLabel(f_srv, text="")
         lbl_rede.pack(side="left", padx=5)
 
-        ctk.CTkButton(janela, text="SALVAR DADOS", fg_color="#27ae60", command=salvar).pack(pady=20)
+        ctk.CTkButton(janela, text=t("ui_salvar_dados"), fg_color="#27ae60", command=salvar).pack(pady=20)
 
     def _atualizar_alerta_ui(self, modelo, alerta=False):
         """Atualiza a sinalização visual de alertas preventivos (Thread Safe)."""
@@ -1478,7 +1481,7 @@ class FrmOS(ctk.CTkToplevel):
     def _limpar_edicao_item(self):
         self._item_em_edicao_id = None
         if hasattr(self, "btn_add"):
-            self.btn_add.configure(text="ADD", fg_color="#27ae60", hover_color="#2ecc71")
+            self.btn_add.configure(text=t("ui_add"), fg_color="#27ae60", hover_color="#2ecc71")
         self._atualizar_estado_botao_reativar(None)
 
     def _atualizar_estado_botao_reativar(self, status_item):
@@ -1513,9 +1516,9 @@ class FrmOS(ctk.CTkToplevel):
         status_item = self._normalizar_status_item(valores[4] if len(valores) > 4 else "ATIVO")
         self._atualizar_estado_botao_reativar(status_item)
         if status_item == "REPROVADO":
-            self.btn_add.configure(text="ATUALIZAR (REPROVADO)", fg_color="#7f1d1d", hover_color="#991b1b")
+            self.btn_add.configure(text=t("ui_atualizar_reprovado"), fg_color="#7f1d1d", hover_color="#991b1b")
         else:
-            self.btn_add.configure(text="ATUALIZAR", fg_color="#2563eb", hover_color="#3b82f6")
+            self.btn_add.configure(text=t("ui_atualizar"), fg_color="#2563eb", hover_color="#3b82f6")
 
     def _on_duplo_clique_item_tabela(self, _event=None):
         self._on_selecionar_item_tabela(_event)
@@ -2106,16 +2109,16 @@ class FrmOS(ctk.CTkToplevel):
         if not hasattr(self, 'btn_salvar_os'):
             return
         if self._orcamento_em_edicao:
-            self.btn_salvar_os.configure(text="💾 SALVAR / ATUALIZAR")
+            self.btn_salvar_os.configure(text=t("ui_salvar_atualizar"))
         else:
-            self.btn_salvar_os.configure(text="💾 SALVAR ENTRADA")
+            self.btn_salvar_os.configure(text=t("ui_salvar_entrada"))
 
     def _alternar_estado_botao_salvar(self, salvando):
         self._salvando_documento = bool(salvando)
         if hasattr(self, 'btn_salvar_os'):
             self.btn_salvar_os.configure(
                 state="disabled" if salvando else "normal",
-                text="SALVANDO ENTRADA..." if salvando else ("💾 SALVAR / ATUALIZAR" if self._orcamento_em_edicao else "💾 SALVAR ENTRADA"),
+                text=t("ui_salvando_entrada") if salvando else ("💾 SALVAR / ATUALIZAR" if self._orcamento_em_edicao else "💾 SALVAR ENTRADA"),
             )
 
     def _auditar_salvar_entrada(self, etapa, **dados):
@@ -2156,7 +2159,7 @@ class FrmOS(ctk.CTkToplevel):
         if hasattr(self, 'btn_recibo'):
             self.btn_recibo.configure(
                 state="disabled" if gerando else "normal",
-                text="GERANDO RECIBO..." if gerando else "🧾 RECIBO ENTRADA",
+                text=t("ui_gerando_recibo") if gerando else "🧾 RECIBO ENTRADA",
             )
 
     def _obter_diretorio_recibos(self, nome_cliente=""):
@@ -3084,7 +3087,7 @@ class FrmOS(ctk.CTkToplevel):
 
         win = self.abrir_janela_ia_diagramas("Selecionar Diagrama Técnico")
 
-        ctk.CTkLabel(win, text="🔎 Seleção de Diagrama Técnico", text_color="orange", font=("Arial", 17, "bold")).pack(pady=(10, 2))
+        ctk.CTkLabel(win, text=t("ui_sele_o_de_diagrama_t_cnico"), text_color="orange", font=("Arial", 17, "bold")).pack(pady=(10, 2))
         ctk.CTkLabel(win, text=f"Modelo: {fabricante} {modelo}".strip(), text_color="#bdc3c7", font=("Arial", 11)).pack(pady=(0, 8))
 
         frame = ctk.CTkFrame(win, fg_color="#161b22")
@@ -3107,23 +3110,23 @@ class FrmOS(ctk.CTkToplevel):
 
         bloco_amarelo = ctk.CTkFrame(frame, fg_color="#f1c40f", corner_radius=10)
         bloco_amarelo.grid(row=0, column=0, sticky="nsew", padx=6, pady=2)
-        ctk.CTkLabel(bloco_amarelo, text="RESULTADOS TÉCNICOS", text_color="#2c3e50", font=("Arial", 13, "bold")).pack(pady=(10, 6))
+        ctk.CTkLabel(bloco_amarelo, text=t("ui_resultados_t_cnicos"), text_color="#2c3e50", font=("Arial", 13, "bold")).pack(pady=(10, 6))
         ctk.CTkLabel(bloco_amarelo, text=f"{len(opcoes)} opção(ões) encontrada(s)", text_color="#2c3e50", font=("Arial", 10)).pack(pady=(0, 6))
         if melhores:
             ctk.CTkButton(
                 bloco_amarelo,
-                text="Abrir Diagrama Técnico 1",
+                text=t("ui_abrir_diagrama_t_cnico_1"),
                 width=170,
                 height=32,
                 fg_color="#d68910",
                 hover_color="#b9770e",
                 command=lambda: abrir_e_validar(melhores[0]),
             ).pack(pady=(4, 6))
-        ctk.CTkLabel(bloco_amarelo, text="Valide após abrir", text_color="#5d4037", font=("Arial", 10)).pack(pady=(0, 10))
+        ctk.CTkLabel(bloco_amarelo, text=t("ui_valide_ap_s_abrir"), text_color="#5d4037", font=("Arial", 10)).pack(pady=(0, 10))
 
         bloco_azul = ctk.CTkFrame(frame, fg_color="#2980b9", corner_radius=10)
         bloco_azul.grid(row=0, column=1, sticky="nsew", padx=6, pady=2)
-        ctk.CTkLabel(bloco_azul, text="LINKS SUGERIDOS", text_color="#ecf0f1", font=("Arial", 13, "bold")).pack(pady=(10, 6))
+        ctk.CTkLabel(bloco_azul, text=t("ui_links_sugeridos"), text_color="#ecf0f1", font=("Arial", 13, "bold")).pack(pady=(10, 6))
         for i, url in enumerate(melhores[1:], start=2):
             ctk.CTkButton(
                 bloco_azul,
@@ -3135,15 +3138,15 @@ class FrmOS(ctk.CTkToplevel):
                 command=lambda u=url: abrir_e_validar(u),
             ).pack(pady=4)
         if len(melhores) <= 1:
-            ctk.CTkLabel(bloco_azul, text="Sem links disponíveis", text_color="#ecf0f1", font=("Arial", 10)).pack(pady=(6, 6))
+            ctk.CTkLabel(bloco_azul, text=t("ui_sem_links_dispon_veis"), text_color="#ecf0f1", font=("Arial", 10)).pack(pady=(6, 6))
 
         bloco_verde = ctk.CTkFrame(frame, fg_color="#27ae60", corner_radius=10)
         bloco_verde.grid(row=0, column=2, sticky="nsew", padx=6, pady=2)
-        ctk.CTkLabel(bloco_verde, text="AÇÕES", text_color="#ecf0f1", font=("Arial", 13, "bold")).pack(pady=(10, 6))
-        ctk.CTkLabel(bloco_verde, text="Se nada resolver, continue\npara a busca por foto.", text_color="#ecf0f1", font=("Arial", 10), justify="center").pack(pady=(0, 10))
+        ctk.CTkLabel(bloco_verde, text=t("ui_a_es"), text_color="#ecf0f1", font=("Arial", 13, "bold")).pack(pady=(10, 6))
+        ctk.CTkLabel(bloco_verde, text=t("ui_se_nada_resolver_continue_npara_a_busca_por_foto"), text_color="#ecf0f1", font=("Arial", 10), justify="center").pack(pady=(0, 10))
         ctk.CTkButton(
             bloco_verde,
-            text="Nenhuma opção funcionou",
+            text=t("ui_nenhuma_op_o_funcionou"),
             fg_color="#1e8449",
             hover_color="#196f3d",
             width=170,
@@ -3296,7 +3299,7 @@ class FrmOS(ctk.CTkToplevel):
         win.lift()
 
         ctk.CTkLabel(win, text=f"Diagrama para: {display_name}", font=("Arial", 16, "bold"), text_color="#f8f8f8", fg_color="#000000").pack(pady=(15, 5))
-        ctk.CTkLabel(win, text="Abrindo no navegador...", font=("Arial", 12), text_color="#cccccc", fg_color="#000000").pack(pady=(5, 10))
+        ctk.CTkLabel(win, text=t("ui_abrindo_no_navegador"), font=("Arial", 12), text_color="#cccccc", fg_color="#000000").pack(pady=(5, 10))
 
         # Modo teste síncrono: execução direta sem thread.
         self._run_ai_alert_scan_and_notify(fabricante, modelo, termo_busca)
@@ -3343,14 +3346,14 @@ class FrmOS(ctk.CTkToplevel):
         ctk.CTkLabel(win, text=f"Resultados para: {termo_busca}", font=("Arial", 16, "bold"), text_color="#f8f8f8", fg_color="#000000").pack(pady=(15, 5))
         
         if links:
-            ctk.CTkLabel(win, text="⚠️ Clique no triângulo para ver alertas técnicos.", font=("Arial", 10), text_color="#f1c40f", fg_color="#000000").pack(pady=(0, 10))
+            ctk.CTkLabel(win, text=t("ui_clique_no_tri_ngulo_para_ver_alertas_t_cnicos"), font=("Arial", 10), text_color="#f1c40f", fg_color="#000000").pack(pady=(0, 10))
         
         scroll_frame = ctk.CTkScrollableFrame(win, fg_color="#000000") # Black background for scrollable frame
         scroll_frame.pack(fill="both", expand=True, padx=15, pady=10)
 
         if not links:
-            ctk.CTkLabel(scroll_frame, text="Nenhum diagrama encontrado para este equipamento.", text_color="#ff6b6b", font=("Arial", 12)).pack(pady=30)
-            ctk.CTkButton(scroll_frame, text="📸 TENTAR IDENTIFICAÇÃO POR FOTO", fg_color="#e67e22", hover_color="#d35400", width=250, height=40,
+            ctk.CTkLabel(scroll_frame, text=t("ui_nenhum_diagrama_encontrado_para_este_equipamento"), text_color="#ff6b6b", font=("Arial", 12)).pack(pady=30)
+            ctk.CTkButton(scroll_frame, text=t("ui_tentar_identifica_o_por_foto"), fg_color="#e67e22", hover_color="#d35400", width=250, height=40,
                           command=lambda: (win.destroy(), self._executar_busca_por_foto_bg(termo_busca))).pack(pady=10)
             return
 
@@ -3385,7 +3388,7 @@ class FrmOS(ctk.CTkToplevel):
             if alert_message:
                 alert_icon_label = ctk.CTkLabel(
                     item_container,
-                    text=" ⚠️", # Space for visual separation
+                    text=t("ui_"), # Space for visual separation
                     text_color="#f1c40f",
                     fg_color="transparent",
                     cursor="hand2",
@@ -3396,7 +3399,7 @@ class FrmOS(ctk.CTkToplevel):
                 alert_icon_label.bind("<Leave>", self._hide_alert_tooltip)
                 alert_icon_label.bind("<Button-1>", lambda e, msg=alert_message: self._show_alert_tooltip(e, msg))
 
-        ctk.CTkButton(win, text="Nenhum funcionou / Fechar", fg_color="#c0392b", command=win.destroy).pack(pady=10)
+        ctk.CTkButton(win, text=t("ui_nenhum_funcionou_fechar"), fg_color="#c0392b", command=win.destroy).pack(pady=10)
 
     def buscar_vista_equipamento(self, equipamento_digitado=None):
         """Inicia motor de inteligência compartilhada: Busca, Filtro e Upload Automático para o Drive."""

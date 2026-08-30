@@ -26,6 +26,12 @@ import firebase_admin
 from firebase_admin import credentials, db
 import customtkinter as ctk
 
+# Inicializa o sistema de i18n (internacionalização) ANTES de qualquer outra
+# coisa — garante que os textos das telas sejam carregados em português.
+from core.i18n import set_default_locale, t  # noqa: E402
+from core.eula import carregar_texto_eula, detectar_idioma_sistema  # noqa: E402
+set_default_locale()
+
 # ============================================================================== 
 # CONFIGURAÇÃO DE DIRETÓRIO DO PYINSTALLER (Mantém o que já está funcionando)
 # ==============================================================================
@@ -416,6 +422,136 @@ def _executar_varredura_inicializacao() -> None:
 
 
 
+# ==============================================================================
+# EULA / CONTRATO DE LICENÇA — aceite obrigatório no primeiro acesso
+# Idioma 100% automático: o contrato é carregado conforme o idioma do Windows
+# (pt_BR -> português | en_US -> inglês | es_UY -> espanhol; fallback pt_BR).
+# ==============================================================================
+
+
+def _exibir_janela_eula() -> bool:
+    """Exibe o Contrato de Licença no idioma do sistema e retorna o aceite.
+
+    O aceite é memorizado em ``Documentos/eula_aceito.json`` (por versão do
+    contrato), evitando repetir a cobrança a cada abertura.
+    """
+    idioma_sistema = detectar_idioma_sistema() or "pt_BR"
+    try:
+        set_default_locale()  # aplica o idioma detectado no sistema operacional
+    except Exception:
+        pass
+
+    texto_contrato = carregar_texto_eula(idioma_sistema)
+    if not texto_contrato:
+        # Sem arquivo de contrato disponível: não bloqueia o acesso.
+        logger.info("[eula] Contrato de licença não encontrado — aceite pulado.")
+        return True
+
+    marcador_aceite = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "Documentos", "eula_aceito.json"
+    )
+    assinatura = f"{idioma_sistema}|{len(texto_contrato)}"
+    try:
+        if os.path.isfile(marcador_aceite):
+            with open(marcador_aceite, "r", encoding="utf-8") as arquivo:
+                dados = json.load(arquivo)
+            if dados.get("assinatura") == assinatura:
+                logger.info("[eula] Contrato já aceito anteriormente (idioma=%s).", idioma_sistema)
+                return True
+    except Exception:
+        pass
+
+    aceito = {"valor": False}
+
+    janela_eula = ctk.CTkToplevel()
+    janela_eula.title(t("eula_titulo", default="Contrato de Licença de Uso"))
+    janela_eula.geometry("780x640")
+    janela_eula.grab_set()
+    janela_eula.protocol("WM_DELETE_WINDOW", lambda: None)  # fecha só pelos botões
+
+    ctk.CTkLabel(
+        janela_eula,
+        text=t("eula_titulo", default="Contrato de Licença de Uso"),
+        font=("Arial", 18, "bold"),
+    ).pack(pady=(14, 4))
+
+    ctk.CTkLabel(
+        janela_eula,
+        text=t(
+            "eula_aviso",
+            default="Leia o contrato abaixo. Para utilizar o sistema, é necessário aceitar os termos.",
+        ),
+        wraplength=700,
+        text_color="#bdc3c7",
+    ).pack(padx=20, pady=(0, 8))
+
+    caixa_texto = ctk.CTkTextbox(janela_eula, wrap="word", font=("Arial", 12))
+    caixa_texto.pack(fill="both", expand=True, padx=20, pady=(0, 12))
+    caixa_texto.insert("1.0", texto_contrato)
+    caixa_texto.configure(state="disabled")
+
+    frame_botoes = ctk.CTkFrame(janela_eula, fg_color="transparent")
+    frame_botoes.pack(pady=(0, 16))
+
+    def _salvar_aceite() -> None:
+        try:
+            pasta_docs = os.path.dirname(marcador_aceite)
+            if pasta_docs and not os.path.isdir(pasta_docs):
+                os.makedirs(pasta_docs, exist_ok=True)
+            with open(marcador_aceite, "w", encoding="utf-8") as arquivo:
+                json.dump(
+                    {
+                        "idioma": idioma_sistema,
+                        "aceito_em": datetime.now().isoformat(timespec="seconds"),
+                        "assinatura": assinatura,
+                    },
+                    arquivo,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+        except Exception:
+            pass
+
+    def _confirmar() -> None:
+        aceito["valor"] = True
+        _salvar_aceite()
+        janela_eula.destroy()
+
+    def _recusar() -> None:
+        if messagebox.askyesno(
+            t("eula_titulo", default="Contrato de Licença de Uso"),
+            t(
+                "eula_aceite_obrigatorio_msg",
+                default="Você precisa aceitar o Contrato de Licença para utilizar o sistema. Deseja encerrar?",
+            ),
+            parent=janela_eula,
+        ):
+            janela_eula.destroy()
+            raise SystemExit(0)
+
+    ctk.CTkButton(
+        frame_botoes,
+        text=t("eula_aceitar", default="Aceitar e Continuar"),
+        command=_confirmar,
+        width=200,
+        fg_color="#2e7d32",
+        hover_color="#1b5e20",
+    ).pack(side="left", padx=10)
+    ctk.CTkButton(
+        frame_botoes,
+        text=t("eula_recusar", default="Recusar e Sair"),
+        command=_recusar,
+        width=160,
+        fg_color="#8b2f2f",
+        hover_color="#6d2424",
+    ).pack(side="left", padx=10)
+
+    janela_eula.attributes("-topmost", True)
+    janela_eula.after(150, lambda: janela_eula.attributes("-topmost", False))
+    janela_eula.wait_window()
+    return aceito["valor"]
+
+
 def _inicializar_fluxo_pos_termos() -> None:
     global _APP_INIT_DONE
     if _APP_INIT_DONE:
@@ -455,7 +591,7 @@ def _inicializar_fluxo_pos_termos() -> None:
             )
         except Exception:
             pass
-        label_status.configure(text="Falha na sincronização de dados com Drive.", text_color="red")
+        label_status.configure(text=t("ui_falha_na_sincroniza_o_de_dados_com_drive"), text_color="red")
         janela_login.deiconify()
         btn_entrar.configure(state="disabled")
         return
@@ -492,20 +628,15 @@ def _inicializar_fluxo_pos_termos() -> None:
 
 
 
-def abrir_janela_planos(dias_restantes_alerta: int | None = None):
+def abrir_janela_planos(evento=None):
+    """Abre a pagina oficial de planos no navegador padrao."""
     try:
-        janela_vendas(
-            parent=janela_login,
-            forcar_abertura=True,
-            dias_restantes_alerta=dias_restantes_alerta,
-        )
-    except Exception as e:
-        logger.exception("Falha ao abrir janela de planos: %s", e)
-        messagebox.showerror(
-            "Planos",
-            "Não foi possível abrir a tela de planos no momento.",
-            parent=janela_login,
-        )
+        webbrowser.open("https://www.frssolutions.com.br/planos")
+    except Exception as exc:
+        try:
+            messagebox.showerror("Oficina de Pesca", "Nao foi possivel abrir o link: %s" % exc)
+        except Exception:
+            pass
 
 
 def _checar_alerta_vencimento_licenca():
@@ -514,11 +645,7 @@ def _checar_alerta_vencimento_licenca():
         if vence_em_breve and dias_restantes is not None:
             janela_login.after(
                 350,
-                lambda: janela_vendas(
-                    parent=janela_login,
-                    forcar_abertura=True,
-                    dias_restantes_alerta=dias_restantes,
-                ),
+                lambda: abrir_janela_planos(),
             )
     except Exception as e:
                 logger.info("Não foi possível calcular alerta de vencimento: %s", e)
@@ -559,7 +686,7 @@ def _mostrar_alerta_conversao_trial():
 
         ctk.CTkLabel(
             pop,
-            text="Aviso de Renovação",
+            text=t("ui_aviso_de_renova_o"),
             font=("Arial", 20, "bold"),
             text_color="#f39c12",
         ).pack(pady=(20, 8))
@@ -599,7 +726,7 @@ def _mostrar_alerta_conversao_trial():
 
         ctk.CTkButton(
             botoes,
-            text="Sim, ver planos",
+            text=t("ui_sim_ver_planos"),
             width=190,
             fg_color="#27ae60",
             hover_color="#229954",
@@ -608,7 +735,7 @@ def _mostrar_alerta_conversao_trial():
 
         ctk.CTkButton(
             botoes,
-            text="Depois",
+            text=t("ui_depois"),
             width=130,
             fg_color="#7f8c8d",
             hover_color="#707b7c",
@@ -916,16 +1043,16 @@ def abrir_tela_cadastro():
     jan_cad.geometry("320x360")
     jan_cad.title("Novo Acesso")
     
-    ctk.CTkLabel(jan_cad, text="CADASTRAR", font=("Arial", 18, "bold")).pack(pady=20)
-    u_new = ctk.CTkEntry(jan_cad, placeholder_text="Novo Usuário")
+    ctk.CTkLabel(jan_cad, text=t("ui_cadastrar"), font=("Arial", 18, "bold")).pack(pady=20)
+    u_new = ctk.CTkEntry(jan_cad, placeholder_text=t("btn_novo_usuario"))
     u_new.pack(pady=10)
-    s_new = ctk.CTkEntry(jan_cad, placeholder_text="Nova Senha", show="*")
+    s_new = ctk.CTkEntry(jan_cad, placeholder_text=t("ui_nova_senha"), show="*")
     s_new.pack(pady=10)
-    s_confirm = ctk.CTkEntry(jan_cad, placeholder_text="Confirmar Senha", show="*")
+    s_confirm = ctk.CTkEntry(jan_cad, placeholder_text=t("ui_confirmar_senha_1"), show="*")
     s_confirm.pack(pady=10)
     ctk.CTkLabel(
         jan_cad,
-        text="Novos cadastros criados nesta tela entram como OPERADOR.",
+        text=t("ui_novos_cadastros_criados_nesta_tela_entram_como_operador"),
         text_color="#95a5a6",
         wraplength=260,
         justify="center"
@@ -936,7 +1063,7 @@ def abrir_tela_cadastro():
         role = "OPERADOR"
         if u and s and sc:
             if s != sc:
-                label_status.configure(text="Senhas não coincidem!", text_color="red")
+                label_status.configure(text=t("ui_senhas_n_o_coincidem"), text_color="red")
                 return
             valid, mensagem = validate_password(s)
             if not valid:
@@ -952,13 +1079,13 @@ def abrir_tela_cadastro():
                 jan_cad.after(200, lambda: jan_cad.destroy())
                 label_status.configure(text=f"Usuário {u} criado!", text_color="green")
             except sqlite3.IntegrityError:
-                label_status.configure(text="Usuário já existe!", text_color="red")
+                label_status.configure(text=t("ui_usu_rio_j_existe_1"), text_color="red")
             except Exception:
-                label_status.configure(text="Erro ao criar usuário!", text_color="red")
+                label_status.configure(text=t("ui_erro_ao_criar_usu_rio"), text_color="red")
         else:
-            label_status.configure(text="Preencha todos os campos!", text_color="red")
+            label_status.configure(text=t("ui_preencha_todos_os_campos_1"), text_color="red")
 
-    ctk.CTkButton(jan_cad, text="SALVAR", fg_color="#27ae60", command=salvar).pack(pady=20)
+    ctk.CTkButton(jan_cad, text=t("ui_salvar_1"), fg_color="#27ae60", command=salvar).pack(pady=20)
 
 
 def abrir_tela_primeiro_admin():
@@ -978,19 +1105,19 @@ def abrir_tela_primeiro_admin():
     jan_admin.grab_set()
     jan_admin.focus_force()
 
-    ctk.CTkLabel(jan_admin, text="CRIAR ADMIN", font=("Arial", 18, "bold")).pack(pady=20)
+    ctk.CTkLabel(jan_admin, text=t("ui_criar_admin"), font=("Arial", 18, "bold")).pack(pady=20)
     ctk.CTkLabel(
         jan_admin,
-        text="Nenhum usuário encontrado.\nCrie agora o ADMIN inicial.",
+        text=t("ui_nenhum_usu_rio_encontrado_ncrie_agora_o_admin_inicial"),
         text_color="#f1c40f",
         justify="center"
     ).pack(pady=(0, 12))
 
-    u_new = ctk.CTkEntry(jan_admin, placeholder_text="Usuário ADMIN")
+    u_new = ctk.CTkEntry(jan_admin, placeholder_text=t("ui_usu_rio_admin"))
     u_new.pack(pady=8)
-    s_new = ctk.CTkEntry(jan_admin, placeholder_text="Senha", show="*")
+    s_new = ctk.CTkEntry(jan_admin, placeholder_text=t("ui_senha"), show="*")
     s_new.pack(pady=8)
-    s_confirm = ctk.CTkEntry(jan_admin, placeholder_text="Confirmar Senha", show="*")
+    s_confirm = ctk.CTkEntry(jan_admin, placeholder_text=t("ui_confirmar_senha_1"), show="*")
     s_confirm.pack(pady=8)
 
     lbl_local = ctk.CTkLabel(jan_admin, text="", text_color="red")
@@ -1002,10 +1129,10 @@ def abrir_tela_primeiro_admin():
         sc = s_confirm.get().strip()
 
         if not u or not s or not sc:
-            lbl_local.configure(text="Preencha todos os campos.")
+            lbl_local.configure(text=t("ui_preencha_todos_os_campos"))
             return
         if s != sc:
-            lbl_local.configure(text="As senhas não coincidem.")
+            lbl_local.configure(text=t("ui_as_senhas_n_o_coincidem"))
             return
 
         valid, mensagem = validate_password(s)
@@ -1028,17 +1155,17 @@ def abrir_tela_primeiro_admin():
             jan_admin.after(200, lambda: jan_admin.destroy())
             
             atualizar_status_trial_tela()
-            label_status.configure(text="ADMIN inicial criado. Faça login.", text_color="green")
+            label_status.configure(text=t("ui_admin_inicial_criado_fa_a_login"), text_color="green")
             
             # Comandos de transição agora corretamente indentados dentro do bloco try
             janela_login.deiconify()
             atualizar_status_primeiro_acesso()
         except sqlite3.IntegrityError:
-            lbl_local.configure(text="Usuário já existe.")
+            lbl_local.configure(text=t("ui_usu_rio_j_existe"))
         except Exception as e:
             lbl_local.configure(text=f"Erro ao criar ADMIN: {e}")
 
-    ctk.CTkButton(jan_admin, text="CRIAR ADMIN", fg_color="#27ae60", command=salvar_admin).pack(pady=18)
+    ctk.CTkButton(jan_admin, text=t("ui_criar_admin"), fg_color="#27ae60", command=salvar_admin).pack(pady=18)
 
 def verificar_login():
     global _LOGIN_SUCESSO_DADOS, _LOGIN_TRANSICAO_EM_ANDAMENTO #
@@ -1056,20 +1183,20 @@ def verificar_login():
         print("Log: Verificando se existem usuários no banco...")
         if not existe_algum_usuario():
             print("Log: Banco vazio detectado. Abrindo tela de Primeiro Acesso.")
-            label_status.configure(text="?? Crie o ADMIN inicial para continuar.", text_color="#f1c40f")
+            label_status.configure(text=t("ui_crie_o_admin_inicial_para_continuar_1"), text_color="#f1c40f")
             # Esconde o login para forçar a criação do admin
             janela_login.withdraw()
             abrir_tela_primeiro_admin()
             return
     except Exception as e:
         logger.exception("Erro ao verificar existência de usuários: %s", e)
-        label_status.configure(text="Erro ao acessar base de usuários.", text_color="red")
+        label_status.configure(text=t("ui_erro_ao_acessar_base_de_usu_rios"), text_color="red")
         return
 
     print(f"Log: Autenticando usuário '{u}'...")
 
     if not u or not s:
-        label_status.configure(text="Informe usuário e senha.", text_color="red")
+        label_status.configure(text=t("ui_informe_usu_rio_e_senha"), text_color="red")
         return
     
     try:
@@ -1084,14 +1211,14 @@ def verificar_login():
             print(f"Log: Comparação executada com usuario={u!r} e resultado_verdadeiro={bool(resultado)}")
 
             if not resultado:
-                label_status.configure(text="Usuário ou senha inválidos.", text_color="red")
+                label_status.configure(text=t("ui_usu_rio_ou_senha_inv_lidos"), text_color="red")
                 messagebox.showerror("Erro de Acesso", "Usuário ou senha inválidos.")
                 return
 
             stored_password = resultado[2]
             if not verify_password(s, stored_password):
                 print(f"Log: Senha não validada para usuario={u!r}; senha_informada={s!r}; senha_armazenada={stored_password!r}")
-                label_status.configure(text="Usuário ou senha inválidos.", text_color="red")
+                label_status.configure(text=t("ui_usu_rio_ou_senha_inv_lidos"), text_color="red")
                 messagebox.showerror("Erro de Acesso", "Usuário ou senha inválidos.")
                 return
 
@@ -1160,7 +1287,7 @@ def verificar_login():
             f"Banco esperado em:\n{CAMINHO_BANCO}\n\n"
             f"Detalhe técnico:\n{e}"
         )
-        label_status.configure(text="Erro de banco de dados ou permissão.", text_color="red")
+        label_status.configure(text=t("ui_erro_de_banco_de_dados_ou_permiss_o"), text_color="red")
         try:
             messagebox.showerror("Erro de banco de dados", msg_erro, parent=janela_login)
         except Exception:
@@ -1169,7 +1296,7 @@ def verificar_login():
     except Exception as e:
         _LOGIN_TRANSICAO_EM_ANDAMENTO = False
         logger.exception("Erro no login: %s", e)
-        label_status.configure(text="Erro interno ao processar login.", text_color="red")
+        label_status.configure(text=t("ui_erro_interno_ao_processar_login"), text_color="red")
         try:
             messagebox.showerror(
                 "Erro no login",
@@ -1180,7 +1307,7 @@ def verificar_login():
             pass
         return
 
-    label_status.configure(text="Usuário ou senha inválidos.", text_color="red")
+    label_status.configure(text=t("ui_usu_rio_ou_senha_inv_lidos"), text_color="red")
     return
 
 
@@ -1197,7 +1324,7 @@ def abrir_tela_ativacao():
     y = janela_login.winfo_y() + (janela_login.winfo_height() // 2) - 150
     dialog.geometry(f"460x260+{x}+{y}")
 
-    ctk.CTkLabel(dialog, text="Chave de instalação deste PC:", text_color="#bdc3c7").pack(pady=(18, 4))
+    ctk.CTkLabel(dialog, text=t("ui_chave_de_instala_o_deste_pc"), text_color="#bdc3c7").pack(pady=(18, 4))
 
     frame_chave = ctk.CTkFrame(dialog, fg_color="#1f2a38")
     frame_chave.pack(pady=(0, 14))
@@ -1206,15 +1333,15 @@ def abrir_tela_ativacao():
     def _copiar_chave():
         dialog.clipboard_clear()
         dialog.clipboard_append(chave_inst)
-        btn_copiar.configure(text="Copiado!")
-        dialog.after(2000, lambda: btn_copiar.configure(text="Copiar Chave"))
+        btn_copiar.configure(text=t("ui_copiado_1"))
+        dialog.after(2000, lambda: btn_copiar.configure(text=t("ui_copiar_chave")))
 
-    btn_copiar = ctk.CTkButton(frame_chave, text="Copiar Chave", command=_copiar_chave,
+    btn_copiar = ctk.CTkButton(frame_chave, text=t("ui_copiar_chave"), command=_copiar_chave,
                                width=130, height=30, fg_color="#2980b9", hover_color="#3498db")
     btn_copiar.pack(side="left")
 
-    ctk.CTkLabel(dialog, text="Contra-senha de ativação:", text_color="#bdc3c7").pack(pady=(0, 4))
-    entry_chave = ctk.CTkEntry(dialog, width=380, height=40, placeholder_text="Cole aqui a chave enviada pelo suporte")
+    ctk.CTkLabel(dialog, text=t("ui_contra_senha_de_ativa_o"), text_color="#bdc3c7").pack(pady=(0, 4))
+    entry_chave = ctk.CTkEntry(dialog, width=380, height=40, placeholder_text=t("ui_cole_aqui_a_chave_enviada_pelo_suporte"))
     entry_chave.pack(pady=(0, 12))
 
     def _confirmar_ativacao():
@@ -1223,7 +1350,7 @@ def abrir_tela_ativacao():
             messagebox.showwarning("Ativação", "Informe a contra-senha de ativação.", parent=dialog)
             return
 
-        btn_confirmar.configure(state="disabled", text="ATIVANDO...")
+        btn_confirmar.configure(state="disabled", text=t("ui_ativando"))
         ok, msg = ativar_licenca(chave)
         if ok:
             def _publicar_drive_background() -> None:
@@ -1238,7 +1365,7 @@ def abrir_tela_ativacao():
                 name="ofp-licenca-drive-auto",
             ).start()
 
-            label_status.configure(text="Licença ativada com sucesso.", text_color="#2ecc71")
+            label_status.configure(text=t("ui_licen_a_ativada_com_sucesso"), text_color="#2ecc71")
             atualizar_status_trial_tela()
             dialog.after(80, dialog.destroy)
             return
@@ -1250,7 +1377,7 @@ def abrir_tela_ativacao():
                 msg = f"{msg}\n\nDiagnóstico: {detalhe}"
         except Exception:
             pass
-        btn_confirmar.configure(state="normal", text="ATIVAR AGORA")
+        btn_confirmar.configure(state="normal", text=t("ui_ativar_agora"))
         messagebox.showerror("Ativação", msg, parent=dialog)
 
     frame_acoes = ctk.CTkFrame(dialog, fg_color="transparent")
@@ -1258,7 +1385,7 @@ def abrir_tela_ativacao():
 
     btn_confirmar = ctk.CTkButton(
         frame_acoes,
-        text="ATIVAR AGORA",
+        text=t("ui_ativar_agora"),
         command=_confirmar_ativacao,
         width=320,
         height=36,
@@ -1290,16 +1417,16 @@ janela_login.geometry(f"400x680+{x}+{y}")
 main_frame = ctk.CTkFrame(janela_login, corner_radius=20, fg_color="#252525")
 main_frame.pack(expand=True, fill="both", padx=16, pady=12)
 
-ctk.CTkLabel(main_frame, text="OFICINA DE PESCA", font=("Segoe UI Semibold", 18), text_color="orange").pack(pady=(16, 4))
+ctk.CTkLabel(main_frame, text=t("titulo_oficina"), font=("Segoe UI Semibold", 18), text_color="orange").pack(pady=(16, 4))
 ctk.CTkLabel(main_frame, text=f"v{VERSION}", text_color="#f6b26b", font=("Segoe UI", 11)).pack(pady=(0, 10))
-ctk.CTkLabel(main_frame, text="Preencha usuário e senha para entrar no sistema.", text_color="#95a5a6").pack(pady=(0, 14))
+ctk.CTkLabel(main_frame, text=t("ui_preencha_usu_rio_e_senha_para_entrar_no_sistema"), text_color="#95a5a6").pack(pady=(0, 14))
 
-ctk.CTkLabel(main_frame, text="Usuário de acesso", text_color="#dfe6e9", anchor="w").pack(padx=50, pady=(0, 4), fill="x")
-entry_user = ctk.CTkEntry(main_frame, placeholder_text="Usuário", width=320, height=44)
+ctk.CTkLabel(main_frame, text=t("ui_usu_rio_de_acesso"), text_color="#dfe6e9", anchor="w").pack(padx=50, pady=(0, 4), fill="x")
+entry_user = ctk.CTkEntry(main_frame, placeholder_text=t("ui_usu_rio"), width=320, height=44)
 entry_user.pack(pady=(0, 10))
 
-ctk.CTkLabel(main_frame, text="Senha de acesso", text_color="#dfe6e9", anchor="w").pack(padx=50, pady=(0, 4), fill="x")
-entry_pass = ctk.CTkEntry(main_frame, placeholder_text="Senha", show="*", width=320, height=44)
+ctk.CTkLabel(main_frame, text=t("ui_senha_de_acesso"), text_color="#dfe6e9", anchor="w").pack(padx=50, pady=(0, 4), fill="x")
+entry_pass = ctk.CTkEntry(main_frame, placeholder_text=t("ui_senha"), show="*", width=320, height=44)
 entry_pass.pack(pady=(0, 10))
 
 # Bindings para permitir login ao pressionar Enter nos campos de texto
@@ -1322,13 +1449,13 @@ def _solicitar_foco_login():
     except Exception:
         pass
 
-btn_entrar = ctk.CTkButton(main_frame, text="ENTRAR", command=verificar_login, width=320, height=48, fg_color="#27ae60", hover_color="#2ecc71")
+btn_entrar = ctk.CTkButton(main_frame, text=t("btn_entrar_maiusculo"), command=verificar_login, width=320, height=48, fg_color="#27ae60", hover_color="#2ecc71")
 btn_entrar.pack(pady=(18, 12))
 print("Log: Interface de Login montada e botão vinculado.")
 
 btn_ativar = ctk.CTkButton(
     main_frame,
-    text="ATIVAR LICENÇA",
+    text=t("ui_ativar_licen_a"),
     command=abrir_tela_ativacao,
     width=320,
     height=38,
@@ -1337,7 +1464,7 @@ btn_ativar = ctk.CTkButton(
 )
 btn_pagamento = ctk.CTkButton(
     main_frame,
-    text="COMPRAR LICENÇA",
+    text=t("ui_comprar_licen_a"),
     command=abrir_janela_planos,
     width=320,
     height=38,
@@ -1348,7 +1475,7 @@ btn_pagamento.pack(pady=(0, 10))
 
 btn_ativar.pack(pady=(0, 8))
 
-ctk.CTkLabel(main_frame, text="Cadastro de usuários disponível apenas no menu do ADMIN.", text_color="#95a5a6", wraplength=360, justify="center", font=("Segoe UI", 10)).pack(pady=(2, 14))
+ctk.CTkLabel(main_frame, text=t("ui_cadastro_de_usu_rios_dispon_vel_apenas_no_menu_do_admin"), text_color="#95a5a6", wraplength=360, justify="center", font=("Segoe UI", 10)).pack(pady=(2, 14))
 
 label_trial = ctk.CTkLabel(main_frame, text="", text_color="#f1c40f", wraplength=320, justify="center")
 label_trial.pack_forget()
@@ -1585,7 +1712,7 @@ def atualizar_status_trial_tela():
         if expira_breve:
             btn_ativar.configure(
                 state="normal",
-                text="ATIVAR LICENÇA",
+                text=t("ui_ativar_licen_a"),
                 width=320,
                 height=38,
                 fg_color="#34495e",
@@ -1594,7 +1721,7 @@ def atualizar_status_trial_tela():
         else:
             btn_ativar.configure(
                 state="disabled",
-                text="ATIVAR LICENÇA",
+                text=t("ui_ativar_licen_a"),
                 width=320,
                 height=38,
                 fg_color="#7f8c8d",
@@ -1616,7 +1743,7 @@ def atualizar_status_trial_tela():
     btn_entrar.configure(state="normal", fg_color="#27ae60", hover_color="#2ecc71")
     btn_ativar.configure(
         state="normal",
-        text="ATIVAR LICENÇA",
+        text=t("ui_ativar_licen_a"),
         width=320,
         height=38,
         fg_color="#34495e",
@@ -1628,7 +1755,7 @@ def atualizar_status_trial_tela():
             if not label_trial.winfo_manager():
                 label_trial.pack(pady=(0, 8), before=label_status)
         else:
-            label_trial.configure(text="Trial expirado. Ative uma licença para continuar.")
+            label_trial.configure(text=t("ui_trial_expirado_ative_uma_licen_a_para_continuar"))
             if not label_trial.winfo_manager():
                 label_trial.pack(pady=(0, 8), before=label_status)
         label_status.configure(text="")
@@ -1647,7 +1774,7 @@ def atualizar_status_primeiro_acesso():
         if usuario_count == 0:
             logger.info("[startup] Nenhum usuário detectado. Forçando tela de Primeiro Acesso.")
             janela_login.withdraw()
-            label_status.configure(text="Crie o ADMIN inicial para continuar.", text_color="#f1c40f")
+            label_status.configure(text=t("ui_crie_o_admin_inicial_para_continuar"), text_color="#f1c40f")
             abrir_tela_primeiro_admin()
         else:
             # Se houver usuários, garante que a tela de login apareça
@@ -1725,7 +1852,18 @@ def _checar_versao_bg():
     else:
         janela_login.after(0, _fechar_popup_atualizacao)
 
-janela_login.after(120, _inicializar_fluxo_pos_termos)
+def _inicializar_fluxo_com_eula() -> None:
+    """Exibe o EULA (primeiro acesso) e só então inicia o fluxo do sistema."""
+    try:
+        _exibir_janela_eula()
+    except SystemExit:
+        raise
+    except Exception:
+        logger.exception("[eula] Falha na janela de aceite — seguindo fluxo padrão.")
+    _inicializar_fluxo_pos_termos()
+
+
+janela_login.after(120, _inicializar_fluxo_com_eula)
 janela_login.after(50, _solicitar_foco_login)
 janela_login.after(250, _solicitar_foco_login)
 janela_login.after(

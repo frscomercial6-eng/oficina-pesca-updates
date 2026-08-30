@@ -6,6 +6,7 @@ import configparser
 import os
 from datetime import datetime
 from version_info import VERSION
+from core.i18n import t  # NOVO: import do sistema de i18n
 from config import (
     obter_status_licenca,
     obter_chave_licenca_ativa,
@@ -128,7 +129,7 @@ def janela_vendas(parent=None, forcar_abertura=False, dias_restantes_alerta=None
 
     ctk.CTkLabel(
         root,
-        text="Escolha o melhor plano para sua oficina",
+        text=t("ui_escolha_o_melhor_plano_para_sua_oficina"),
         font=("Roboto", 28, "bold"),
         text_color=COR_TEXTO
     ).pack(pady=10 if expirada else 30)
@@ -305,7 +306,7 @@ def janela_vendas(parent=None, forcar_abertura=False, dias_restantes_alerta=None
 
         ctk.CTkButton(
             inner,
-            text="Assinar Agora",
+            text=t("ui_assinar_agora"),
             font=("Roboto", 15, "bold"),
             fg_color=plano["botao_cor"],
             text_color=plano["botao_texto"],

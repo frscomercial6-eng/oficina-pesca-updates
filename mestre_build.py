@@ -12,7 +12,7 @@ import time
 import zipfile
 
 DIV = "═" * 50
-VERSAO = "1.0.55"
+VERSAO = "1.0.56"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -74,6 +74,9 @@ RESOURCE_SPECS = [
     ("version.txt", "."),
     ("Documentos/termos_de_uso.txt", "Documentos"),
     ("Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf", "."),
+    ("Contrato_Oficina_de_Pesca_V3_Maio_2026_en_US.rtf", "."),
+    ("Contrato_Oficina_de_Pesca_V3_Maio_2026_es_UY.rtf", "."),
+    ("locales", "locales"),
 ]
 
 INSTALLER_REQUIRED_SPECS = [
@@ -83,6 +86,7 @@ INSTALLER_REQUIRED_SPECS = [
     ("Atualizador.exe", "."),
     ("static", "static"),
     ("templates", "templates"),
+    ("locales", "locales"),
 ]
 
 PORTABLE_REQUIRED_SPECS = [
@@ -96,6 +100,7 @@ PORTABLE_REQUIRED_SPECS = [
     ("config.cfg", "."),
     ("versao.json", "."),
     ("version.txt", "."),
+    ("locales", "locales"),
 ]
 
 FUNDO_MENU_CANDIDATOS = [
@@ -133,6 +138,7 @@ LOCAL_HIDDEN_IMPORTS = [
     ("tela_os", "tela_os.py"),
     ("tela_planos", "tela_planos.py"),
     ("util_recibo", "util_recibo.py"),
+    ("core.i18n", "core/i18n.py"),
 ]
 
 PYINSTALLER_HIDDEN_IMPORTS = [
@@ -306,6 +312,8 @@ def _atualizar_version_info(nova_versao: str) -> None:
 def _atualizar_eula(nova_versao: str) -> None:
     candidatos = [
         "Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf",
+        "Contrato_Oficina_de_Pesca_V3_Maio_2026_en_US.rtf",
+        "Contrato_Oficina_de_Pesca_V3_Maio_2026_es_UY.rtf",
         os.path.join("Documentos", "termos_de_uso.txt"),
     ]
     for path in candidatos:
@@ -314,6 +322,8 @@ def _atualizar_eula(nova_versao: str) -> None:
         txt, enc = _read_text_any(path)
         novo = txt
         novo = re.sub(r'(Vers[aã]o\s+)([0-9]+(?:\.[0-9]+){2,})', rf'\g<1>{nova_versao}', novo, flags=re.IGNORECASE)
+        # Contratos em inglês ("Version x.y.z") e espanhol ("Versión x.y.z").
+        novo = re.sub(r'(Versi[oó]n?\s+)([0-9]+(?:\.[0-9]+){2,})', rf'\g<1>{nova_versao}', novo, flags=re.IGNORECASE)
         # Caso específico em RTF onde "Versão" aparece com escapes.
         novo = re.sub(
             r"(Vers\\'e3\\loch\\f1\s+\\hich\\f1\s*o\s+)([0-9]+(?:\.[0-9]+){2,})",
@@ -726,7 +736,7 @@ def _sincronizar_fonte_para_build() -> None:
     if os.path.abspath(BUILD_ROOT) == os.path.abspath(REPO_ROOT):
         return
 
-    itens = [
+        itens = [
         ENTRY_SCRIPT,
         "config.py",
         "configuracao_fiscal.py",
@@ -738,6 +748,8 @@ def _sincronizar_fonte_para_build() -> None:
         "version.txt",
         "version_info.py",
         "Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf",
+        "Contrato_Oficina_de_Pesca_V3_Maio_2026_en_US.rtf",
+        "Contrato_Oficina_de_Pesca_V3_Maio_2026_es_UY.rtf",
         INSTALLER_SCRIPT,
         "instalar_oficial_completo.iss",
         "fundomenu.png",
@@ -749,6 +761,7 @@ def _sincronizar_fonte_para_build() -> None:
         "servidor.py",
         "menu.py",
         "core",
+        "locales",
         "assets",
         "Documentos",
         "templates",

@@ -8,7 +8,7 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.55"
+#define AppVersion "1.0.56"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
@@ -27,18 +27,24 @@ DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.55
+OutputBaseFilename=Setup_OficinaPesca_v1.0.56
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 LicenseFile=Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf
-ShowLanguageDialog=yes
+; Diálogo de idioma desativado: o idioma é selecionado automaticamente
+; conforme o idioma configurado no Windows do usuário.
+ShowLanguageDialog=no
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=commandline
 SetupIconFile=icone_oficina.ico
 
 [Languages]
-Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
+; O contrato (LicenseFile) acompanha o idioma selecionado automaticamente
+; pelo Windows: português (Brasil), inglês (EUA) ou espanhol (fallback pt_BR).
+Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"; LicenseFile: "Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf"
+Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "Contrato_Oficina_de_Pesca_V3_Maio_2026_en_US.rtf"
+Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"; LicenseFile: "Contrato_Oficina_de_Pesca_V3_Maio_2026_es_UY.rtf"
 
 [Components]
 Name: "core"; Description: "Sistema Oficina de Pesca (obrigatório)"; Types: full custom; Flags: fixed

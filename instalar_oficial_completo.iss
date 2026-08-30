@@ -4,7 +4,7 @@
 ; ==============================================================
 
 #define AppName "Oficina de Pesca versão {#AppVersion} - Instalador"
-#define AppVersion "1.0.55"
+#define AppVersion "1.0.56"
 #define AppPublisher "FRS Solutions"
 #define AppExeName "Oficina_Pesca.exe"
 
@@ -16,7 +16,7 @@ AppPublisher={#AppPublisher}
 DefaultDirName={localappdata}\OficinaPesca
 DefaultGroupName={#AppName}
 OutputDir=Output
-OutputBaseFilename=Instalador_Oficina_Pesca_Oficial_v1.0.55
+OutputBaseFilename=Instalador_Oficina_Pesca_Oficial_v1.0.56
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -25,9 +25,16 @@ PrivilegesRequiredOverridesAllowed=dialog
 AllowNoIcons=yes
 SetupIconFile=assets\logo.ico
 LicenseFile=Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf
+; Diálogo de idioma desativado: o idioma é selecionado automaticamente
+; conforme o idioma configurado no Windows do usuário.
+ShowLanguageDialog=no
 
 [Languages]
-Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
+; O contrato (LicenseFile) acompanha o idioma selecionado automaticamente
+; pelo Windows: português (Brasil), inglês (EUA) ou espanhol (fallback pt_BR).
+Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"; LicenseFile: "Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf"
+Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "Contrato_Oficina_de_Pesca_V3_Maio_2026_en_US.rtf"
+Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"; LicenseFile: "Contrato_Oficina_de_Pesca_V3_Maio_2026_es_UY.rtf"
 
 [Tasks]
 Name: "desktopicon"; Description: "Criar atalho na Área de Trabalho"; GroupDescription: "Atalhos:"
@@ -59,6 +66,8 @@ Source: "apk_celular_distribuicao\instrucoes_instalacao.txt"; DestDir: "{app}\_i
 
 ; Documentos de contrato e termos de uso
 Source: "Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf"; DestDir: "{app}\Documentos"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "Contrato_Oficina_de_Pesca_V3_Maio_2026_en_US.rtf"; DestDir: "{app}\Documentos"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "Contrato_Oficina_de_Pesca_V3_Maio_2026_es_UY.rtf"; DestDir: "{app}\Documentos"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "termos_de_uso.txt"; DestDir: "{app}\Documentos"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]

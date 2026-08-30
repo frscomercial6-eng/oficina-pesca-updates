@@ -391,7 +391,7 @@ class FrmPDV(ctk.CTkToplevel):
         topo.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 4))
         topo.grid_columnconfigure(2, weight=1)
 
-        ctk.CTkLabel(topo, text="Qtd", font=("Arial", 11, "bold"), text_color="#dbe4ee").grid(
+        ctk.CTkLabel(topo, text=t("ui_qtd_1"), font=("Arial", 11, "bold"), text_color="#dbe4ee").grid(
             row=0, column=0, padx=(10, 6), pady=8, sticky="w"
         )
         self.ent_qtd = ctk.CTkEntry(
@@ -409,7 +409,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         self.ent_busca = ctk.CTkEntry(
             topo,
-            placeholder_text="Produto / codigo de barras... (Enter adiciona | Tab abre busca)",
+            placeholder_text=t("ui_produto_codigo_de_barras_enter_adiciona_tab_abre_busca"),
             height=30,
             fg_color="#111827",
             border_color="#93c5fd",
@@ -424,7 +424,7 @@ class FrmPDV(ctk.CTkToplevel):
         acoes_topo.grid_columnconfigure((0, 1, 2), weight=0)
         ctk.CTkButton(
             acoes_topo,
-            text="Adicionar item da Oficina",
+            text=t("ui_adicionar_item_da_oficina"),
             width=220,
             height=30,
             fg_color="#2563eb",
@@ -433,7 +433,7 @@ class FrmPDV(ctk.CTkToplevel):
         ).grid(row=0, column=0, sticky="e", padx=(0, 6))
         ctk.CTkButton(
             acoes_topo,
-            text="Buscar Produto",
+            text=t("btn_buscar_produto"),
             width=170,
             height=30,
             fg_color="#0ea5e9",
@@ -442,7 +442,7 @@ class FrmPDV(ctk.CTkToplevel):
         ).grid(row=0, column=1, sticky="e", padx=(0, 6))
         ctk.CTkButton(
             acoes_topo,
-            text="SOLICITAÇÃO PARA OFICINA",
+            text=t("ui_solicita_o_para_oficina"),
             width=230,
             height=30,
             fg_color="#7c3aed",
@@ -466,11 +466,11 @@ class FrmPDV(ctk.CTkToplevel):
             height=14,
             style="PDV.Treeview",
         )
-        self.tree_carrinho.heading("id", text="ID")
-        self.tree_carrinho.heading("nome", text="Item")
-        self.tree_carrinho.heading("qtd", text="Qtd")
-        self.tree_carrinho.heading("unit", text="Unit.")
-        self.tree_carrinho.heading("total", text="Total")
+        self.tree_carrinho.heading("id", text=t("col_id"))
+        self.tree_carrinho.heading("nome", text=t("ui_item"))
+        self.tree_carrinho.heading("qtd", text=t("ui_qtd_1"))
+        self.tree_carrinho.heading("unit", text=t("ui_unit_1"))
+        self.tree_carrinho.heading("total", text=t("ui_total_1"))
         self.tree_carrinho.column("id", width=60, anchor="center")
         self.tree_carrinho.column("nome", width=620)
         self.tree_carrinho.column("qtd", width=90, anchor="center")
@@ -515,7 +515,7 @@ class FrmPDV(ctk.CTkToplevel):
         linha_pagto = ctk.CTkFrame(painel_pagamento, fg_color="transparent")
         linha_pagto.grid(row=2, column=0, sticky="ew", pady=(8, 6))
         linha_pagto.grid_columnconfigure(4, weight=1)
-        ctk.CTkLabel(linha_pagto, text="Valor", text_color="#cbd5e1").grid(row=0, column=0, padx=(0, 6))
+        ctk.CTkLabel(linha_pagto, text=t("col_valor"), text_color="#cbd5e1").grid(row=0, column=0, padx=(0, 6))
         self.ent_valor_pagamento = ctk.CTkEntry(
             linha_pagto,
             width=120,
@@ -536,7 +536,7 @@ class FrmPDV(ctk.CTkToplevel):
         ).grid(row=0, column=2, padx=(0, 8))
         ctk.CTkButton(
             linha_pagto,
-            text="Limpar (F2)",
+            text=t("ui_limpar_f2"),
             width=120,
             fg_color="#64748b",
             command=self._limpar_venda,
@@ -592,7 +592,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             acoes_venda,
-            text="FECHAMENTO DE CAIXA",
+            text=t("ui_fechamento_de_caixa"),
             width=168,
             height=34,
             fg_color="#16a34a",
@@ -606,8 +606,8 @@ class FrmPDV(ctk.CTkToplevel):
             height=3,
             style="PDV.Treeview",
         )
-        self.tree_pagamentos.heading("metodo", text="Metodo")
-        self.tree_pagamentos.heading("valor", text="Valor")
+        self.tree_pagamentos.heading("metodo", text=t("ui_metodo"))
+        self.tree_pagamentos.heading("valor", text=t("col_valor"))
         self.tree_pagamentos.column("metodo", width=170, anchor="w")
         self.tree_pagamentos.column("valor", width=130, anchor="e")
         self.tree_pagamentos.grid(row=3, column=0, sticky="ew")
@@ -617,14 +617,14 @@ class FrmPDV(ctk.CTkToplevel):
         painel_resumo.grid_columnconfigure(0, weight=1)
         painel_resumo.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(painel_resumo, text="Resumo", font=("Arial", 12, "bold"), text_color="#f8fafc").grid(
+        ctk.CTkLabel(painel_resumo, text=t("ui_resumo"), font=("Arial", 12, "bold"), text_color="#f8fafc").grid(
             row=0, column=0, columnspan=2, sticky="e", padx=12, pady=(10, 8)
         )
-        ctk.CTkLabel(painel_resumo, text="Total", text_color="#cbd5e1").grid(row=1, column=0, sticky="e", padx=(12, 8), pady=3)
-        self.lbl_subtotal = ctk.CTkLabel(painel_resumo, text="R$ 0,00", font=("Arial", 12, "bold"), text_color="#e2e8f0")
+        ctk.CTkLabel(painel_resumo, text=t("ui_total_1"), text_color="#cbd5e1").grid(row=1, column=0, sticky="e", padx=(12, 8), pady=3)
+        self.lbl_subtotal = ctk.CTkLabel(painel_resumo, text=t("ui_r_0_00"), font=("Arial", 12, "bold"), text_color="#e2e8f0")
         self.lbl_subtotal.grid(row=1, column=1, sticky="e", padx=(8, 12), pady=3)
 
-        ctk.CTkLabel(painel_resumo, text="Desconto", text_color="#cbd5e1").grid(row=2, column=0, sticky="e", padx=(12, 8), pady=3)
+        ctk.CTkLabel(painel_resumo, text=t("ui_desconto_1"), text_color="#cbd5e1").grid(row=2, column=0, sticky="e", padx=(12, 8), pady=3)
         self.ent_desconto = ctk.CTkEntry(
             painel_resumo,
             width=126,
@@ -638,20 +638,20 @@ class FrmPDV(ctk.CTkToplevel):
         self.ent_desconto.insert(0, "0")
         self.ent_desconto.bind("<KeyRelease>", self._ao_alterar_desconto)
 
-        ctk.CTkLabel(painel_resumo, text="Valor Pago", text_color="#cbd5e1").grid(row=3, column=0, sticky="e", padx=(12, 8), pady=3)
-        self.lbl_pago = ctk.CTkLabel(painel_resumo, text="R$ 0,00", font=("Arial", 12, "bold"), text_color="#22c55e")
+        ctk.CTkLabel(painel_resumo, text=t("ui_valor_pago"), text_color="#cbd5e1").grid(row=3, column=0, sticky="e", padx=(12, 8), pady=3)
+        self.lbl_pago = ctk.CTkLabel(painel_resumo, text=t("ui_r_0_00"), font=("Arial", 12, "bold"), text_color="#22c55e")
         self.lbl_pago.grid(row=3, column=1, sticky="e", padx=(8, 12), pady=3)
 
-        ctk.CTkLabel(painel_resumo, text="Saldo", text_color="#cbd5e1").grid(row=4, column=0, sticky="e", padx=(12, 8), pady=3)
-        self.lbl_restante = ctk.CTkLabel(painel_resumo, text="R$ 0,00", font=("Arial", 12, "bold"), text_color="#f87171")
+        ctk.CTkLabel(painel_resumo, text=t("ui_saldo"), text_color="#cbd5e1").grid(row=4, column=0, sticky="e", padx=(12, 8), pady=3)
+        self.lbl_restante = ctk.CTkLabel(painel_resumo, text=t("ui_r_0_00"), font=("Arial", 12, "bold"), text_color="#f87171")
         self.lbl_restante.grid(row=4, column=1, sticky="e", padx=(8, 12), pady=3)
 
-        ctk.CTkLabel(painel_resumo, text="Troco", text_color="#cbd5e1").grid(row=5, column=0, sticky="e", padx=(12, 8), pady=3)
-        self.lbl_troco = ctk.CTkLabel(painel_resumo, text="R$ 0,00", font=("Arial", 12, "bold"), text_color="#f59e0b")
+        ctk.CTkLabel(painel_resumo, text=t("ui_troco"), text_color="#cbd5e1").grid(row=5, column=0, sticky="e", padx=(12, 8), pady=3)
+        self.lbl_troco = ctk.CTkLabel(painel_resumo, text=t("ui_r_0_00"), font=("Arial", 12, "bold"), text_color="#f59e0b")
         self.lbl_troco.grid(row=5, column=1, sticky="e", padx=(8, 12), pady=3)
 
-        ctk.CTkLabel(painel_resumo, text="Total Liquido", text_color="#cbd5e1").grid(row=6, column=0, sticky="e", padx=(12, 8), pady=(3, 12))
-        self.lbl_total = ctk.CTkLabel(painel_resumo, text="R$ 0,00", font=("Arial", 18, "bold"), text_color="#22c55e")
+        ctk.CTkLabel(painel_resumo, text=t("ui_total_liquido"), text_color="#cbd5e1").grid(row=6, column=0, sticky="e", padx=(12, 8), pady=(3, 12))
+        self.lbl_total = ctk.CTkLabel(painel_resumo, text=t("ui_r_0_00"), font=("Arial", 18, "bold"), text_color="#22c55e")
         self.lbl_total.grid(row=6, column=1, sticky="e", padx=(8, 12), pady=(3, 12))
 
         self.btn_finalizar = ctk.CTkButton(
@@ -665,7 +665,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkCheckBox(
             painel_resumo,
-            text="Impressao Automatica",
+            text=t("ui_impressao_automatica"),
             variable=self._auto_impressao,
             onvalue=True,
             offvalue=False,
@@ -682,7 +682,7 @@ class FrmPDV(ctk.CTkToplevel):
         if hasattr(self, "btn_finalizar"):
             self.btn_finalizar.configure(
                 state="disabled" if finalizando else "normal",
-                text="Finalizando..." if finalizando else "Finalizar (F1)",
+                text=t("ui_finalizando") if finalizando else "Finalizar (F1)",
             )
 
     def _focar_qtd(self):
@@ -928,10 +928,10 @@ class FrmPDV(ctk.CTkToplevel):
         win.grab_set()
         win.focus_force()
 
-        ctk.CTkLabel(win, text="Buscar produto", font=("Arial", 12, "bold")).pack(anchor="w", padx=12, pady=(12, 4))
+        ctk.CTkLabel(win, text=t("ui_buscar_produto"), font=("Arial", 12, "bold")).pack(anchor="w", padx=12, pady=(12, 4))
         ent_filtro = ctk.CTkEntry(
             win,
-            placeholder_text="Digite para filtrar...",
+            placeholder_text=t("ui_digite_para_filtrar"),
             height=32,
             fg_color="#1e293b",
             border_color="#f8fafc",
@@ -940,10 +940,10 @@ class FrmPDV(ctk.CTkToplevel):
         ent_filtro.pack(fill="x", padx=12, pady=(0, 8))
 
         tree = ttk.Treeview(win, columns=("id", "nome", "preco", "estoque"), show="headings", style="PDV.Treeview")
-        tree.heading("id", text="ID")
-        tree.heading("nome", text="Produto")
-        tree.heading("preco", text="Preco")
-        tree.heading("estoque", text="Estoque")
+        tree.heading("id", text=t("col_id"))
+        tree.heading("nome", text=t("ui_produto"))
+        tree.heading("preco", text=t("ui_preco"))
+        tree.heading("estoque", text=t("btn_estoque"))
         tree.column("id", width=60, anchor="center")
         tree.column("nome", width=430)
         tree.column("preco", width=110, anchor="e")
@@ -1005,13 +1005,13 @@ class FrmPDV(ctk.CTkToplevel):
         rodape.pack(fill="x", padx=12, pady=(0, 12))
         ctk.CTkLabel(
             rodape,
-            text="Duplo clique, ENTER ou botão para adicionar ao carrinho.",
+            text=t("ui_duplo_clique_enter_ou_bot_o_para_adicionar_ao_carrinho"),
             font=("Arial", 10),
             text_color="#94a3b8",
         ).pack(side="left")
         ctk.CTkButton(
             rodape,
-            text="Fechar",
+            text=t("ui_fechar_1"),
             width=110,
             height=34,
             fg_color="#374151",
@@ -1020,7 +1020,7 @@ class FrmPDV(ctk.CTkToplevel):
         ).pack(side="right", padx=(0, 8))
         ctk.CTkButton(
             rodape,
-            text="Adicionar ao carrinho",
+            text=t("ui_adicionar_ao_carrinho"),
             width=200,
             height=34,
             fg_color="#16a34a",
@@ -1091,7 +1091,7 @@ class FrmPDV(ctk.CTkToplevel):
         ).pack(anchor="w", padx=16, pady=(14, 0))
         ctk.CTkLabel(
             cabecalho,
-            text="Registro rápido cliente + equipamentos. Orçamento por item quando necessário.",
+            text=t("ui_registro_r_pido_cliente_equipamentos_or_amento_por_item_quan_1"),
             font=("Arial", 12),
             text_color="#94a3b8",
         ).pack(anchor="w", padx=16, pady=(2, 12))
@@ -1103,11 +1103,11 @@ class FrmPDV(ctk.CTkToplevel):
         grid.grid_columnconfigure(2, weight=3)
         grid.grid_columnconfigure(3, weight=5)
 
-        ctk.CTkLabel(grid, text="CLIENTE", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
-        ctk.CTkLabel(grid, text="BUSCA", font=("Arial", 11, "bold")).grid(row=0, column=1, sticky="w", padx=(10, 0), pady=(0, 4))
-        ctk.CTkLabel(grid, text="TELEFONE / WHATSAPP", font=("Arial", 11, "bold")).grid(row=0, column=2, columnspan=2, sticky="w", padx=(10, 0), pady=(0, 4))
+        ctk.CTkLabel(grid, text=t("ui_cliente_1"), font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
+        ctk.CTkLabel(grid, text=t("ui_busca"), font=("Arial", 11, "bold")).grid(row=0, column=1, sticky="w", padx=(10, 0), pady=(0, 4))
+        ctk.CTkLabel(grid, text=t("ui_telefone_whatsapp"), font=("Arial", 11, "bold")).grid(row=0, column=2, columnspan=2, sticky="w", padx=(10, 0), pady=(0, 4))
 
-        ent_cliente = ctk.CTkEntry(grid, placeholder_text="NOME DO CLIENTE", height=34)
+        ent_cliente = ctk.CTkEntry(grid, placeholder_text=t("ui_nome_do_cliente"), height=34)
         ent_cliente.grid(row=1, column=0, sticky="ew", padx=(0, 0), pady=(0, 12))
 
         cliente_selecionado = {"id": None}
@@ -1122,16 +1122,16 @@ class FrmPDV(ctk.CTkToplevel):
             command=lambda: self._abrir_busca_cliente_solicitacao(ent_cliente, ent_telefone, cliente_selecionado, win),
         ).grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(0, 12))
 
-        ent_telefone = ctk.CTkEntry(grid, placeholder_text="TELEFONE / WHATSAPP", height=34)
+        ent_telefone = ctk.CTkEntry(grid, placeholder_text=t("ui_telefone_whatsapp"), height=34)
         ent_telefone.grid(row=1, column=2, columnspan=2, sticky="ew", padx=(10, 0), pady=(0, 12))
 
-        ctk.CTkLabel(grid, text="MODELO / EQUIPAMENTO", font=("Arial", 11, "bold")).grid(row=2, column=0, sticky="w", pady=(0, 4))
-        ctk.CTkLabel(grid, text="DEFEITO RELATADO", font=("Arial", 11, "bold")).grid(row=2, column=1, columnspan=3, sticky="w", padx=(10, 0), pady=(0, 4))
+        ctk.CTkLabel(grid, text=t("ui_modelo_equipamento"), font=("Arial", 11, "bold")).grid(row=2, column=0, sticky="w", pady=(0, 4))
+        ctk.CTkLabel(grid, text=t("ui_defeito_relatado"), font=("Arial", 11, "bold")).grid(row=2, column=1, columnspan=3, sticky="w", padx=(10, 0), pady=(0, 4))
 
-        ent_equipamento = ctk.CTkEntry(grid, placeholder_text="MODELO / EQUIPAMENTO", height=34)
+        ent_equipamento = ctk.CTkEntry(grid, placeholder_text=t("ui_modelo_equipamento"), height=34)
         ent_equipamento.grid(row=3, column=0, sticky="ew", pady=(0, 0))
 
-        ent_defeito = ctk.CTkEntry(grid, placeholder_text="DEFEITO RELATADO", height=34)
+        ent_defeito = ctk.CTkEntry(grid, placeholder_text=t("ui_defeito_relatado"), height=34)
         ent_defeito.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(10, 0), pady=(0, 0))
 
         ent_cliente.bind("<KeyRelease>", lambda _e: cliente_selecionado.update({"id": None}))
@@ -1142,7 +1142,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             bloco_itens,
-            text="ITENS DA O.S. (ENVELOPE DO CLIENTE)",
+            text=t("ui_itens_da_o_s_envelope_do_cliente"),
             font=("Arial", 14, "bold"),
         ).pack(anchor="w", padx=16, pady=(12, 8))
 
@@ -1162,10 +1162,10 @@ class FrmPDV(ctk.CTkToplevel):
             height=9,
         )
         tree.heading("idx", text="#")
-        tree.heading("equipamento", text="Equipamento")
-        tree.heading("defeito", text="Defeito")
-        tree.heading("subtotal", text="Subtotal")
-        tree.heading("status", text="Status")
+        tree.heading("equipamento", text=t("ui_equipamento"))
+        tree.heading("defeito", text=t("ui_defeito"))
+        tree.heading("subtotal", text=t("ui_subtotal"))
+        tree.heading("status", text=t("ui_status"))
         tree.column("idx", width=60, anchor="center")
         tree.column("equipamento", width=390)
         tree.column("defeito", width=390)
@@ -1258,7 +1258,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             barra_acoes,
-            text="➕ ADICIONAR ITEM",
+            text=t("ui_adicionar_item"),
             fg_color="#16a34a",
             hover_color="#15803d",
             width=170,
@@ -1267,7 +1267,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             barra_acoes,
-            text="🗑 REMOVER ITEM",
+            text=t("ui_remover_item_1"),
             fg_color="#ef4444",
             hover_color="#dc2626",
             width=170,
@@ -1276,7 +1276,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             barra_acoes,
-            text="SALVAR SOLICITAÇÃO",
+            text=t("ui_salvar_solicita_o"),
             fg_color="#16a34a",
             hover_color="#15803d",
             width=210,
@@ -1285,7 +1285,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkButton(
             barra_acoes,
-            text="CANCELAR SOLICITAÇÃO",
+            text=t("ui_cancelar_solicita_o"),
             fg_color="#dc2626",
             hover_color="#b91c1c",
             width=220,
@@ -1301,10 +1301,10 @@ class FrmPDV(ctk.CTkToplevel):
         win.grab_set()
         win.focus_force()
 
-        ctk.CTkLabel(win, text="Buscar por nome ou telefone", font=("Arial", 12, "bold")).pack(anchor="w", padx=12, pady=(12, 4))
+        ctk.CTkLabel(win, text=t("ui_buscar_por_nome_ou_telefone"), font=("Arial", 12, "bold")).pack(anchor="w", padx=12, pady=(12, 4))
         ent_filtro = ctk.CTkEntry(
             win,
-            placeholder_text="Digite nome ou telefone...",
+            placeholder_text=t("ui_digite_nome_ou_telefone"),
             height=32,
             fg_color="#1e293b",
             border_color="#f8fafc",
@@ -1313,9 +1313,9 @@ class FrmPDV(ctk.CTkToplevel):
         ent_filtro.pack(fill="x", padx=12, pady=(0, 8))
 
         tree = ttk.Treeview(win, columns=("id", "nome", "telefone"), show="headings", style="PDV.Treeview")
-        tree.heading("id", text="ID")
-        tree.heading("nome", text="Cliente")
-        tree.heading("telefone", text="Telefone")
+        tree.heading("id", text=t("col_id"))
+        tree.heading("nome", text=t("ui_cliente"))
+        tree.heading("telefone", text=t("ui_telefone"))
         tree.column("id", width=70, anchor="center")
         tree.column("nome", width=440)
         tree.column("telefone", width=180, anchor="w")
@@ -1704,14 +1704,14 @@ class FrmPDV(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             win,
-            text="Selecione um orçamento para carregar itens e valores automaticamente no PDV",
+            text=t("ui_selecione_um_or_amento_para_carregar_itens_e_valores_automat"),
             font=("Arial", 12, "bold"),
             text_color="#e2e8f0",
         ).pack(anchor="w", padx=12, pady=(12, 6))
 
         ent_filtro = ctk.CTkEntry(
             win,
-            placeholder_text="Filtrar por nº orçamento, cliente ou equipamento...",
+            placeholder_text=t("ui_filtrar_por_n_or_amento_cliente_ou_equipamento"),
             height=34,
             fg_color="#1e293b",
             border_color="#f8fafc",
@@ -1725,12 +1725,12 @@ class FrmPDV(ctk.CTkToplevel):
             show="headings",
             style="PDV.Treeview",
         )
-        tree.heading("id", text="Orçamento")
-        tree.heading("cliente", text="Cliente")
-        tree.heading("equipamento", text="Equipamento")
-        tree.heading("valor_total", text="Valor")
-        tree.heading("status", text="Status")
-        tree.heading("data", text="Data")
+        tree.heading("id", text=t("ui_or_amento"))
+        tree.heading("cliente", text=t("ui_cliente"))
+        tree.heading("equipamento", text=t("ui_equipamento"))
+        tree.heading("valor_total", text=t("col_valor"))
+        tree.heading("status", text=t("ui_status"))
+        tree.heading("data", text=t("col_data"))
         tree.column("id", width=100, anchor="center")
         tree.column("cliente", width=250)
         tree.column("equipamento", width=310)

@@ -1,0 +1,787 @@
+﻿
+===== MENU_INDICADORES (f:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\menu.py) linhas 3021-3110 =====
+3021:     def _obter_indicadores_oficina(self):
+3022:         with get_db_connection() as conn:
+3023:             cursor = conn.cursor()
+3024:             cursor.execute(
+3025:                 """
+3026:                 SELECT COUNT(*)
+3027:                 FROM orcamentos_aguardo
+3028:                 WHERE UPPER(COALESCE(status,'')) IN ('EM ANDAMENTO', 'APROVADO')
+3029:                 """
+3030:             )
+3031:             total_bancada = int((cursor.fetchone() or [0])[0] or 0)
+3032: 
+3033:             cursor.execute(
+3034:                 """
+3035:                 SELECT COALESCE(SUM(saldo), 0)
+3036:                 FROM orcamentos_aguardo
+3037:                 WHERE UPPER(COALESCE(status,'')) NOT IN ('ENTREGUE', 'REPROVADO', 'CANCELADO')
+3038:                 """
+3039:             )
+3040:             total_receber_abertas = float((cursor.fetchone() or [0])[0] or 0)
+3041: 
+3042:             cursor.execute(
+3043:                 """
+3044:                 SELECT COUNT(*)
+3045:                 FROM orcamentos_aguardo
+3046:                 WHERE UPPER(COALESCE(status,'')) = 'AGUARDANDO ORÇAMENTO'
+3047:                 """
+3048:             )
+3049:             os_pendentes = int((cursor.fetchone() or [0])[0] or 0)
+3050: 
+3051:             cursor.execute(
+3052:                 """
+3053:                 SELECT COUNT(*)
+3054:                 FROM orcamentos_aguardo
+3055:                 WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
+3056:                 """
+3057:             )
+3058:             os_finalizados = int((cursor.fetchone() or [0])[0] or 0)
+3059: 
+3060:             cursor.execute(
+3061:                 """
+3062:                 SELECT COUNT(*)
+3063:                 FROM orcamentos_aguardo
+3064:                 WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
+3065:                   AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
+3066:                 """
+3067:             )
+3068:             os_aguardando_retirada = int((cursor.fetchone() or [0])[0] or 0)
+3069: 
+3070:         dados_card = listar_os_rejeitados_abandono_dashboard(
+3071:             dias_abandono_min=20,
+3072:             dias_aviso1=15,
+3073:             dias_aviso2=85,
+3074:             limite_card=8,
+3075:         )
+3076:         rejeitados_abandono_itens = list(dados_card.get("itens_card") or [])
+3077:         rejeitados_abandono_tem_aviso1 = bool(dados_card.get("tem_aviso1"))
+3078:         rejeitados_abandono_tem_aviso2 = bool(dados_card.get("tem_aviso2"))
+3079: 
+3080:         return {
+3081:             "bancada": total_bancada,
+3082:             "receber": total_receber_abertas,
+3083:             "pendentes": os_pendentes,
+3084:             "finalizados": os_finalizados,
+3085:             "aguardando_retirada": os_aguardando_retirada,
+3086:             "rejeitados_abandono_itens": rejeitados_abandono_itens,
+3087:             "rejeitados_abandono_tem_aviso1": rejeitados_abandono_tem_aviso1,
+3088:             "rejeitados_abandono_tem_aviso2": rejeitados_abandono_tem_aviso2,
+3089:         }
+3090: 
+3091:     def _obter_indicadores_pdv(self):
+3092:         hoje = datetime.now().strftime("%d/%m/%Y")
+3093:         with get_db_connection() as conn:
+3094:             cursor = conn.cursor()
+3095: 
+3096:             cursor.execute(
+3097:                 """
+3098:                 SELECT COALESCE(SUM(valor), 0)
+3099:                 FROM fluxo_caixa
+3100:                 WHERE UPPER(COALESCE(tipo,'')) = 'ENTRADA'
+3101:                   AND UPPER(COALESCE(categoria,'')) NOT LIKE '%ORDEM DE SERV%'
+3102:                   AND UPPER(COALESCE(descricao,'')) NOT LIKE '%O.S.%'
+3103:                 """
+3104:             )
+3105:             volume_vendas = float((cursor.fetchone() or [0])[0] or 0)
+3106: 
+3107:             cursor.execute(
+3108:                 """
+3109:                 SELECT COALESCE(SUM(valor), 0)
+3110:                 FROM fluxo_caixa
+
+===== MENU_PAINEL_FIXO (f:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\menu.py) linhas 3273-3470 =====
+3273:     def _criar_painel_pendencias_fixo(self, parent, orcamentos, bancada, status_finalizados, aguardando_orcamento):
+3274:         bloco = ctk.CTkFrame(parent, fg_color="#121a24", corner_radius=12)
+3275:         bloco.pack(fill="both", expand=True, pady=(2, 2))
+3276: 
+3277:         ctk.CTkLabel(
+3278:             bloco,
+3279:             text=t("ui_painel_de_pend_ncias_ltimos_15_dias"),
+3280:             font=("Arial", 12, "bold"),
+3281:             text_color="#f5f6fa",
+3282:         ).pack(anchor="w", padx=10, pady=(6, 4))
+3283: 
+3284:         corpo = ctk.CTkFrame(bloco, fg_color="#121a24")
+3285:         corpo.pack(fill="both", expand=True, padx=8, pady=(0, 6))
+3286:         corpo.grid_columnconfigure((0, 1, 2, 3), weight=1)
+3287: 
+3288:         def _linha_item(item):
+3289:             if len(item) < 3:
+3290:                 return ""
+3291:             os_id = item[0]
+3292:             data = item[1]
+3293:             cliente = item[2]
+3294:             extra = f" | {item[3]}" if len(item) > 3 and item[3] else ""
+3295:             return f"OS {os_id} | {data} | {cliente}{extra}"
+3296: 
+3297:         cards = [
+3298:             ("ORÇAMENTOS", "#f1c40f", orcamentos),
+3299:             ("NA BANCADA", "#3498db", bancada),
+3300:             ("FINALIZADOS", "#27ae60", status_finalizados),
+3301:             ("AGUARDANDO ORÇAMENTO", "#f39c12", aguardando_orcamento),
+3302:         ]
+3303: 
+3304:         for col, (titulo, cor, dados) in enumerate(cards):
+3305:             card = ctk.CTkFrame(corpo, fg_color="#1a2230", border_width=2, border_color=cor, corner_radius=12)
+3306:             card.grid(row=0, column=col, sticky="nsew", padx=4, pady=2)
+3307:             ctk.CTkLabel(card, text=f"{titulo} ({len(dados)})", font=("Arial", 11, "bold"), text_color=cor).pack(anchor="w", padx=8, pady=(6, 3))
+3308:             lista = ctk.CTkScrollableFrame(card, height=96, fg_color="#0f1720")
+3309:             lista.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+3310: 
+3311:             if not dados:
+3312:                 ctk.CTkLabel(
+3313:                     lista,
+3314:                     text=t("ui_sem_pend_ncias"),
+3315:                     text_color="#9ca3af",
+3316:                     font=("Arial", 9),
+3317:                     anchor="w",
+3318:                 ).pack(fill="x", padx=6, pady=6)
+3319:                 continue
+3320: 
+3321:             for item in dados:
+3322:                 try:
+3323:                     os_id = int(item[0])
+3324:                 except Exception:
+3325:                     continue
+3326: 
+3327:                 texto = _linha_item(item)
+3328:                 if not texto:
+3329:                     continue
+3330: 
+3331:                 ctk.CTkButton(
+3332:                     lista,
+3333:                     text=texto,
+3334:                     anchor="w",
+3335:                     height=24,
+3336:                     fg_color="#1f2937",
+3337:                     hover_color="#334155",
+3338:                     text_color="#e5e7eb",
+3339:                     font=("Arial", 9),
+3340:                     command=lambda oid=os_id: self._abrir_os_por_id_dashboard(oid),
+3341:                 ).pack(fill="x", padx=4, pady=3)
+3342: 
+3343:     def _criar_dashboard_modular(self):
+3344:         if self.dashboard_content is None or not self.dashboard_content.winfo_exists():
+3345:             self.dashboard_content = ctk.CTkFrame(self.dashboard_frame, fg_color="transparent")
+3346:             self.dashboard_content.place(relx=0, rely=0, relwidth=1, relheight=1)
+3347: 
+3348:         for w in self.dashboard_content.winfo_children():
+3349:             w.destroy()
+3350: 
+3351:         parent_dash = self.dashboard_content
+3352:         parent_dash.lift()
+3353: 
+3354:         self.modulos_usuario = self._obter_modulos_usuario()
+3355:         tem_oficina = self.modulos_usuario.get("oficina", True)
+3356:         tem_pdv = self.modulos_usuario.get("pdv", False)
+3357:         
+3358:         # Lógica de Perfil Restrito (Dashboard)
+3359:         if self.role == "VENDEDOR":
+3360:             tem_oficina = False
+3361:             tem_pdv = True
+3362:         elif self.role == "OFICINA":
+3363:             tem_oficina = True
+3364:             tem_pdv = False
+3365: 
+3366:         ctk.CTkLabel(
+3367:             parent_dash,
+3368:             text=t("ui_dashboard"),
+3369:             font=("Arial", 28, "bold"),
+3370:             text_color="orange",
+3371:         ).pack(anchor="w", pady=(0, 10))
+3372: 
+3373:         ctk.CTkLabel(
+3374:             parent_dash,
+3375:             text=str(self._status_fiscal_dashboard.get("texto", "Status Fiscal: Inativo")),
+3376:             font=("Arial", 12, "bold"),
+3377:             text_color=str(self._status_fiscal_dashboard.get("cor", "#e74c3c")),
+3378:         ).pack(anchor="w", pady=(0, 10))
+3379: 
+3380:         # Sem seletor/manual: o dashboard abre pronto pelo perfil do usuário.
+3381:         if self.role == "OFICINA":
+3382:             mode = "OFICINA"
+3383:         elif self.role == "VENDEDOR":
+3384:             mode = "PDV"
+3385:         else:
+3386:             mode = "COMPLETO"
+3387: 
+3388:         oficina = self._obter_indicadores_oficina() if tem_oficina else {
+3389:             "bancada": 0,
+3390:             "receber": 0.0,
+3391:             "pendentes": 0,
+3392:             "finalizados": 0,
+3393:             "aguardando_retirada": 0,
+3394:             "rejeitados_abandono_itens": [],
+3395:             "rejeitados_abandono_tem_aviso1": False,
+3396:             "rejeitados_abandono_tem_aviso2": False,
+3397:         }
+3398:         pdv = self._obter_indicadores_pdv() if tem_pdv else {"volume_vendas": 0.0, "vendas_dia": 0.0, "estoque_es": "0/0"}
+3399: 
+3400:         if mode == "OFICINA":
+3401:             self._criar_linha_cards(
+3402:                 parent_dash,
+3403:                 [
+3404:                     ("OS na Bancada", oficina["bancada"]),
+3405:                     ("Total a Receber Oficina", self._formatar_moeda(oficina["receber"])),
+3406:                     ("Pendentes", oficina["pendentes"]),
+3407:                 ],
+3408:             )
+3409:             linha_oficina_2 = ctk.CTkFrame(parent_dash, fg_color="transparent")
+3410:             linha_oficina_2.pack(fill="x", pady=(0, 2))
+3411:             self._criar_card_dashboard(linha_oficina_2, "Finalizados", oficina["finalizados"])
+3412:             self._criar_card_dashboard(linha_oficina_2, "Aguardando Retirada", oficina["aguardando_retirada"])
+3413:             self._criar_card_rejeitados_abandono(
+3414:                 linha_oficina_2,
+3415:                 oficina["rejeitados_abandono_itens"],
+3416:                 oficina["rejeitados_abandono_tem_aviso1"],
+3417:                 oficina["rejeitados_abandono_tem_aviso2"],
+3418:             )
+3419:         elif mode == "PDV":
+3420:             self._criar_linha_cards(
+3421:                 parent_dash,
+3422:                 [
+3423:                     ("Volume de Vendas", self._formatar_moeda(pdv["volume_vendas"])),
+3424:                     ("Entradas/Saídas de Estoque", pdv["estoque_es"]),
+3425:                     ("Vendas do Dia", self._formatar_moeda(pdv["vendas_dia"])),
+3426:                 ],
+3427:             )
+3428:         else: # COMPLETO (ADMIN)
+3429:             topo = ctk.CTkFrame(parent_dash, fg_color="transparent")
+3430:             topo.pack(fill="x", pady=(0, 8))
+3431:             self._criar_card_dashboard(
+3432:                 topo,
+3433:                 "Consolidado - Total a Receber + Vendas",
+3434:                 self._formatar_moeda(oficina["receber"] + pdv["vendas_dia"]),
+3435:             )
+3436: 
+3437:             split = ctk.CTkFrame(parent_dash, fg_color="transparent")
+3438:             split.pack(fill="both", expand=True)
+3439: 
+3440:             col_oficina = ctk.CTkFrame(split, fg_color="transparent")
+3441:             col_oficina.pack(side="left", fill="both", expand=True, padx=(0, 6))
+3442:             ctk.CTkLabel(col_oficina, text=t("ui_oficina"), font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
+3443:             self._criar_linha_cards(
+3444:                 col_oficina,
+3445:                 [
+3446:                     ("OS na Bancada", oficina["bancada"]),
+3447:                     ("Total a Receber Oficina", self._formatar_moeda(oficina["receber"])),
+3448:                     ("Pendentes", oficina["pendentes"]),
+3449:                 ],
+3450:             )
+3451:             linha_admin_oficina_2 = ctk.CTkFrame(col_oficina, fg_color="transparent")
+3452:             linha_admin_oficina_2.pack(fill="x", pady=(0, 2))
+3453:             self._criar_card_dashboard(linha_admin_oficina_2, "Finalizados", oficina["finalizados"])
+3454:             self._criar_card_dashboard(linha_admin_oficina_2, "Aguardando Retirada", oficina["aguardando_retirada"])
+3455:             self._criar_card_rejeitados_abandono(
+3456:                 linha_admin_oficina_2,
+3457:                 oficina["rejeitados_abandono_itens"],
+3458:                 oficina["rejeitados_abandono_tem_aviso1"],
+3459:                 oficina["rejeitados_abandono_tem_aviso2"],
+3460:             )
+3461: 
+3462:             col_pdv = ctk.CTkFrame(split, fg_color="transparent")
+3463:             col_pdv.pack(side="left", fill="both", expand=True, padx=(6, 0))
+3464:             ctk.CTkLabel(col_pdv, text=t("btn_pdv"), font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
+3465:             self._criar_linha_cards(
+3466:                 col_pdv,
+3467:                 [
+3468:                     ("Volume de Vendas", self._formatar_moeda(pdv["volume_vendas"])),
+3469:                     ("Entradas/Saídas de Estoque", pdv["estoque_es"]),
+3470:                     ("Vendas do Dia", self._formatar_moeda(pdv["vendas_dia"])),
+
+===== MENU_CHAMADOR (f:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\menu.py) linhas 2770-2812 =====
+2770:                     self.lbl_status_nuvem.configure(text=status, text_color=cor)
+2771: 
+2772:             try:
+2773:                 self.after(0, _aplicar)
+2774:             except Exception:
+2775:                 pass
+2776: 
+2777:         threading.Thread(target=_worker_nuvem, daemon=True, name="ofp-status-nuvem").start()
+2778:         # Polling automático de rede removido.
+2779:     def _verificar_e_exibir_painel_pendencias(self):
+2780:         try:
+2781:             orcamentos, bancada, status_finalizados, aguardando_orcamento = self._consultar_pendencias_login()
+2782:         except Exception as exc:
+2783:             logger.info("Falha ao consultar pendencias do login: %s", exc)
+2784:             return
+2785:         # Painel integrado ao dashboard principal (sem popup).
+2786:         self._dados_pendencias_dashboard = (orcamentos, bancada, status_finalizados, aguardando_orcamento)
+2787:         if hasattr(self, "dashboard_frame") and self.dashboard_frame.winfo_exists():
+2788:             self._criar_dashboard_modular()
+2789: 
+2790: 
+2791:     def _obter_logo_oficina(self):
+2792:         try:
+2793:             with get_db_connection() as conn:
+2794:                 cursor = conn.cursor()
+2795:                 cursor.execute("SELECT COALESCE(logo_path, '') FROM dados_oficina WHERE id = 1")
+2796:                 row = cursor.fetchone()
+2797:             caminho = (row[0] if row else "") or ""
+2798:             caminho = caminho.strip()
+2799:             if caminho and os.path.exists(caminho):
+2800:                 return caminho
+2801:         except Exception:
+2802:             pass
+2803:         return ""
+2804: 
+2805:     def _mostrar_menu_pronto(self):
+2806:         if self._menu_pronto_exibido or not self.winfo_exists() or self._encerrando_aplicacao:
+2807:             return
+2808:         self._menu_pronto_exibido = True
+2809:         try:
+2810:             # Exibe a janela apenas após concluir montagem e dados iniciais do dashboard.
+2811:             self.update_idletasks()
+2812:             self._atualizar_fundo()
+
+===== TELA_OS_PROX_NUM (f:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\tela_os.py) linhas 740-880 =====
+740:             prefixo = "ORÇAMENTO Nº"
+741: 
+742:         # Atualiza o label do número do documento e o botão de geração de PDF
+743:         if hasattr(self, 'lbl_oc'):
+744:             self.lbl_oc.configure(text=f"{prefixo}: {self.num_oc}", text_color=cor)
+745:         
+746:         if hasattr(self, 'btn_pdf'):
+747:             self.btn_pdf.configure(text=f"📄 GERAR {self.tipo_documento}")
+748: 
+749:     def _aplicar_maximizacao(self):
+750:         try:
+751:             self.state("zoomed") #
+752:         except Exception: #
+753:             pass #
+754:         try: #
+755:             self.attributes("-zoomed", True)
+756:             return
+757:         except Exception:
+758:             pass
+759:         try:
+760:             w = self.winfo_screenwidth()
+761:             h = self.winfo_screenheight()
+762:             self.geometry(f"{w}x{h}+0+0")
+763:         except Exception:
+764:             pass
+765: 
+766:     def carregar_proximo_numero(self):
+767:         return obter_proximo_numero_orcamento_oficial()
+768: 
+769:     def _parse_valor(self, valor, default=0.0):
+770:         """Converte valores monetários aceitando vírgula ou ponto."""
+771:         return OSCalculator.parse_monetario(valor, default=default)
+772: 
+773:     def carregar_dados_oficina(self):
+774:         try:
+775:             with get_db_connection() as conn:
+776:                 cursor = conn.cursor()
+777:                 cursor.execute(
+778:                     """
+779:                     SELECT nome_oficina, endereco_oficina, telefone_oficina, chave_pix, logo_path, logo_patrocinador_path
+780:                     FROM dados_oficina
+781:                     WHERE id = 1
+782:                     """
+783:                 )
+784:                 res = cursor.fetchone()
+785:             if res:
+786:                 self.nome_oficina = res[0] or self.nome_oficina
+787:                 self.endereco_oficina = res[1] or self.endereco_oficina
+788:                 self.telefone_oficina = res[2] or self.telefone_oficina
+789:                 self.chave_pix = res[3] or self.chave_pix
+790:                 self.logo_oficina = res[4] or self.logo_oficina
+791:                 self.logo_patrocinador = (res[5] or self.logo_patrocinador) if len(res) > 5 else self.logo_patrocinador
+792:         except Exception as e:
+793:             logger.exception("Erro ao carregar dados da oficina: %s", e)
+794: 
+795:     def abrir_config_oficina(self):
+796:         janela = ctk.CTkToplevel(self)
+797:         janela.title("DADOS DA OFICINA")
+798:         janela.geometry("620x500")
+799:         janela.resizable(False, False)
+800:         janela.grab_set()
+801:         janela.focus_force()
+802: 
+803:         ctk.CTkLabel(janela, text=t("ui_configurar_layout_da_oficina"), font=("Arial", 20, "bold"), text_color="orange").pack(pady=(20, 12))
+804: 
+805:         form = ctk.CTkFrame(janela)
+806:         form.pack(fill="both", expand=True, padx=20, pady=10)
+807: 
+808:         ent_nome = ctk.CTkEntry(form, placeholder_text=t("ui_nome_da_oficina"))
+809:         ent_nome.pack(fill="x", padx=15, pady=(15, 8))
+810:         ent_nome.insert(0, self.nome_oficina)
+811: 
+812:         ent_endereco = ctk.CTkEntry(form, placeholder_text=t("ui_endere_o"))
+813:         ent_endereco.pack(fill="x", padx=15, pady=8)
+814:         ent_endereco.insert(0, self.endereco_oficina)
+815: 
+816:         ent_fone = ctk.CTkEntry(form, placeholder_text=t("ui_telefone"))
+817:         ent_fone.pack(fill="x", padx=15, pady=8)
+818:         ent_fone.insert(0, self.telefone_oficina)
+819: 
+820:         ent_pix = ctk.CTkEntry(form, placeholder_text=t("ui_chave_pix"))
+821:         ent_pix.pack(fill="x", padx=15, pady=8)
+822:         ent_pix.insert(0, self.chave_pix)
+823: 
+824:         logo_var = ctk.StringVar(value=self.logo_oficina)
+825:         f_logo = ctk.CTkFrame(form, fg_color="#1f2a38")
+826:         f_logo.pack(fill="x", padx=15, pady=(8, 4))
+827:         ent_logo = ctk.CTkEntry(f_logo, textvariable=logo_var)
+828:         ent_logo.pack(side="left", fill="x", expand=True)
+829: 
+830:         def escolher_logo():
+831:             caminho = filedialog.askopenfilename(
+832:                 parent=janela,
+833:                 title="Selecionar imagem da oficina",
+834:                 filetypes=[("Imagens", "*.png;*.jpg;*.jpeg;*.webp")]
+835:             )
+836:             if caminho:
+837:                 logo_var.set(caminho)
+838: 
+839:         ctk.CTkButton(f_logo, text=t("ui_imagem"), width=90, fg_color="#2980b9", command=escolher_logo).pack(side="left", padx=(8, 0))
+840: 
+841:         def salvar():
+842:             nome = ent_nome.get().strip()
+843:             endereco = ent_endereco.get().strip()
+844:             telefone = ent_fone.get().strip()
+845:             pix = ent_pix.get().strip()
+846:             logo = logo_var.get().strip()
+847: 
+848:             if not nome:
+849:                 messagebox.showwarning(t('msg_titulo_atencao'), t('msg_informe_nome_oficina'), parent=janela)
+850:                 return
+851: 
+852:             try:
+853:                 with get_db_connection() as conn:
+854:                     cursor = conn.cursor()
+855:                     cursor.execute(
+856:                         """
+857:                         UPDATE dados_oficina
+858:                         SET nome_oficina = ?, endereco_oficina = ?, telefone_oficina = ?, chave_pix = ?, logo_path = ?
+859:                         WHERE id = 1
+860:                         """,
+861:                         (nome, endereco, telefone, pix, logo)
+862:                     )
+863:                     conn.commit()
+864: 
+865:                 self.nome_oficina = nome
+866:                 self.endereco_oficina = endereco
+867:                 self.telefone_oficina = telefone
+868:                 self.chave_pix = pix
+869:                 self.logo_oficina = logo
+870: 
+871:                 messagebox.showinfo(t('msg_titulo_sucesso'), t('msg_dados_oficina_atualizados'), parent=janela)
+872:                 janela.destroy()
+873:             except Exception as e:
+874:                 messagebox.showerror(t('msg_titulo_erro'), t('msg_erro_ao_salvar').format(erro=e), parent=janela)
+875: 
+876:         def _descobrir_oficina_udp(timeout_total=5.0):
+877:             payload = json.dumps({
+878:                 "type": "OFP_DISCOVER_REQUEST",
+879:                 "app": "oficina_pesca",
+880:                 "source": "desktop_oficina_cfg",
+
+===== TELA_OS_SALVAR (f:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\tela_os.py) linhas 3860-3995 =====
+3860:             except Exception:
+3861:                 pass
+3862:             self.atualizar_identificacao_documento("REPROVADO")
+3863:             try:
+3864:                 self._gerar_pdf_orcamento_reprovado_automatico(motivo="REPROVADO PELO CLIENTE")
+3865:             except Exception:
+3866:                 logger.exception("Falha ao gerar PDF automático de orçamento reprovado da O.S. %s.", self.num_oc)
+3867:             messagebox.showinfo("FRS", t('msg_orcamento_reprovado_sucesso'), parent=self)
+3868: 
+3869:     def pesquisar_orcamento(self):
+3870:         try:
+3871:             from gestao_os import FrmGestaoOrcamentos
+3872:             parent = self.master
+3873:             self.destroy()
+3874:             janela = FrmGestaoOrcamentos(parent, on_os_update_callback=self.on_save_callback)
+3875:             try:
+3876:                 setattr(parent, "_janela_gestao_os", janela)
+3877:             except Exception:
+3878:                 pass
+3879:             janela.focus_force()
+3880:         except Exception as e:
+3881:             messagebox.showerror(t('msg_titulo_erro'), t('msg_erro_abrir_pesquisa_os').format(erro=e), parent=self)
+3882: 
+3883:     def salvar_entrada(self):
+3884:         cliente = self.txt_cliente.get().strip().upper()
+3885:         telefone = self.txt_fone.get().strip()
+3886:         telefone_normalizado = self._normalizar_telefone_whatsapp(telefone)
+3887:         inicio = time.perf_counter()
+3888: 
+3889:         self._auditar_salvar_entrada("inicio")
+3890: 
+3891:         if not cliente or not telefone:
+3892:             messagebox.showwarning(t('msg_titulo_atencao'), t('msg_informe_nome_telefone_cliente'), parent=self)
+3893:             self._auditar_salvar_entrada("validacao_falhou", motivo="cliente_ou_telefone_ausente")
+3894:             return
+3895:         if not telefone_normalizado:
+3896:             messagebox.showwarning(t('msg_titulo_atencao'), t('msg_telefone_invalido'), parent=self)
+3897:             self._auditar_salvar_entrada("validacao_falhou", motivo="telefone_invalido")
+3898:             return
+3899:         if not self._entrada_tem_equipamento():
+3900:             messagebox.showwarning(t('msg_titulo_atencao'), t('msg_informe_equipamento_defeito'), parent=self)
+3901:             self._auditar_salvar_entrada("validacao_falhou", motivo="equipamento_ausente")
+3902:             return
+3903:         if self._salvando_documento:
+3904:             self._auditar_salvar_entrada("ignorado", motivo="salvamento_em_andamento")
+3905:             return
+3906: 
+3907:         self.txt_fone.delete(0, 'end')
+3908:         self.txt_fone.insert(0, telefone_normalizado)
+3909: 
+3910:         self._alternar_estado_botao_salvar(True)
+3911:         try:
+3912:             numero_salvo = self.num_oc
+3913:             dados_salvos = self.salvar_documento(status="AGUARDANDO")
+3914:             if not dados_salvos:
+3915:                 self._auditar_salvar_entrada("falha", motivo="salvar_documento_retornou_vazio")
+3916:                 return
+3917: 
+3918:             duracao = round(time.perf_counter() - inicio, 3)
+3919:             self._auditar_salvar_entrada(
+3920:                 "sucesso",
+3921:                 duracao_seg=duracao,
+3922:                 telefone_salvo=str(dados_salvos.get("telefone_cliente_whatsapp", "") or ""),
+3923:                 equipamento=str(dados_salvos.get("equipamento", "") or ""),
+3924:                 defeito=str(dados_salvos.get("defeito", "") or ""),
+3925:             )
+3926:             if self._orcamento_em_edicao:
+3927:                 self._salvar_equipamento_ativo()
+3928:                 self._atualizar_lista_equipamentos_ui()
+3929:                 self.atualizar_total()
+3930:                 messagebox.showinfo(t('msg_titulo_atualizacao'), t('msg_orcamento_atualizado_sucesso').format(numero=numero_salvo), parent=self)
+3931:             else:
+3932:                 self._orcamento_em_edicao = True
+3933:                 self._atualizar_rotulo_botao_salvar()
+3934:                 self._restaurar_formulario_pos_salvamento()
+3935:                 messagebox.showinfo(t('msg_titulo_entrada'), t('msg_entrada_salva_sucesso').format(numero=numero_salvo), parent=self)
+3936:         except Exception as e:
+3937:             self._auditar_salvar_entrada("erro", erro=str(e))
+3938:             messagebox.showerror(t('msg_titulo_erro'), str(e), parent=self)
+3939:         finally:
+3940:             self._alternar_estado_botao_salvar(False)
+3941: 
+3942:     def salvar_os_rapido(self):
+3943:         # Alias de compatibilidade para fluxos antigos.
+3944:         self.salvar_entrada()
+3945: 
+3946:     def abrir_estoque(self):
+3947:         try:
+3948:             from menu import FrmProdutos
+3949:             FrmProdutos(self)
+3950:         except Exception as e: messagebox.showerror(t('msg_titulo_erro'), t('msg_erro_generico').format(erro=e))
+3951: 
+3952:     def finalizar_e_abrir_pdf(self):
+3953:         cliente = self.txt_cliente.get().strip().upper()
+3954:         telefone = self.txt_fone.get().strip()
+3955:         if not cliente or not telefone:
+3956:             messagebox.showwarning(t('msg_titulo_atencao'), t('msg_informe_nome_telefone_documento'), parent=self)
+3957:             return
+3958:         if self._gerando_orcamento:
+3959:             return
+3960:         self._gerando_orcamento = True
+3961:         if hasattr(self, 'btn_pdf'):
+3962:             self.btn_pdf.configure(state="disabled")
+3963:         try:
+3964:             self.salvar_documento(status="AGUARDANDO")
+3965:             caminho_pdf = self.gerar_documento_pdf(self.tipo_documento)
+3966:             if caminho_pdf:
+3967:                 self._oferecer_envio_whatsapp(caminho_pdf, self.tipo_documento)
+3968:         except Exception as e:
+3969:             messagebox.showerror(t('msg_titulo_erro'), str(e), parent=self)
+3970:         finally:
+3971:             self._gerando_orcamento = False
+3972:             if hasattr(self, 'btn_pdf'):
+3973:                 self.btn_pdf.configure(state="normal")
+3974: 
+3975:     def gerar_pdf_fiel(self, caminho, tipo_documento=None, condicao_pagamento=None):
+3976:         c = canvas.Canvas(caminho, pagesize=A4)
+3977:         largura, altura = A4
+3978:         data_atual = datetime.now().strftime("%d/%m/%Y")
+3979:         tipo = tipo_documento or self.tipo_documento or "ORÇAMENTO"
+3980:         eh_os = tipo == "ORDEM DE SERVIÇO"
+3981:         cor_banner = (0.15, 0.55, 0.32) if eh_os else (0.90, 0.48, 0.13)
+3982:         titulo_secundario = "DOCUMENTO DE ENTRADA E EXECUÇÃO" if eh_os else "PROPOSTA COMERCIAL PARA APROVAÇÃO"
+3983: 
+3984:         # --- IMAGENS NO TOPO (configuráveis) ---
+3985:         try:
+3986:             def _resolver_logo_absoluta(caminho_logo, padroes=None):
+3987:                 bruto = str(caminho_logo or "").strip().strip('"')
+3988:                 base_dir = os.path.dirname(os.path.abspath(__file__))
+3989:                 candidatos = []
+3990:                 if bruto:
+3991:                     if os.path.isabs(bruto):
+3992:                         candidatos.append(os.path.abspath(bruto))
+3993:                     else:
+3994:                         candidatos.extend(
+3995:                             [
+
+===== GESTAO_UNPACK (f:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\gestao_os.py) linhas 285-345 =====
+285:             fg_color="#1a6b30",
+286:             hover_color="#27ae60",
+287:             command=lambda: aplicar(status_var.get()),
+288:         ).pack(pady=(0, 8))
+289: 
+290:     def buscar_os(self):
+291:         termo_bruto = self.ent_busca.get().strip()
+292:         termo = termo_bruto.upper()
+293:         for item in self.tab.get_children():
+294:             self.tab.delete(item)
+295: 
+296:         self.dados_os = None
+297: 
+298:         try:
+299:             rows = listar_orcamentos_gestao()
+300:             if termo:
+301:                 termo_digitos = re.sub(r"\D", "", termo_bruto)
+302:                 rows = [
+303:                     row for row in rows
+304:                     if str(row[0]).startswith(termo_digitos) or termo in str(row[2]).upper() or termo_digitos in re.sub(r"\D", "", str(row[11] or ""))
+305:                 ]
+306: 
+307:             for row in rows:
+308:                 id_orc, id_cli, nome_cli, equipamento, defeito, total, sinal, saldo, status, data, itens_json, telefone_cli, dados_adicionais = row
+309:                 id_nome = f"{id_cli} - {nome_cli}" if id_cli else str(nome_cli or "")
+310:                 descricao_fmt = self._formatar_itens(itens_json)
+311:                 telefone = str(telefone_cli or "").strip()
+312:                 if not telefone and dados_adicionais:
+313:                     try:
+314:                         json_adicional = json.loads(dados_adicionais)
+315:                         telefone = str(json_adicional.get("cliente_telefone", "") or "").strip()
+316:                     except Exception:
+317:                         telefone = ""
+318:                 status_norm = normalizar_status_orcamento(status)
+319:                 status_upper = (status_norm or "").upper()
+320:                 if is_status_orcamento(status_upper) or is_status_aguardando_orcamento(status_upper) or status_upper == "EM ANDAMENTO":
+321:                     tag = "st_amarelo"
+322:                 elif status_upper in ("FINALIZADO", "APROVADO"):
+323:                     tag = "st_verde"
+324:                 elif status_upper == "REPROVADO":
+325:                     tag = "st_vermelho"
+326:                 else:
+327:                     tag = "st_padrao"
+328:                 self.tab.insert(
+329:                     "",
+330:                     "end",
+331:                     values=(
+332:                         id_orc,
+333:                         id_nome,
+334:                         telefone,
+335:                         equipamento or "",
+336:                         defeito or "",
+337:                         f"R$ {float(total or 0):.2f}",
+338:                         f"R$ {float(sinal or 0):.2f}",
+339:                         f"R$ {float(saldo or 0):.2f}",
+340:                         status_norm or "",
+341:                         data or "-",
+342:                         descricao_fmt,
+343:                     ),
+344:                     tags=(tag,)
+345:                 )
+
+===== REPOSITORY (f:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\core\gestao_os_repository.py) linhas 1-130 =====
+1: # -*- coding: utf-8 -*-
+2: """Persistência de gestão de orçamentos isolada da interface gráfica."""
+3: 
+4: from __future__ import annotations
+5: 
+6: from typing import Any
+7: 
+8: from config import get_db_connection
+9: 
+10: 
+11: def listar_orcamentos_para_gestao() -> list[tuple[Any, ...]]:
+12:     """Lista O.S. para a consulta da gestão.
+13: 
+14:     Layout fixo de 13 colunas consumido pela interface (gestao_os.py):
+15:       0 id_orc, 1 id_cli, 2 nome_cli, 3 equipamento, 4 defeito, 5 total,
+16:       6 sinal, 7 saldo, 8 status, 9 data, 10 itens_detalhes (JSON),
+17:       11 telefone_whatsapp, 12 dados_adicionais
+18:     """
+19:     with get_db_connection() as conn:
+20:         cursor = conn.cursor()
+21:         cursor.execute(
+22:             """
+23:             SELECT oa.id, COALESCE(c.id, ''), oa.cliente, oa.equipamento, oa.defeito, oa.valor_total,
+24:                    oa.sinal, oa.saldo, oa.status, oa.data,
+25:                    COALESCE(oa.itens_detalhes, ''),
+26:                    COALESCE(c.telefone_cliente_whatsapp, ''),
+27:                    COALESCE(oa.dados_adicionais, '')
+28:             FROM orcamentos_aguardo oa
+29:             LEFT JOIN clientes c ON UPPER(TRIM(c.nome)) = UPPER(TRIM(oa.cliente))
+30:             ORDER BY oa.id DESC
+31:             """
+32:         )
+33:         return cursor.fetchall()
+34: 
+35: 
+36: def alterar_status_orcamento(os_id: int, novo_status: str) -> None:
+37:     with get_db_connection() as conn:
+38:         cursor = conn.cursor()
+39:         cursor.execute("UPDATE orcamentos_aguardo SET status = ? WHERE id = ?", (novo_status, os_id))
+40:         conn.commit()
+41: 
+42: 
+43: def buscar_dados_orcamento(os_id: int) -> tuple[Any, ...] | None:
+44:     with get_db_connection() as conn:
+45:         cursor = conn.cursor()
+46:         cursor.execute(
+47:             """
+48:             SELECT id, cliente, equipamento, defeito, valor_total, sinal, saldo, status, data,
+49:                    COALESCE(itens_detalhes, ''), COALESCE(dados_adicionais, '')
+50:             FROM orcamentos_aguardo
+51:             WHERE id = ?
+52:             """,
+53:             (os_id,),
+54:         )
+55:         return cursor.fetchone()
+
+===== SERVICE (f:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\core\gestao_os_service.py) linhas 1-110 =====
+1: # -*- coding: utf-8 -*-
+2: """Regras de negócio de gestão de O.S. isoladas da interface gráfica."""
+3: 
+4: from __future__ import annotations
+5: 
+6: import json
+7: from typing import Any
+8: 
+9: from core.gestao_os_repository import alterar_status_orcamento, buscar_dados_orcamento, listar_orcamentos_para_gestao
+10: 
+11: 
+12: def listar_orcamentos_gestao() -> list[tuple[Any, ...]]:
+13:     return listar_orcamentos_para_gestao()
+14: 
+15: 
+16: def mudar_status_orcamento(os_id: int, novo_status: str) -> None:
+17:     alterar_status_orcamento(os_id, novo_status)
+18: 
+19: 
+20: def carregar_dados_orcamento(os_id: int) -> dict[str, Any] | None:
+21:     registro = buscar_dados_orcamento(os_id)
+22:     if not registro:
+23:         return None
+24: 
+25:     try:
+26:         dados_adicionais = json.loads(registro[10] or "{}")
+27:     except Exception:
+28:         dados_adicionais = {}
+29: 
+30:     equipamento = str(registro[2] or "").strip()
+31:     defeito = str(registro[3] or "").strip()
+32:     resumo = " - ".join(p for p in (equipamento, defeito) if p)
+33: 
+34:     return {
+35:         "id": registro[0],
+36:         "cliente": registro[1],
+37:         "equipamento": equipamento,
+38:         "defeito": defeito,
+39:         "valor_total": registro[4],
+40:         "sinal": registro[5],
+41:         "saldo": registro[6],
+42:         "status": registro[7],
+43:         "data": registro[8],
+44:         "itens_detalhes": registro[9] or "",
+45:         "resumo_equipamento_defeito": resumo,
+46:         "dados_adicionais": dados_adicionais,
+47:     }

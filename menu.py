@@ -119,7 +119,7 @@ from reforma_tributaria import garantir_estrutura_reforma_tributaria
 from core.modulos import obter_modulos_habilitados
 from core.licenca import obter_info_licenca_visual
 from core.sincronizacao import checar_status_firebase
-from core.i18n import get_current_locale, set_default_locale, t
+from core.i18n import set_default_locale, t  # noqa: E402
 from shutdown_utils import fechar_sistema
 from status_os import STATUS_AGUARDANDO_ORCAMENTO, STATUS_ORCAMENTO
 from configuracao_fiscal import ConfiguracaoFiscal, carregar_configuracao_fiscal, salvar_configuracao_fiscal, inicializar_motor_fiscal, verificar_status_motor_fiscal
@@ -215,20 +215,20 @@ class FrmProdutos(ctk.CTkToplevel):
         self.after(300, lambda: self.attributes('-topmost', False))
         self.grab_set()
 
-        ctk.CTkLabel(self, text="🛠️ GESTÃO DE ESTOQUE E MARGEM", font=("Arial", 22, "bold")).pack(pady=15)
+        ctk.CTkLabel(self, text=t("ui_gest_o_de_estoque_e_margem"), font=("Arial", 22, "bold")).pack(pady=15)
 
         f_busca = ctk.CTkFrame(self)
         f_busca.pack(pady=(0, 8), padx=20, fill="x")
         self.ent_busca_estoque = ctk.CTkEntry(
             f_busca,
-            placeholder_text="Buscar por Nome, NCM ou Compatibilidade",
+            placeholder_text=t("ui_buscar_por_nome_ncm_ou_compatibilidade"),
             width=420,
         )
         self.ent_busca_estoque.pack(side="left", padx=(8, 8), pady=8, fill="x", expand=True)
         self.ent_busca_estoque.bind("<Return>", lambda _e: self.carregar_dados())
         ctk.CTkButton(
             f_busca,
-            text="Buscar",
+            text=t("ui_buscar"),
             fg_color="#2980b9",
             width=120,
             command=self.carregar_dados,
@@ -238,37 +238,37 @@ class FrmProdutos(ctk.CTkToplevel):
         f_inputs = ctk.CTkFrame(self)
         f_inputs.pack(pady=10, padx=20, fill="x")
 
-        self.ent_nome = ctk.CTkEntry(f_inputs, placeholder_text="Nome do Produto", width=250)
+        self.ent_nome = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_nome_do_produto"), width=250)
         self.ent_nome.grid(row=0, column=0, padx=5, pady=5)
 
-        self.ent_compat = ctk.CTkEntry(f_inputs, placeholder_text="Compatibilidade", width=170)
+        self.ent_compat = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_compatibilidade_1"), width=170)
         self.ent_compat.grid(row=0, column=1, padx=5, pady=5)
 
-        self.ent_ncm = ctk.CTkEntry(f_inputs, placeholder_text="NCM (8 dígitos)", width=130)
+        self.ent_ncm = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_ncm_8_d_gitos"), width=130)
         self.ent_ncm.grid(row=0, column=2, padx=5, pady=5)
 
-        self.ent_custo = ctk.CTkEntry(f_inputs, placeholder_text="R$ Custo", width=90)
+        self.ent_custo = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_r_custo_1"), width=90)
         self.ent_custo.grid(row=0, column=3, padx=5, pady=5)
 
         # NOVO CAMPO: % Margem
-        self.ent_margem = ctk.CTkEntry(f_inputs, placeholder_text="% Margem", width=90)
+        self.ent_margem = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_margem"), width=90)
         self.ent_margem.grid(row=0, column=4, padx=5, pady=5)
         # Ao digitar na margem, ele pode calcular a venda automaticamente
         self.ent_margem.bind("<KeyRelease>", self.calcular_venda_por_margem)
 
-        self.ent_venda = ctk.CTkEntry(f_inputs, placeholder_text="R$ Venda", width=90)
+        self.ent_venda = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_r_venda_1"), width=90)
         self.ent_venda.grid(row=0, column=5, padx=5, pady=5)
 
-        self.ent_qtd = ctk.CTkEntry(f_inputs, placeholder_text="Qtd", width=60)
+        self.ent_qtd = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_qtd_1"), width=60)
         self.ent_qtd.grid(row=0, column=6, padx=5, pady=5)
 
-        self.ent_qtd_min = ctk.CTkEntry(f_inputs, placeholder_text="Qtd Min (3)", width=90)
+        self.ent_qtd_min = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_qtd_min_3"), width=90)
         self.ent_qtd_min.grid(row=0, column=7, padx=5, pady=5)
         self.ent_qtd_min.insert(0, "3")
 
         self.btn_reforma = ctk.CTkButton(
             f_inputs,
-            text="IBS/CBS",
+            text=t("ui_ibs_cbs"),
             fg_color="#566573",
             width=100,
             command=self._alternar_painel_reforma_tributaria,
@@ -276,8 +276,8 @@ class FrmProdutos(ctk.CTkToplevel):
         self.btn_reforma.grid(row=0, column=8, padx=5)
 
         # BOTÕES
-        ctk.CTkButton(f_inputs, text="Salvar", fg_color="green", width=100, command=self.salvar_produto).grid(row=0, column=9, padx=5)
-        ctk.CTkButton(f_inputs, text="Excluir", fg_color="red", width=100, command=self.excluir_produto).grid(row=0, column=10, padx=5)
+        ctk.CTkButton(f_inputs, text=t("btn_salvar"), fg_color="green", width=100, command=self.salvar_produto).grid(row=0, column=9, padx=5)
+        ctk.CTkButton(f_inputs, text=t("btn_excluir"), fg_color="red", width=100, command=self.excluir_produto).grid(row=0, column=10, padx=5)
 
         self.frame_reforma = ctk.CTkFrame(self, fg_color="#1f2a38", corner_radius=16)
         self.frame_reforma.pack(fill="x", padx=20, pady=(0, 8))
@@ -286,20 +286,20 @@ class FrmProdutos(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             self.frame_reforma,
-            text="Reforma Tributária latente - campos opcionais para IBS/CBS",
+            text=t("ui_reforma_tribut_ria_latente_campos_opcionais_para_ibs_cbs"),
             font=("Arial", 12, "bold"),
             text_color="#f1c40f",
         ).grid(row=0, column=0, columnspan=6, sticky="w", padx=12, pady=(12, 4))
 
-        self.ent_aliquota_ibs = ctk.CTkEntry(self.frame_reforma, placeholder_text="Aliquota IBS %", width=130)
+        self.ent_aliquota_ibs = ctk.CTkEntry(self.frame_reforma, placeholder_text=t("ui_aliquota_ibs"), width=130)
         self.ent_aliquota_ibs.grid(row=1, column=0, padx=8, pady=8)
-        self.ent_aliquota_cbs = ctk.CTkEntry(self.frame_reforma, placeholder_text="Aliquota CBS %", width=130)
+        self.ent_aliquota_cbs = ctk.CTkEntry(self.frame_reforma, placeholder_text=t("ui_aliquota_cbs"), width=130)
         self.ent_aliquota_cbs.grid(row=1, column=1, padx=8, pady=8)
-        self.ent_valor_ibs = ctk.CTkEntry(self.frame_reforma, placeholder_text="Valor IBS", width=130)
+        self.ent_valor_ibs = ctk.CTkEntry(self.frame_reforma, placeholder_text=t("ui_valor_ibs"), width=130)
         self.ent_valor_ibs.grid(row=1, column=2, padx=8, pady=8)
-        self.ent_valor_cbs = ctk.CTkEntry(self.frame_reforma, placeholder_text="Valor CBS", width=130)
+        self.ent_valor_cbs = ctk.CTkEntry(self.frame_reforma, placeholder_text=t("ui_valor_cbs"), width=130)
         self.ent_valor_cbs.grid(row=1, column=3, padx=8, pady=8)
-        self.ent_reforma_json = ctk.CTkEntry(self.frame_reforma, placeholder_text="JSON futuro opcional", width=360)
+        self.ent_reforma_json = ctk.CTkEntry(self.frame_reforma, placeholder_text=t("ui_json_futuro_opcional"), width=360)
         self.ent_reforma_json.grid(row=1, column=4, padx=8, pady=8, columnspan=2, sticky="ew")
 
         # --- TABELA ---
@@ -308,15 +308,15 @@ class FrmProdutos(ctk.CTkToplevel):
             columns=("id", "nome", "custo", "venda", "margem", "qtd", "ncm", "compat", "qtd_min"),
             show="headings",
         )
-        self.tabela.heading("id", text="ID")
-        self.tabela.heading("nome", text="PRODUTO")
-        self.tabela.heading("custo", text="R$ CUSTO")
-        self.tabela.heading("venda", text="R$ VENDA")
-        self.tabela.heading("margem", text="LUCRO %")
-        self.tabela.heading("qtd", text="QTD")
-        self.tabela.heading("ncm", text="NCM")
-        self.tabela.heading("compat", text="COMPATIBILIDADE")
-        self.tabela.heading("qtd_min", text="QTD MIN")
+        self.tabela.heading("id", text=t("col_id"))
+        self.tabela.heading("nome", text=t("ui_produto_1"))
+        self.tabela.heading("custo", text=t("ui_r_custo"))
+        self.tabela.heading("venda", text=t("ui_r_venda"))
+        self.tabela.heading("margem", text=t("ui_lucro"))
+        self.tabela.heading("qtd", text=t("ui_qtd"))
+        self.tabela.heading("ncm", text=t("ui_ncm"))
+        self.tabela.heading("compat", text=t("ui_compatibilidade"))
+        self.tabela.heading("qtd_min", text=t("ui_qtd_min"))
         
         self.tabela.column("id", width=40)
         self.tabela.column("nome", width=250)
@@ -581,13 +581,13 @@ class FrmCadastroUsuarios(ctk.CTkToplevel):
         form = ctk.CTkFrame(self)
         form.pack(fill="both", expand=True, padx=20, pady=10)
 
-        self.ent_usuario = ctk.CTkEntry(form, placeholder_text="Usuário", width=320, height=40)
+        self.ent_usuario = ctk.CTkEntry(form, placeholder_text=t("ui_usu_rio"), width=320, height=40)
         self.ent_usuario.pack(pady=(20, 10))
 
-        self.ent_senha = ctk.CTkEntry(form, placeholder_text="Senha", show="*", width=320, height=40)
+        self.ent_senha = ctk.CTkEntry(form, placeholder_text=t("ui_senha"), show="*", width=320, height=40)
         self.ent_senha.pack(pady=10)
 
-        self.ent_confirma = ctk.CTkEntry(form, placeholder_text="Confirmar senha", show="*", width=320, height=40)
+        self.ent_confirma = ctk.CTkEntry(form, placeholder_text=t("ui_confirmar_senha"), show="*", width=320, height=40)
         self.ent_confirma.pack(pady=10)
 
         self.role_var = ctk.StringVar(value="VENDEDOR")
@@ -596,14 +596,14 @@ class FrmCadastroUsuarios(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             form,
-            text="Somente usuários ADMIN podem acessar esta tela.",
+            text=t("ui_somente_usu_rios_admin_podem_acessar_esta_tela"),
             text_color="#95a5a6"
         ).pack(pady=(0, 10))
 
         self.lbl_status = ctk.CTkLabel(form, text="", text_color="red")
         self.lbl_status.pack(pady=(0, 10))
 
-        ctk.CTkButton(form, text="SALVAR USUÁRIO", fg_color="#27ae60", command=self.salvar_usuario, width=320, height=42).pack(pady=(5, 20))
+        ctk.CTkButton(form, text=t("ui_salvar_usu_rio"), fg_color="#27ae60", command=self.salvar_usuario, width=320, height=42).pack(pady=(5, 20))
 
     def destroy(self):
         try:
@@ -624,11 +624,11 @@ class FrmCadastroUsuarios(ctk.CTkToplevel):
         role = self.role_var.get().strip().upper() or "VENDEDOR"
 
         if not usuario or not senha or not confirma:
-            self.lbl_status.configure(text="Preencha todos os campos.", text_color="red")
+            self.lbl_status.configure(text=t("ui_preencha_todos_os_campos"), text_color="red")
             return
 
         if senha != confirma:
-            self.lbl_status.configure(text="As senhas não coincidem.", text_color="red")
+            self.lbl_status.configure(text=t("ui_as_senhas_n_o_coincidem"), text_color="red")
             return
 
         senha_ok, msg = validate_password(senha)
@@ -650,7 +650,7 @@ class FrmCadastroUsuarios(ctk.CTkToplevel):
             # Fechamento seguro para evitar erro 'can't delete Tcl command'
             self.destroy()
         except sqlite3.IntegrityError:
-            self.lbl_status.configure(text="Usuário já existe.", text_color="red")
+            self.lbl_status.configure(text=t("ui_usu_rio_j_existe"), text_color="red")
         except Exception as e:
             self.lbl_status.configure(text=f"Erro ao salvar: {e}", text_color="red")
 
@@ -681,13 +681,13 @@ class FrmRelatorioDesempenho(ctk.CTkToplevel):
         header = ctk.CTkFrame(self, fg_color="#1f2a38", corner_radius=15)
         header.pack(fill="x", padx=20, pady=(20, 5))
         ctk.CTkLabel(
-            header, text="📊 RELATÓRIO DE DESEMPENHO",
+            header, text=t("ui_relat_rio_de_desempenho"),
             font=("Arial", 20, "bold"), text_color="orange"
         ).pack(pady=(15, 8))
 
         f_periodo = ctk.CTkFrame(header, fg_color="#1f2a38")
         f_periodo.pack(pady=(0, 14))
-        ctk.CTkLabel(f_periodo, text="De:", font=("Arial", 12), text_color="#bdc3c7").pack(side="left", padx=(10, 4))
+        ctk.CTkLabel(f_periodo, text=t("label_de"), font=("Arial", 12), text_color="#bdc3c7").pack(side="left", padx=(10, 4))
         self.ent_inicio = ctk.CTkEntry(f_periodo, width=105, placeholder_text="01/04/2026")
         self.ent_inicio.insert(0, inicio_mes.strftime("%d/%m/%Y"))
         self.ent_inicio.pack(side="left", padx=4)
@@ -696,7 +696,7 @@ class FrmRelatorioDesempenho(ctk.CTkToplevel):
         self.ent_fim.insert(0, hoje.strftime("%d/%m/%Y"))
         self.ent_fim.pack(side="left", padx=4)
         ctk.CTkButton(
-            f_periodo, text="🔄 ATUALIZAR", fg_color="#2980b9", hover_color="#3498db",
+            f_periodo, text=t("ui_atualizar_1"), fg_color="#2980b9", hover_color="#3498db",
             width=120, command=self.carregar_dados
         ).pack(side="left", padx=(10, 5))
 
@@ -775,7 +775,7 @@ class FrmRelatorioDesempenho(ctk.CTkToplevel):
 
         if not dt_inicio or not dt_fim:
             ctk.CTkLabel(
-                self.scroll, text="⚠  Datas inválidas. Use dd/mm/aaaa.",
+                self.scroll, text=t("ui_datas_inv_lidas_use_dd_mm_aaaa"),
                 text_color="#ff6b6b", font=("Arial", 12)
             ).pack(pady=20)
             return
@@ -950,7 +950,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         self.focus_force()
         self.after(300, lambda: self.attributes('-topmost', False))
         self.janela_dados_oficina_aberta = True # Flag para controle de duplicidade
-        ctk.CTkLabel(self, text="🏪 DADOS DA OFICINA", font=("Arial", 22, "bold"), text_color="orange").pack(pady=(16, 6))
+        ctk.CTkLabel(self, text=t("ui_dados_da_oficina"), font=("Arial", 22, "bold"), text_color="orange").pack(pady=(16, 6))
 
         container = ctk.CTkScrollableFrame(self, fg_color="#1f2a38", corner_radius=12)
         self.update_idletasks()
@@ -1002,7 +1002,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         f_logo.grid_columnconfigure(0, weight=1)
         self.ent_logo = ctk.CTkEntry(
             f_logo,
-            placeholder_text="Caminho do logo da oficina",
+            placeholder_text=t("ui_caminho_do_logo_da_oficina"),
             height=34,
             fg_color="#f8fafc",
             border_width=2,
@@ -1011,7 +1011,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
             placeholder_text_color="#64748b",
         )
         self.ent_logo.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(f_logo, text="Escolher", width=90, fg_color="#2980b9", command=self.escolher_logo).grid(row=0, column=1, padx=(8, 0))
+        ctk.CTkButton(f_logo, text=t("ui_escolher"), width=90, fg_color="#2980b9", command=self.escolher_logo).grid(row=0, column=1, padx=(8, 0))
         linha += 1
 
         _lbl("Imagem do patrocinador (direita)")
@@ -1020,7 +1020,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         f_logo_dir.grid_columnconfigure(0, weight=1)
         self.ent_logo_dir = ctk.CTkEntry(
             f_logo_dir,
-            placeholder_text="Caminho da imagem do patrocinador (direita)",
+            placeholder_text=t("ui_caminho_da_imagem_do_patrocinador_direita"),
             height=34,
             fg_color="#f8fafc",
             border_width=2,
@@ -1029,22 +1029,22 @@ class FrmDadosOficina(ctk.CTkToplevel):
             placeholder_text_color="#64748b",
         )
         self.ent_logo_dir.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(f_logo_dir, text="Escolher", width=90, fg_color="#8e44ad", command=self.escolher_logo_direita).grid(row=0, column=1, padx=(8, 0))
+        ctk.CTkButton(f_logo_dir, text=t("ui_escolher"), width=90, fg_color="#8e44ad", command=self.escolher_logo_direita).grid(row=0, column=1, padx=(8, 0))
         linha += 1
 
         ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 6))
         linha += 1
-        ctk.CTkLabel(form, text="☁️  BACKUP NA NUVEM", anchor="w", text_color="#3498db", font=("Arial", 13, "bold")).grid(
+        ctk.CTkLabel(form, text=t("ui_backup_na_nuvem"), anchor="w", text_color="#3498db", font=("Arial", 13, "bold")).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
-        ctk.CTkLabel(form, text="E-mail para backup na nuvem", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
+        ctk.CTkLabel(form, text=t("ui_e_mail_para_backup_na_nuvem"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
         self.ent_email = ctk.CTkEntry(
             form,
-            placeholder_text="exemplo@gmail.com",
+            placeholder_text=t("ui_exemplo_gmail_com"),
             height=34,
             fg_color="#f8fafc",
             border_width=2,
@@ -1057,7 +1057,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
 
         self.btn_google = ctk.CTkButton(
             form,
-            text="Entrar no Google Drive",
+            text=t("ui_entrar_no_google_drive"),
             width=200,
             fg_color="#1a73e8",
             hover_color="#1558b0",
@@ -1070,7 +1070,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         f_drive_actions.grid(row=linha, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
         ctk.CTkButton(
             f_drive_actions,
-            text="Backup para o Drive",
+            text=t("ui_backup_para_o_drive"),
             width=200,
             fg_color="#27ae60",
             hover_color="#1f8d4d",
@@ -1078,7 +1078,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         ).grid(row=0, column=0, padx=(0, 8))
         ctk.CTkButton(
             f_drive_actions,
-            text="Restaurar do Drive",
+            text=t("ui_restaurar_do_drive"),
             width=200,
             fg_color="#d68910",
             hover_color="#b9770e",
@@ -1088,14 +1088,14 @@ class FrmDadosOficina(ctk.CTkToplevel):
 
         ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(8, 6))
         linha += 1
-        ctk.CTkLabel(form, text="🧾 CONFIGURAÇÃO FISCAL (ACBr)", anchor="w", text_color="#64b5f6", font=("Arial", 13, "bold")).grid(
+        ctk.CTkLabel(form, text=t("ui_configura_o_fiscal_acbr"), anchor="w", text_color="#64b5f6", font=("Arial", 13, "bold")).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
 
         ctk.CTkButton(
             form,
-            text="CONFIGURAR ACBr",
+            text=t("ui_configurar_acbr"),
             width=220,
             fg_color="#1f6aa5",
             hover_color="#1a5a8b",
@@ -1104,7 +1104,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         ).grid(row=linha, column=0, sticky="w", padx=10, pady=(0, 8))
         linha += 1
 
-        ctk.CTkLabel(form, text="Modalidade Fiscal", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
+        ctk.CTkLabel(form, text=t("ui_modalidade_fiscal"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
@@ -1122,7 +1122,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         self.opt_modalidade_fiscal.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
         linha += 1
 
-        ctk.CTkLabel(form, text="CNPJ Emitente (NF-e)", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
+        ctk.CTkLabel(form, text=t("ui_cnpj_emitente_nf_e"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
@@ -1139,13 +1139,13 @@ class FrmDadosOficina(ctk.CTkToplevel):
         self.ent_fiscal_cnpj.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
         linha += 1
 
-        ctk.CTkLabel(form, text="IE (Inscrição Estadual)", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
+        ctk.CTkLabel(form, text=t("ui_ie_inscri_o_estadual"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
         self.ent_fiscal_ie = ctk.CTkEntry(
             form,
-            placeholder_text="Inscrição Estadual",
+            placeholder_text=t("ui_inscri_o_estadual"),
             height=34,
             fg_color="#f8fafc",
             border_width=2,
@@ -1156,13 +1156,13 @@ class FrmDadosOficina(ctk.CTkToplevel):
         self.ent_fiscal_ie.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
         linha += 1
 
-        ctk.CTkLabel(form, text="Token Fiscal", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
+        ctk.CTkLabel(form, text=t("ui_token_fiscal"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
         self.ent_fiscal_token = ctk.CTkEntry(
             form,
-            placeholder_text="Token/CSC do emissor",
+            placeholder_text=t("ui_token_csc_do_emissor"),
             height=34,
             fg_color="#f8fafc",
             border_width=2,
@@ -1173,7 +1173,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         self.ent_fiscal_token.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
         linha += 1
 
-        ctk.CTkLabel(form, text="Caminho do Certificado A1", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
+        ctk.CTkLabel(form, text=t("ui_caminho_do_certificado_a1"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
@@ -1182,7 +1182,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         f_cert_a1.grid_columnconfigure(0, weight=1)
         self.ent_fiscal_cert_a1 = ctk.CTkEntry(
             f_cert_a1,
-            placeholder_text="Caminho do certificado A1 (.pfx/.p12)",
+            placeholder_text=t("ui_caminho_do_certificado_a1_pfx_p12"),
             height=34,
             fg_color="#f8fafc",
             border_width=2,
@@ -1193,14 +1193,14 @@ class FrmDadosOficina(ctk.CTkToplevel):
         self.ent_fiscal_cert_a1.grid(row=0, column=0, sticky="ew")
         ctk.CTkButton(
             f_cert_a1,
-            text="Escolher",
+            text=t("ui_escolher"),
             width=90,
             fg_color="#2980b9",
             command=self.escolher_certificado_a1,
         ).grid(row=0, column=1, padx=(8, 0))
         linha += 1
 
-        ctk.CTkLabel(form, text="Configuração de rede da oficina", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
+        ctk.CTkLabel(form, text=t("ui_configura_o_de_rede_da_oficina"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
@@ -1209,7 +1209,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         f_rede.grid_columnconfigure(1, weight=1)
         self.btn_localizar_rede = ctk.CTkButton(
             f_rede,
-            text="LOCALIZAR OFICINA NA REDE",
+            text=t("ui_localizar_oficina_na_rede"),
             width=280,
             height=34,
             fg_color="#1f6aa5",
@@ -1223,11 +1223,11 @@ class FrmDadosOficina(ctk.CTkToplevel):
 
         ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(4, 6))
         linha += 1
-        ctk.CTkLabel(form, text="ℹ️  INFORMAÇÕES DO SISTEMA", anchor="w", text_color="#95a5a6", font=("Arial", 13, "bold")).grid(
+        ctk.CTkLabel(form, text=t("ui_informa_es_do_sistema"), anchor="w", text_color="#95a5a6", font=("Arial", 13, "bold")).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
-        self.lbl_versao = ctk.CTkLabel(form, text="Versão: carregando...", anchor="w", text_color="#7f8c8d", font=("Arial", 11))
+        self.lbl_versao = ctk.CTkLabel(form, text=t("ui_vers_o_carregando"), anchor="w", text_color="#7f8c8d", font=("Arial", 11))
         self.lbl_versao.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2))
         linha += 1
 
@@ -1246,7 +1246,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
 
         ctk.CTkButton(
             form,
-            text="ATIVAR LICENÇA",
+            text=t("ui_ativar_licen_a"),
             fg_color="#34495e",
             hover_color="#3c5a71",
             width=220,
@@ -1255,33 +1255,33 @@ class FrmDadosOficina(ctk.CTkToplevel):
         ).grid(row=linha, column=0, sticky="w", padx=10, pady=(0, 8))
         linha += 1
 
-        ctk.CTkButton(form, text="SALVAR DADOS", fg_color="#27ae60", width=220, font=("Arial", 13, "bold"), command=self.salvar).grid(
+        ctk.CTkButton(form, text=t("ui_salvar_dados"), fg_color="#27ae60", width=220, font=("Arial", 13, "bold"), command=self.salvar).grid(
             row=linha, column=0, sticky="w", padx=10, pady=(0, 10)
         )
         linha += 1
 
         ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(2, 6))
         linha += 1
-        ctk.CTkLabel(form, text="RECUPERACAO DE BACKUP", anchor="w", text_color="#f1c40f", font=("Arial", 13, "bold")).grid(
+        ctk.CTkLabel(form, text=t("ui_recuperacao_de_backup"), anchor="w", text_color="#f1c40f", font=("Arial", 13, "bold")).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
-        ctk.CTkLabel(form, text="Use esta opcao apos reinstalacao para restaurar um arquivo .db antigo.", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
+        ctk.CTkLabel(form, text=t("ui_use_esta_opcao_apos_reinstalacao_para_restaurar_um_arquivo_d"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6)
         )
         linha += 1
-        ctk.CTkButton(form, text="RESTAURAR BACKUP AGORA", fg_color="#d68910", hover_color="#b9770e", width=260, font=("Arial", 12, "bold"), command=self.restaurar_backup_manual).grid(
+        ctk.CTkButton(form, text=t("ui_restaurar_backup_agora"), fg_color="#d68910", hover_color="#b9770e", width=260, font=("Arial", 12, "bold"), command=self.restaurar_backup_manual).grid(
             row=linha, column=0, sticky="w", padx=10, pady=(0, 10)
         )
         linha += 1
 
         ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(2, 6))
         linha += 1
-        ctk.CTkLabel(form, text="SERVIDOR PARA CLIENTE", anchor="w", text_color="#64b5f6", font=("Arial", 13, "bold")).grid(
+        ctk.CTkLabel(form, text=t("ui_servidor_para_cliente"), anchor="w", text_color="#64b5f6", font=("Arial", 13, "bold")).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
         )
         linha += 1
-        ctk.CTkLabel(form, text="Gera um pacote para o cliente clicar e instalar o servidor local.", anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
+        ctk.CTkLabel(form, text=t("ui_gera_um_pacote_para_o_cliente_clicar_e_instalar_o_servidor_l"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
             row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6)
         )
         linha += 1
@@ -1291,7 +1291,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         f_servidor.grid_columnconfigure(1, weight=1)
         ctk.CTkButton(
             f_servidor,
-            text="GERAR INSTALADOR DO SERVIDOR",
+            text=t("ui_gerar_instalador_do_servidor"),
             fg_color="#2980b9",
             hover_color="#3498db",
             width=320,
@@ -1301,7 +1301,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         ).grid(row=0, column=0, padx=(0, 8), pady=0)
         ctk.CTkLabel(
             f_servidor,
-            text="Gera um pacote para o cliente instalar o servidor local com poucos cliques.",
+            text=t("ui_gera_um_pacote_para_o_cliente_instalar_o_servidor_local_com_"),
             anchor="w",
             justify="left",
             text_color="#aab4be",
@@ -1484,7 +1484,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         dialog.focus_force()
 
         chave_inst = str(obter_chave_instalacao() or "").strip()
-        ctk.CTkLabel(dialog, text="Chave de instalação deste PC:", text_color="#bdc3c7").pack(pady=(16, 4))
+        ctk.CTkLabel(dialog, text=t("ui_chave_de_instala_o_deste_pc"), text_color="#bdc3c7").pack(pady=(16, 4))
 
         frame_chave = ctk.CTkFrame(dialog, fg_color="#1f2a38")
         frame_chave.pack(pady=(0, 12), padx=12, fill="x")
@@ -1493,12 +1493,12 @@ class FrmDadosOficina(ctk.CTkToplevel):
         def _copiar_chave():
             dialog.clipboard_clear()
             dialog.clipboard_append(chave_inst)
-            btn_copiar.configure(text="Copiado")
-            dialog.after(1500, lambda: btn_copiar.configure(text="Copiar Chave"))
+            btn_copiar.configure(text=t("ui_copiado"))
+            dialog.after(1500, lambda: btn_copiar.configure(text=t("ui_copiar_chave")))
 
         btn_copiar = ctk.CTkButton(
             frame_chave,
-            text="Copiar Chave",
+            text=t("ui_copiar_chave"),
             command=_copiar_chave,
             width=130,
             height=30,
@@ -1507,8 +1507,8 @@ class FrmDadosOficina(ctk.CTkToplevel):
         )
         btn_copiar.pack(side="right", padx=(0, 8), pady=8)
 
-        ctk.CTkLabel(dialog, text="Contra-senha de ativação:", text_color="#bdc3c7").pack(pady=(2, 4))
-        entry_chave = ctk.CTkEntry(dialog, width=420, height=40, placeholder_text="Cole aqui a chave enviada pelo suporte")
+        ctk.CTkLabel(dialog, text=t("ui_contra_senha_de_ativa_o"), text_color="#bdc3c7").pack(pady=(2, 4))
+        entry_chave = ctk.CTkEntry(dialog, width=420, height=40, placeholder_text=t("ui_cole_aqui_a_chave_enviada_pelo_suporte"))
         entry_chave.pack(pady=(0, 10))
 
         def _confirmar():
@@ -1517,7 +1517,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
                 messagebox.showwarning("Ativação", "Informe a contra-senha de ativação.", parent=dialog)
                 return
 
-            btn_confirmar.configure(state="disabled", text="ATIVANDO...")
+            btn_confirmar.configure(state="disabled", text=t("ui_ativando"))
             ok, msg = ativar_licenca(chave)
             if ok:
                 def _publicar_drive_bg():
@@ -1540,12 +1540,12 @@ class FrmDadosOficina(ctk.CTkToplevel):
             except Exception:
                 pass
 
-            btn_confirmar.configure(state="normal", text="ATIVAR AGORA")
+            btn_confirmar.configure(state="normal", text=t("ui_ativar_agora"))
             messagebox.showerror("Ativação", msg, parent=dialog)
 
         btn_confirmar = ctk.CTkButton(
             dialog,
-            text="ATIVAR AGORA",
+            text=t("ui_ativar_agora"),
             command=_confirmar,
             width=320,
             height=36,
@@ -1679,8 +1679,8 @@ class FrmDadosOficina(ctk.CTkToplevel):
         return caminho_cfg
 
     def localizar_oficina_rede_cfg(self):
-        self.btn_localizar_rede.configure(state="disabled", text="LOCALIZANDO...")
-        self.lbl_rede.configure(text="Buscando servidor na rede local...", text_color="#f1c40f")
+        self.btn_localizar_rede.configure(state="disabled", text=t("ui_localizando"))
+        self.lbl_rede.configure(text=t("ui_buscando_servidor_na_rede_local"), text_color="#f1c40f")
 
         def worker():
             url = ""
@@ -1691,9 +1691,9 @@ class FrmDadosOficina(ctk.CTkToplevel):
                 erro = str(exc)
 
             def finalizar():
-                self.btn_localizar_rede.configure(state="normal", text="LOCALIZAR OFICINA NA REDE")
+                self.btn_localizar_rede.configure(state="normal", text=t("ui_localizar_oficina_na_rede"))
                 if not url:
-                    self.lbl_rede.configure(text="Oficina não localizada na rede.", text_color="#e74c3c")
+                    self.lbl_rede.configure(text=t("ui_oficina_n_o_localizada_na_rede"), text_color="#e74c3c")
                     msg = "Não foi possível localizar a oficina automaticamente na rede."
                     if erro:
                         msg += f"\n\nDetalhe: {erro}"
@@ -1704,7 +1704,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
                     self.lbl_rede.configure(text=f"Oficina localizada: {url}", text_color="#2ecc71")
                     messagebox.showinfo("Rede Local", f"Oficina localizada com sucesso!\n\nServidor: {url}\nConfig salvo em: {caminho}", parent=self)
                 except Exception as exc:
-                    self.lbl_rede.configure(text="Servidor encontrado, mas falha ao salvar.", text_color="#f39c12")
+                    self.lbl_rede.configure(text=t("ui_servidor_encontrado_mas_falha_ao_salvar"), text_color="#f39c12")
                     messagebox.showwarning("Rede Local", f"Servidor encontrado: {url}\nFalha ao salvar config: {exc}", parent=self)
 
             self.after(0, finalizar)
@@ -1871,7 +1871,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             dialog,
-            text="Selecione um arquivo .db da nuvem",
+            text=t("ui_selecione_um_arquivo_db_da_nuvem"),
             font=("Arial", 14, "bold"),
             text_color="orange",
         ).pack(anchor="w", padx=16, pady=(12, 8))
@@ -1919,8 +1919,8 @@ class FrmDadosOficina(ctk.CTkToplevel):
 
         botoes = ctk.CTkFrame(dialog, fg_color="transparent")
         botoes.pack(anchor="e", padx=16, pady=(8, 12))
-        ctk.CTkButton(botoes, text="Cancelar", fg_color="#7f8c8d", width=120, command=_cancelar).grid(row=0, column=0, padx=(0, 8))
-        ctk.CTkButton(botoes, text="Restaurar", fg_color="#d68910", hover_color="#b9770e", width=120, command=_confirmar).grid(row=0, column=1)
+        ctk.CTkButton(botoes, text=t("btn_cancelar"), fg_color="#7f8c8d", width=120, command=_cancelar).grid(row=0, column=0, padx=(0, 8))
+        ctk.CTkButton(botoes, text=t("ui_restaurar"), fg_color="#d68910", hover_color="#b9770e", width=120, command=_confirmar).grid(row=0, column=1)
 
         self.wait_window(dialog)
         return retorno["value"]
@@ -2221,9 +2221,9 @@ class FrmDadosOficina(ctk.CTkToplevel):
         win.focus_force()
         win.configure(fg_color="#0d1117")
 
-        ctk.CTkLabel(win, text="✅  PACOTE DO SERVIDOR GERADO!",
+        ctk.CTkLabel(win, text=t("ui_pacote_do_servidor_gerado"),
                      font=("Arial", 17, "bold"), text_color="#2ecc71").pack(pady=(20, 4))
-        ctk.CTkLabel(win, text="Escolha a opção de entrega mais adequada para o cliente:",
+        ctk.CTkLabel(win, text=t("ui_escolha_a_op_o_de_entrega_mais_adequada_para_o_cliente"),
                      font=("Arial", 12), text_color="#bdc3c7").pack(pady=(0, 12))
 
         # ── Opção 1: Instalador (recomendado) ───────────────────────────
@@ -2231,9 +2231,9 @@ class FrmDadosOficina(ctk.CTkToplevel):
         card1.pack(fill="x", padx=20, pady=(0, 10))
         f1h = ctk.CTkFrame(card1, fg_color="#1a2a1a")
         f1h.pack(fill="x", padx=14, pady=(12, 0))
-        ctk.CTkLabel(f1h, text="📦  OPÇÃO 1 — ZIP (RECOMENDADO)",
+        ctk.CTkLabel(f1h, text=t("ui_op_o_1_zip_recomendado"),
                      font=("Arial", 13, "bold"), text_color="#2ecc71").pack(side="left")
-        ctk.CTkLabel(f1h, text="  ✔ mais fácil para o cliente",
+        ctk.CTkLabel(f1h, text=t("ui_mais_f_cil_para_o_cliente"),
                      font=("Arial", 11), text_color="#7fba00").pack(side="left", padx=6)
         ctk.CTkLabel(card1,
                      text=(
@@ -2245,7 +2245,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
                      ),
                      font=("Arial", 11), text_color="#b2d9b2", justify="left", wraplength=560).pack(
             padx=14, pady=(4, 12), anchor="w")
-        ctk.CTkButton(card1, text="📋  Copiar caminho do ZIP",
+        ctk.CTkButton(card1, text=t("ui_copiar_caminho_do_zip"),
                       fg_color="#1a6b30", hover_color="#27ae60", width=230,
                       command=lambda: (win.clipboard_clear(), win.clipboard_append(zip_saida),
                                        messagebox.showinfo("Copiado", "Caminho do ZIP copiado!", parent=win))
@@ -2256,9 +2256,9 @@ class FrmDadosOficina(ctk.CTkToplevel):
         card2.pack(fill="x", padx=20, pady=(0, 10))
         f2h = ctk.CTkFrame(card2, fg_color="#1a1a2a")
         f2h.pack(fill="x", padx=14, pady=(12, 0))
-        ctk.CTkLabel(f2h, text="💻  OPÇÃO 2 — TERMINAL (para técnicos)",
+        ctk.CTkLabel(f2h, text=t("ui_op_o_2_terminal_para_t_cnicos"),
                      font=("Arial", 13, "bold"), text_color="#3498db").pack(side="left")
-        ctk.CTkLabel(f2h, text="  ⚠ requer Python",
+        ctk.CTkLabel(f2h, text=t("ui_requer_python"),
                      font=("Arial", 11), text_color="#f39c12").pack(side="left", padx=6)
         ctk.CTkLabel(card2,
                      text=(
@@ -2273,14 +2273,14 @@ class FrmDadosOficina(ctk.CTkToplevel):
                      ),
                      font=("Consolas", 10), text_color="#a0c4ff", justify="left", wraplength=560).pack(
             padx=14, pady=(4, 8), anchor="w")
-        ctk.CTkButton(card2, text="📋  Copiar comando pip install",
+        ctk.CTkButton(card2, text=t("ui_copiar_comando_pip_install"),
                       fg_color="#1a3a6b", hover_color="#2980b9", width=260,
                       command=lambda: (win.clipboard_clear(),
                                        win.clipboard_append("pip install fastapi uvicorn jinja2 python-multipart"),
                                        messagebox.showinfo("Copiado", "Comando copiado!", parent=win))
                       ).pack(pady=(0, 12))
 
-        ctk.CTkButton(win, text="Fechar", fg_color="#7f8c8d", hover_color="#95a5a6",
+        ctk.CTkButton(win, text=t("ui_fechar_1"), fg_color="#7f8c8d", hover_color="#95a5a6",
                       width=140, command=win.destroy).pack(pady=(6, 16))
 
 
@@ -2304,13 +2304,13 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
         header.pack(fill="x", padx=18, pady=(18, 10))
         ctk.CTkLabel(
             header,
-            text="🧾 BAIXA DE O.S. FINALIZADAS",
+            text=t("ui_baixa_de_o_s_finalizadas"),
             font=("Arial", 22, "bold"),
             text_color="orange",
         ).pack(side="left", padx=18, pady=18)
         ctk.CTkButton(
             header,
-            text="DAR BAIXA / GERAR RECIBO",
+            text=t("ui_dar_baixa_gerar_recibo"),
             fg_color="#8e6b3b",
             hover_color="#a87c45",
             width=220,
@@ -2318,14 +2318,14 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
         ).pack(side="right", padx=(0, 10), pady=18)
         ctk.CTkButton(
             header,
-            text="Fechar",
+            text=t("ui_fechar_1"),
             fg_color="#7f8c8d",
             width=120,
             command=self.destroy,
         ).pack(side="right", padx=(0, 10), pady=18)
         ctk.CTkButton(
             header,
-            text="Atualizar",
+            text=t("btn_atualizar"),
             fg_color="#2980b9",
             width=130,
             command=self.carregar_os_finalizadas,
@@ -2335,7 +2335,7 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
         info.pack(fill="x", padx=18, pady=(0, 10))
         ctk.CTkLabel(
             info,
-            text="Selecione uma O.S. FINALIZADA para dar baixa, gerar o recibo e marcar como ENTREGUE.",
+            text=t("ui_selecione_uma_o_s_finalizada_para_dar_baixa_gerar_o_recibo_e"),
             font=("Arial", 12),
             text_color="#d5d8dc",
         ).pack(anchor="w", padx=16, pady=(12, 8))
@@ -2355,13 +2355,13 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
             show="headings",
             height=14,
         )
-        self.tab_recibos.heading("id", text="Nº O.S.")
-        self.tab_recibos.heading("cliente", text="CLIENTE")
-        self.tab_recibos.heading("equipamento", text="EQUIPAMENTO")
-        self.tab_recibos.heading("data", text="DATA")
-        self.tab_recibos.heading("valor_total", text="VALOR TOTAL")
-        self.tab_recibos.heading("saldo", text="SALDO")
-        self.tab_recibos.heading("status", text="STATUS")
+        self.tab_recibos.heading("id", text=t("ui_n_o_s"))
+        self.tab_recibos.heading("cliente", text=t("ui_cliente_1"))
+        self.tab_recibos.heading("equipamento", text=t("ui_equipamento_1"))
+        self.tab_recibos.heading("data", text=t("ui_data_1"))
+        self.tab_recibos.heading("valor_total", text=t("ui_valor_total"))
+        self.tab_recibos.heading("saldo", text=t("ui_saldo_1"))
+        self.tab_recibos.heading("status", text=t("ui_status_1"))
         self.tab_recibos.column("id", width=80, anchor="center")
         self.tab_recibos.column("cliente", width=240)
         self.tab_recibos.column("equipamento", width=210)
@@ -2445,7 +2445,7 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
             if rows:
                 self.lbl_info_recibo.configure(text=f"{len(rows)} O.S. finalizada(s) pronta(s) para baixa.")
             else:
-                self.lbl_info_recibo.configure(text="Nenhuma O.S. finalizada pendente de baixa.")
+                self.lbl_info_recibo.configure(text=t("ui_nenhuma_o_s_finalizada_pendente_de_baixa"))
         except Exception as exc:
             self.lbl_info_recibo.configure(text=f"Erro ao carregar O.S. finalizadas: {exc}")
 
@@ -2510,7 +2510,7 @@ class FrmMenu(ctk.CTk):
         self._ultima_os_contexto = None
         self._encerrando_aplicacao = False
         self._aviso_motor_fiscal_inicio_exibido = False
-        self.locale = set_default_locale(os.getenv("OFICINA_LOCALE", get_current_locale()))
+        self.locale = set_default_locale()  # idioma 100% automático (sistema operacional)
         self.title(f"{t('titulo_sistema')} v{VERSION}")
         self.geometry("1100x750") #
         self.configure(fg_color="#0f1720")
@@ -2523,7 +2523,7 @@ class FrmMenu(ctk.CTk):
         
         self._dash_mode = "COMPLETO"
         self._dashboard_auto_after_id = None
-        self._dados_pendencias_dashboard = ([], [], [], []) #
+        self._dados_pendencias_dashboard = ([], [], [], [], []) #
         self._bg_pil_original = None
         self._bg_tk_image = None
         self._bg_canvas = None
@@ -2612,16 +2612,8 @@ class FrmMenu(ctk.CTk):
 
         self._adicionar_status_nuvem()
 
-        ctk.CTkLabel(self.sidebar, text=t("label_idioma", default="Idioma"), font=("Arial", 9, "bold"), text_color="#bdc3c7", fg_color="#0d1b2a").pack(padx=8, pady=(4, 2))
-        self._locale_var = ctk.StringVar(value=get_current_locale())
-        self._option_idioma = ctk.CTkOptionMenu(
-            self.sidebar,
-            values=["pt_BR", "es_UY", "en_US"],
-            variable=self._locale_var,
-            command=self._trocar_idioma,
-            width=120,
-        )
-        self._option_idioma.pack(padx=8, pady=(0, 6))
+        # Seleção manual de idioma removida: o idioma agora é detectado
+        # automaticamente a partir do sistema operacional (Windows).
 
         ctk.CTkFrame(self.sidebar, height=1, fg_color="#1e3a5f").pack(fill="x", padx=12, pady=(0, 5))
 
@@ -2689,40 +2681,8 @@ class FrmMenu(ctk.CTk):
         self._iniciar_auto_refresh_dashboard()
         self.after_idle(self._mostrar_menu_pronto)
 
-    def _salvar_idioma_cfg(self, idioma: str) -> None:
-        caminhos = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.cfg"),
-            os.path.join(os.getcwd(), "config.cfg"),
-        ]
-        caminho_cfg = next((c for c in caminhos if os.path.exists(c)), caminhos[0])
-
-        parser = configparser.ConfigParser()
-        if os.path.exists(caminho_cfg):
-            parser.read(caminho_cfg, encoding="utf-8")
-        if not parser.has_section("idioma"):
-            parser.add_section("idioma")
-        parser.set("idioma", "idioma_atual", idioma)
-        with open(caminho_cfg, "w", encoding="utf-8") as arquivo_cfg:
-            parser.write(arquivo_cfg)
-
-    def _trocar_idioma(self, valor: str):
-        try:
-            set_default_locale(valor)
-            self._salvar_idioma_cfg(valor)
-            self.locale = get_current_locale()
-            self.title(f"{t('titulo_sistema')} v{VERSION}")
-            if hasattr(self, "lbl_titulo_oficina") and self.lbl_titulo_oficina.winfo_exists():
-                self.lbl_titulo_oficina.configure(text=t("titulo_oficina"))
-            if hasattr(self, "lbl_usuario_menu") and self.lbl_usuario_menu.winfo_exists():
-                self.lbl_usuario_menu.configure(text=f"👤 {self.usuario.upper()}")
-            if hasattr(self, "lbl_role_menu") and self.lbl_role_menu.winfo_exists():
-                self.lbl_role_menu.configure(text=f"({self.role})")
-            if hasattr(self, "lbl_contador_licenca") and self.lbl_contador_licenca.winfo_exists():
-                self.lbl_contador_licenca.configure(text=t("licenca_carregando", default="Licença: carregando..."))
-            self._reconstruir_botoes_menu()
-            self._atualizar_status_nuvem()
-        except Exception:
-            pass
+    # Seleção manual de idioma removida (métodos antigos de troca/salvamento):
+    # o idioma agora é detectado automaticamente a partir do sistema operacional.
 
     def _reconstruir_botoes_menu(self):
         if not hasattr(self, "sidebar_buttons") or not self.sidebar_buttons.winfo_exists():
@@ -2818,12 +2778,12 @@ class FrmMenu(ctk.CTk):
         # Polling automático de rede removido.
     def _verificar_e_exibir_painel_pendencias(self):
         try:
-            orcamentos, bancada, status_finalizados, aguardando_orcamento = self._consultar_pendencias_login()
+            orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada = self._consultar_pendencias_login()
         except Exception as exc:
             logger.info("Falha ao consultar pendencias do login: %s", exc)
             return
         # Painel integrado ao dashboard principal (sem popup).
-        self._dados_pendencias_dashboard = (orcamentos, bancada, status_finalizados, aguardando_orcamento)
+        self._dados_pendencias_dashboard = (orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada)
         if hasattr(self, "dashboard_frame") and self.dashboard_frame.winfo_exists():
             self._criar_dashboard_modular()
 
@@ -3273,7 +3233,7 @@ class FrmMenu(ctk.CTk):
 
         ctk.CTkLabel(
             box,
-            text="Rejeitados/Abandono",
+            text=t("ui_rejeitados_abandono"),
             font=("Arial", 10, "bold"),
             text_color=titulo_cor,
             wraplength=180,
@@ -3292,7 +3252,7 @@ class FrmMenu(ctk.CTk):
             linhas.append(f"OS {os_id} - {dias} dias")
 
         if not linhas:
-            ctk.CTkLabel(box, text="Sem O.S.", font=("Arial", 9), text_color=vazio_cor).pack(pady=(2, 6))
+            ctk.CTkLabel(box, text=t("ui_sem_o_s"), font=("Arial", 9), text_color=vazio_cor).pack(pady=(2, 6))
             return
 
         ctk.CTkLabel(
@@ -3310,20 +3270,20 @@ class FrmMenu(ctk.CTk):
         for titulo, valor in cards:
             self._criar_card_dashboard(linha, titulo, valor)
 
-    def _criar_painel_pendencias_fixo(self, parent, orcamentos, bancada, status_finalizados, aguardando_orcamento):
+    def _criar_painel_pendencias_fixo(self, parent, orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada):
         bloco = ctk.CTkFrame(parent, fg_color="#121a24", corner_radius=12)
         bloco.pack(fill="both", expand=True, pady=(2, 2))
 
         ctk.CTkLabel(
             bloco,
-            text="PAINEL DE PENDÊNCIAS (ÚLTIMOS 15 DIAS)",
+            text=t("ui_painel_de_pend_ncias_ltimos_15_dias"),
             font=("Arial", 12, "bold"),
             text_color="#f5f6fa",
         ).pack(anchor="w", padx=10, pady=(6, 4))
 
         corpo = ctk.CTkFrame(bloco, fg_color="#121a24")
         corpo.pack(fill="both", expand=True, padx=8, pady=(0, 6))
-        corpo.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        corpo.grid_columnconfigure((0, 1, 2, 3, 4), weight=1)
 
         def _linha_item(item):
             if len(item) < 3:
@@ -3339,6 +3299,7 @@ class FrmMenu(ctk.CTk):
             ("NA BANCADA", "#3498db", bancada),
             ("FINALIZADOS", "#27ae60", status_finalizados),
             ("AGUARDANDO ORÇAMENTO", "#f39c12", aguardando_orcamento),
+            ("AGUARDANDO RETIRADA", "#e74c3c", aguardando_retirada),
         ]
 
         for col, (titulo, cor, dados) in enumerate(cards):
@@ -3351,7 +3312,7 @@ class FrmMenu(ctk.CTk):
             if not dados:
                 ctk.CTkLabel(
                     lista,
-                    text="Sem pendências",
+                    text=t("ui_sem_pend_ncias"),
                     text_color="#9ca3af",
                     font=("Arial", 9),
                     anchor="w",
@@ -3405,7 +3366,7 @@ class FrmMenu(ctk.CTk):
 
         ctk.CTkLabel(
             parent_dash,
-            text="Dashboard",
+            text=t("ui_dashboard"),
             font=("Arial", 28, "bold"),
             text_color="orange",
         ).pack(anchor="w", pady=(0, 10))
@@ -3479,7 +3440,7 @@ class FrmMenu(ctk.CTk):
 
             col_oficina = ctk.CTkFrame(split, fg_color="transparent")
             col_oficina.pack(side="left", fill="both", expand=True, padx=(0, 6))
-            ctk.CTkLabel(col_oficina, text="Oficina", font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
+            ctk.CTkLabel(col_oficina, text=t("ui_oficina"), font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
             self._criar_linha_cards(
                 col_oficina,
                 [
@@ -3501,7 +3462,7 @@ class FrmMenu(ctk.CTk):
 
             col_pdv = ctk.CTkFrame(split, fg_color="transparent")
             col_pdv.pack(side="left", fill="both", expand=True, padx=(6, 0))
-            ctk.CTkLabel(col_pdv, text="PDV", font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
+            ctk.CTkLabel(col_pdv, text=t("btn_pdv"), font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
             self._criar_linha_cards(
                 col_pdv,
                 [
@@ -3513,13 +3474,13 @@ class FrmMenu(ctk.CTk):
 
         if self.role in ("ADMIN", "OFICINA", "VENDEDOR"):
             try:
-                orcamentos, bancada, status_finalizados, aguardando_orcamento = self._consultar_pendencias_login()
-                self._dados_pendencias_dashboard = (orcamentos, bancada, status_finalizados, aguardando_orcamento)
+                orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada = self._consultar_pendencias_login()
+                self._dados_pendencias_dashboard = (orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada)
             except Exception as exc:
                 logger.info("Falha ao montar painel fixo de pendencias: %s", exc)
-                orcamentos, bancada, status_finalizados, aguardando_orcamento = ([], [], [], [])
+                orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada = ([], [], [], [], [])
 
-            self._criar_painel_pendencias_fixo(parent_dash, orcamentos, bancada, status_finalizados, aguardando_orcamento)
+            self._criar_painel_pendencias_fixo(parent_dash, orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada)
 
         self._atualizar_fundo()
 
@@ -3679,14 +3640,15 @@ class FrmMenu(ctk.CTk):
                 f"""
                 SELECT id, COALESCE(data,''), COALESCE(cliente,''), COALESCE(equipamento,'')
                 FROM orcamentos_aguardo
-                                WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
+                WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
+                  AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
                   AND {fmt_data} >= ?
                 ORDER BY id DESC
                 """,
                 (limite,),
             )
-            status_finalizados = cursor.fetchall()
-        return orcamentos, bancada, status_finalizados, aguardando_orcamento
+            aguardando_retirada = cursor.fetchall()
+        return orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada
 
     def _exibir_popup_pendencias_login(self, orcamentos, bancada, status_finalizados):
         pop = ctk.CTkToplevel(self)
@@ -3703,7 +3665,7 @@ class FrmMenu(ctk.CTk):
 
         ctk.CTkLabel(
             pop,
-            text="PAINEL DE PENDÊNCIAS (ÚLTIMOS 15 DIAS)",
+            text=t("ui_painel_de_pend_ncias_ltimos_15_dias"),
             font=("Arial", 16, "bold"),
             text_color="#f5f6fa",
         ).pack(pady=(14, 10))
@@ -3740,7 +3702,7 @@ class FrmMenu(ctk.CTk):
             txt.insert("1.0", _texto_linhas(bloco))
             txt.configure(state="disabled")
 
-        ctk.CTkButton(pop, text="Fechar", width=140, fg_color="#7f8c8d", command=pop.destroy).pack(pady=(0, 12))
+        ctk.CTkButton(pop, text=t("ui_fechar_1"), width=140, fg_color="#7f8c8d", command=pop.destroy).pack(pady=(0, 12))
 
     def _atualizar_contador_licenca(self):
         try:
@@ -3748,7 +3710,7 @@ class FrmMenu(ctk.CTk):
             self.lbl_contador_licenca.configure(text=texto, text_color=cor)
         except Exception as e:
             logger.exception("Erro ao atualizar contador de licença/trial: %s", e)
-            self.lbl_contador_licenca.configure(text="Licença: indisponível", text_color="#6b7280")
+            self.lbl_contador_licenca.configure(text=t("ui_licen_a_indispon_vel"), text_color="#6b7280")
         finally: #
             if self.winfo_exists():
                 self.after(60000, self._atualizar_contador_licenca)
@@ -4673,7 +4635,7 @@ class FrmMenu(ctk.CTk):
 
         ctk.CTkLabel(
             win,
-            text="Analise Inteligente de Melhorias",
+            text=t("ui_analise_inteligente_de_melhorias"),
             font=("Arial", 18, "bold"),
             text_color="orange",
         ).pack(pady=(14, 8))
@@ -4704,8 +4666,8 @@ class FrmMenu(ctk.CTk):
             except Exception as e:
                 messagebox.showwarning("Analise IA", f"Nao foi possivel copiar: {e}", parent=win)
 
-        ctk.CTkButton(f_btn, text="Copiar relatorio", width=150, fg_color="#2980b9", command=copiar_relatorio).pack(side="left")
-        ctk.CTkButton(f_btn, text="Fechar", width=120, fg_color="#7f8c8d", command=win.destroy).pack(side="right")
+        ctk.CTkButton(f_btn, text=t("ui_copiar_relatorio"), width=150, fg_color="#2980b9", command=copiar_relatorio).pack(side="left")
+        ctk.CTkButton(f_btn, text=t("ui_fechar_1"), width=120, fg_color="#7f8c8d", command=win.destroy).pack(side="right")
 
     def configurar_email_nuvem_admin(self) -> str:
         if self.role != "ADMIN":

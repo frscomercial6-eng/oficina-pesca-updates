@@ -67,7 +67,7 @@ class FrmFinanceiro(ctk.CTkToplevel):
         self.ent_data_fim = ctk.CTkEntry(filter_frame, width=110, placeholder_text="30/04/2026")
         self.ent_data_fim.insert(0, hoje.strftime("%d/%m/%Y"))
         self.ent_data_fim.pack(side="left", padx=5, pady=12)
-        self.ent_busca = ctk.CTkEntry(filter_frame, placeholder_text="Buscar descricao, categoria ou pagamento", width=330)
+        self.ent_busca = ctk.CTkEntry(filter_frame, placeholder_text=t("ui_buscar_descricao_categoria_ou_pagamento"), width=330)
         self.ent_busca.pack(side="left", padx=12, pady=12)
         ctk.CTkButton(filter_frame, text=t('btn_aplicar'), fg_color="#2980b9", width=120, command=self.carregar_dados).pack(side="left", padx=6, pady=12)
         ctk.CTkButton(filter_frame, text=t('btn_limpar'), fg_color="#7f8c8d", width=100, command=self.limpar_filtros).pack(side="left", padx=6, pady=12)
@@ -105,28 +105,28 @@ class FrmFinanceiro(ctk.CTkToplevel):
 
         self.frame_resumo = ctk.CTkFrame(content, fg_color="#1f2a38", corner_radius=20)
         self.frame_resumo.pack(fill="x", pady=(0, 10), padx=10)
-        self.lbl_entradas = ctk.CTkLabel(self.frame_resumo, text="ENTRADAS FILTRADAS\nR$ 0.00", font=("Arial", 14, "bold"), text_color="#000000", fg_color="#c8f7c5", corner_radius=8, width=240, height=58)
+        self.lbl_entradas = ctk.CTkLabel(self.frame_resumo, text=t("ui_entradas_filtradas_nr_0_00"), font=("Arial", 14, "bold"), text_color="#000000", fg_color="#c8f7c5", corner_radius=8, width=240, height=58)
         self.lbl_entradas.pack(side="left", padx=10, pady=15)
-        self.lbl_saidas = ctk.CTkLabel(self.frame_resumo, text="SAIDAS FILTRADAS\nR$ 0.00", font=("Arial", 14, "bold"), text_color="#000000", fg_color="#ff9f9a", corner_radius=8, width=240, height=58)
+        self.lbl_saidas = ctk.CTkLabel(self.frame_resumo, text=t("ui_saidas_filtradas_nr_0_00"), font=("Arial", 14, "bold"), text_color="#000000", fg_color="#ff9f9a", corner_radius=8, width=240, height=58)
         self.lbl_saidas.pack(side="left", padx=10, pady=15)
-        self.lbl_saldo_resumo = ctk.CTkLabel(self.frame_resumo, text="SALDO DO FILTRO\nR$ 0.00", font=("Arial", 14, "bold"), text_color="#000000", fg_color="#b7ef8a", corner_radius=8, width=240, height=58)
+        self.lbl_saldo_resumo = ctk.CTkLabel(self.frame_resumo, text=t("ui_saldo_do_filtro_nr_0_00"), font=("Arial", 14, "bold"), text_color="#000000", fg_color="#b7ef8a", corner_radius=8, width=240, height=58)
         self.lbl_saldo_resumo.pack(side="left", padx=10, pady=15)
-        self.lbl_saldo_receber = ctk.CTkLabel(self.frame_resumo, text="SALDO A RECEBER\nR$ 0.00", font=("Arial", 14, "bold"), text_color="#000000", fg_color="#fff36d", corner_radius=8, width=240, height=58)
+        self.lbl_saldo_receber = ctk.CTkLabel(self.frame_resumo, text=t("ui_saldo_a_receber_nr_0_00"), font=("Arial", 14, "bold"), text_color="#000000", fg_color="#fff36d", corner_radius=8, width=240, height=58)
         self.lbl_saldo_receber.pack(side="left", padx=10, pady=15)
 
         self.frame_pagamento = ctk.CTkFrame(content, fg_color="#1f2a38", corner_radius=20)
         self.frame_pagamento.pack(fill="x", pady=(0, 10), padx=10)
         ctk.CTkLabel(self.frame_pagamento, text=t('recebimentos_pagamento', default='RECEBIMENTOS NO PERÍODO POR PAGAMENTO'), font=("Arial", 12, "bold"), text_color="#bdc3c7").pack(anchor="w", padx=15, pady=(8, 0))
-        self.lbl_pix = ctk.CTkLabel(self.frame_pagamento, text="PIX\nR$ 0.00", font=("Arial", 13, "bold"), text_color="#000000", fg_color="#a8e6ff", corner_radius=8, width=220, height=56)
+        self.lbl_pix = ctk.CTkLabel(self.frame_pagamento, text=t("ui_pix_nr_0_00"), font=("Arial", 13, "bold"), text_color="#000000", fg_color="#a8e6ff", corner_radius=8, width=220, height=56)
         self.lbl_pix.pack(side="left", padx=10, pady=12)
-        self.lbl_dinheiro = ctk.CTkLabel(self.frame_pagamento, text="DINHEIRO\nR$ 0.00", font=("Arial", 13, "bold"), text_color="#000000", fg_color="#d2f8c8", corner_radius=8, width=220, height=56)
+        self.lbl_dinheiro = ctk.CTkLabel(self.frame_pagamento, text=t("ui_dinheiro_nr_0_00"), font=("Arial", 13, "bold"), text_color="#000000", fg_color="#d2f8c8", corner_radius=8, width=220, height=56)
         self.lbl_dinheiro.pack(side="left", padx=10, pady=12)
-        self.lbl_cartao = ctk.CTkLabel(self.frame_pagamento, text="CARTAO\nR$ 0.00", font=("Arial", 13, "bold"), text_color="#000000", fg_color="#f2d5ff", corner_radius=8, width=220, height=56)
+        self.lbl_cartao = ctk.CTkLabel(self.frame_pagamento, text=t("ui_cartao_nr_0_00"), font=("Arial", 13, "bold"), text_color="#000000", fg_color="#f2d5ff", corner_radius=8, width=220, height=56)
         self.lbl_cartao.pack(side="left", padx=10, pady=12)
 
         self.btn_reforma = ctk.CTkButton(
             self.frame_botoes,
-            text="IBS/CBS",
+            text=t("ui_ibs_cbs"),
             fg_color="#566573",
             width=130,
             command=self.abrir_config_reforma_tributaria,
@@ -192,8 +192,8 @@ class FrmFinanceiro(ctk.CTkToplevel):
             garantir_estrutura_reforma_tributaria(cursor)
             cfg = ler_config_reforma_tributaria(cursor)
 
-        ctk.CTkLabel(dialogo, text="CONFIGURACAO LATENTE DE IBS/CBS", font=("Arial", 18, "bold"), text_color="orange").pack(pady=(18, 8))
-        ctk.CTkLabel(dialogo, text="Nada aqui altera o fluxo atual. Esta tela apenas prepara o mapeamento futuro.", font=("Arial", 12), text_color="#d5d8dc", wraplength=560).pack(pady=(0, 12))
+        ctk.CTkLabel(dialogo, text=t("ui_configuracao_latente_de_ibs_cbs"), font=("Arial", 18, "bold"), text_color="orange").pack(pady=(18, 8))
+        ctk.CTkLabel(dialogo, text=t("ui_nada_aqui_altera_o_fluxo_atual_esta_tela_apenas_prepara_o_ma"), font=("Arial", 12), text_color="#d5d8dc", wraplength=560).pack(pady=(0, 12))
 
         frame = ctk.CTkFrame(dialogo, fg_color="#1f2a38", corner_radius=18)
         frame.pack(fill="both", expand=True, padx=20, pady=10)
@@ -210,11 +210,11 @@ class FrmFinanceiro(ctk.CTkToplevel):
         ent_vigencia = ctk.CTkEntry(frame, width=220)
         ent_vigencia.insert(0, str(cfg.get("vigencia_inicio") or ""))
         ent_vigencia.grid(row=1, column=1, padx=12, pady=10, sticky="ew")
-        ent_split = ctk.CTkSwitch(frame, text="Split payment padrao")
+        ent_split = ctk.CTkSwitch(frame, text=t("ui_split_payment_padrao"))
         if int(cfg.get("split_payment_padrao") or 0):
             ent_split.select()
         ent_split.grid(row=2, column=0, padx=12, pady=10, sticky="w")
-        ent_obs = ctk.CTkEntry(frame, width=460, placeholder_text="Observacoes opcionais")
+        ent_obs = ctk.CTkEntry(frame, width=460, placeholder_text=t("ui_observacoes_opcionais"))
         ent_obs.insert(0, str(cfg.get("observacoes") or ""))
         ent_obs.grid(row=2, column=1, padx=12, pady=10, sticky="ew")
 
@@ -244,8 +244,8 @@ class FrmFinanceiro(ctk.CTkToplevel):
             except Exception as exc:
                 messagebox.showerror("Erro", f"Nao foi possivel salvar a configuracao: {exc}", parent=dialogo)
 
-        ctk.CTkButton(dialogo, text="SALVAR", fg_color="green", width=150, command=salvar).pack(side="left", padx=20, pady=16)
-        ctk.CTkButton(dialogo, text="FECHAR", fg_color="#7f8c8d", width=150, command=dialogo.destroy).pack(side="right", padx=20, pady=16)
+        ctk.CTkButton(dialogo, text=t("ui_salvar_1"), fg_color="green", width=150, command=salvar).pack(side="left", padx=20, pady=16)
+        ctk.CTkButton(dialogo, text=t("ui_fechar"), fg_color="#7f8c8d", width=150, command=dialogo.destroy).pack(side="right", padx=20, pady=16)
 
         dialogo.wait_window()
         senha = simpledialog.askstring("Autorizacao Admin", "Senha ADMIN:", show="*", parent=self)
@@ -289,10 +289,10 @@ class FrmFinanceiro(ctk.CTkToplevel):
 
         f = ctk.CTkFrame(dialogo, fg_color="#161b22")
         f.pack()
-        ctk.CTkButton(f, text="DINHEIRO", fg_color="#1a6b30", hover_color="#27ae60", width=200, command=lambda: escolher("DINHEIRO")).pack(pady=5)
-        ctk.CTkButton(f, text="PIX", fg_color="#1a4b6b", hover_color="#2980b9", width=200, command=lambda: escolher("PIX")).pack(pady=5)
-        ctk.CTkButton(f, text="CARTAO", fg_color="#4b1a6b", hover_color="#8e44ad", width=200, command=lambda: escolher("CARTAO")).pack(pady=5)
-        ctk.CTkButton(f, text="CANCELAR", fg_color="#7f8c8d", hover_color="#95a5a6", width=200, command=dialogo.destroy).pack(pady=(12, 0))
+        ctk.CTkButton(f, text=t("ui_dinheiro_1"), fg_color="#1a6b30", hover_color="#27ae60", width=200, command=lambda: escolher("DINHEIRO")).pack(pady=5)
+        ctk.CTkButton(f, text=t("ui_pix"), fg_color="#1a4b6b", hover_color="#2980b9", width=200, command=lambda: escolher("PIX")).pack(pady=5)
+        ctk.CTkButton(f, text=t("ui_cartao"), fg_color="#4b1a6b", hover_color="#8e44ad", width=200, command=lambda: escolher("CARTAO")).pack(pady=5)
+        ctk.CTkButton(f, text=t("ui_cancelar"), fg_color="#7f8c8d", hover_color="#95a5a6", width=200, command=dialogo.destroy).pack(pady=(12, 0))
 
         dialogo.wait_window()
         return resultado["metodo"]
