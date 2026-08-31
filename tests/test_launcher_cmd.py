@@ -17,9 +17,16 @@ launcher_script = os.path.join(base_tmp, "run_update_forcado.cmd")
 destino = r"C:\Windows\System32\cmd.exe"
 inno_log = os.path.join(base_tmp, "inno_test.log")
 launcher_err_log = os.path.join(base_tmp, "update_error.log")
-pid_txt = "999999"  # PID que nao existe
+restart_marker = os.path.join(base_tmp, "restart_marker.txt")
+restart_probe = os.path.join(base_tmp, "restart_probe.cmd")
+pid_txt = ""  # Sem processo-pai no teste: valida apenas instalação e reinício.
 nomes_processo_cmd = '"inexistente_teste.exe"'
-app_exec = ""
+app_exec = restart_probe
+
+if os.path.exists(restart_marker):
+    os.remove(restart_marker)
+with open(restart_probe, "w", encoding="utf-8") as fprobe:
+    fprobe.write(f'@echo reiniciado>"{restart_marker}"\n')
 
 args_txt = '/SP- /VERYSILENT /SUPPRESSMSGBOXES /NOCANCEL /NORESTART "/LOG=%s"' % inno_log
 
@@ -81,10 +88,11 @@ script_lines.extend(
     [
         f'start "" /wait "{destino}" /c exit 7'.rstrip(),
         'set "UPD_EXIT=%ERRORLEVEL%"',
-        'if not "%UPD_EXIT%"=="0" (',
-        '  echo [%date% %time%] Falha na execucao do instalador. exit=%UPD_EXIT%>>"%UPDATE_ERR_LOG%"',
+        'if "%UPD_EXIT%"=="0" (',
+        '  if not "%APP_EXEC%"=="" if exist "%APP_EXEC%" start "" "%APP_EXEC%"',
+        '  exit /b 0',
         ')',
-        'if not "%APP_EXEC%"=="" if exist "%APP_EXEC%" start "" "%APP_EXEC%"',
+        'echo [%date% %time%] Falha na execucao do instalador. exit=%UPD_EXIT%>>"%UPDATE_ERR_LOG%"',
         'exit /b %UPD_EXIT%',
     ]
 )
@@ -98,4 +106,9 @@ print("LAUNCHER_EXIT=", rc, "(esperado 7: start /wait repassa o exit do 'instala
 if os.path.exists(launcher_err_log):
     with open(launcher_err_log, encoding="utf-8", errors="replace") as fh:
         print("ERR_LOG:", fh.read().strip() or "(vazio)")
-print("TESTE_LAUNCHER_OK" if rc == 7 else "TESTE_LAUNCHER_FALHOU")
+reiniciou_apos_falha = os.path.exists(restart_marker)
+ok = rc == 7 and not reiniciou_apos_falha
+print("REINICIO_APOS_FALHA=", reiniciou_apos_falha, "(esperado False)")
+print("TESTE_LAUNCHER_OK" if ok else "TESTE_LAUNCHER_FALHOU")
+if __name__ == "__main__":
+    raise SystemExit(0 if ok else 1)

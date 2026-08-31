@@ -23,7 +23,7 @@ def listar_orcamentos_para_gestao() -> list[tuple[Any, ...]]:
             SELECT oa.id, COALESCE(c.id, ''), oa.cliente, oa.equipamento, oa.defeito, oa.valor_total,
                    oa.sinal, oa.saldo, oa.status, oa.data,
                    COALESCE(oa.itens_detalhes, ''),
-                   COALESCE(c.telefone_cliente_whatsapp, ''),
+                   COALESCE(oa.telefone_cliente_whatsapp, ''),
                    COALESCE(oa.dados_adicionais, '')
             FROM orcamentos_aguardo oa
             LEFT JOIN clientes c ON UPPER(TRIM(c.nome)) = UPPER(TRIM(oa.cliente))

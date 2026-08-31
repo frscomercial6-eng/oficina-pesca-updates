@@ -1530,13 +1530,42 @@ def _fechar_popup_atualizacao():
     _barra_update = None
 
 
+def _abrir_popup_progresso_update() -> None:
+    global _janela_update, _label_update, _barra_update
+    _fechar_popup_atualizacao()
+    _janela_update = ctk.CTkToplevel(janela_login)
+    _janela_update.title("Atualizando Oficina de Pesca")
+    _janela_update.geometry("440x180")
+    _janela_update.resizable(False, False)
+    _janela_update.transient(janela_login)
+    _janela_update.protocol("WM_DELETE_WINDOW", lambda: None)
+
+    ctk.CTkLabel(
+        _janela_update,
+        text="Instalando atualização",
+        font=("Arial", 18, "bold"),
+    ).pack(pady=(24, 12))
+    _label_update = ctk.CTkLabel(
+        _janela_update,
+        text="Preparando download...",
+        font=("Arial", 12),
+    )
+    _label_update.pack(padx=24, pady=(0, 10))
+    _barra_update = ctk.CTkProgressBar(_janela_update, width=360, mode="determinate")
+    _barra_update.set(0)
+    _barra_update.pack(padx=24, pady=(0, 20))
+    _janela_update.grab_set()
+    _janela_update.lift()
+
+
 def _avisar_atualizacao_unica(versao: str, novidades: str = ""):
     """Exibe UMA única mensagem de atualização por sessão.
 
-    Substitui o antigo popup com contagem regressiva (que abria janelas
-    duplicadas). Ao confirmar, o download é feito e o sistema é totalmente
-    encerrado ANTES de o instalador baixado ser executado: o launcher (.cmd)
-    aguarda este processo terminar e só então roda o instalador.
+    Fluxo do auto-update inteligente na inicialização:
+      1. Pop-up perguntando se o usuário deseja instalar agora (Sim/Não).
+      2. Se "Sim": avisa que o sistema será fechado e atualizado em seguida.
+      3. Baixa a atualização com janela de progresso visual, fecha o sistema,
+         instala e reabre automaticamente já na versão nova (via launcher .cmd).
     """
     global _popup_update_exibido, _update_versao_detectada, _update_novidades_detectadas
 
@@ -1549,15 +1578,20 @@ def _avisar_atualizacao_unica(versao: str, novidades: str = ""):
     _update_versao_detectada = str(versao or "").strip()
     _update_novidades_detectadas = str(novidades or "").strip()
 
-    resposta = messagebox.askokcancel(
-        "Atualização",
-        "Uma nova versão está disponível. O sistema será encerrado para aplicar a atualização.",
+    resposta = messagebox.askyesno(
+        "Atualização disponível",
+        "Há uma nova atualização disponível. Deseja instalar agora?",
         parent=janela_login,
     )
     if not resposta:
         # Usuário optou por atualizar depois: não insiste nesta sessão.
         return
 
+    messagebox.showinfo(
+        "Atualização",
+        "O sistema será fechado e atualizado em seguida.",
+        parent=janela_login,
+    )
     _executar_instalacao_update(confirmar_usuario=False)
 
 
@@ -1599,6 +1633,8 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
             _auto_update_disparada = False
             return
 
+            _abrir_popup_progresso_update()
+
     def _status(mensagem: str):
         try:
             label_versao.configure(
@@ -1613,12 +1649,21 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
 
     def _progresso(valor: float, mensagem: str = ""):
         texto = str(mensagem or "").strip() or "Baixando atualização..."
-        pct = float(valor or 0.0)
+        pct = max(0.0, min(float(valor or 0.0), 1.0))
+
+        def _atualizar_progresso():
+            _status(f"{texto} ({int(pct * 100)}%)" if 0 < pct < 1 else texto)
+            try:
+                if _janela_update and _janela_update.winfo_exists():
+                    if _label_update is not None:
+                        _label_update.configure(text=f"{texto} ({int(pct * 100)}%)")
+                    if _barra_update is not None:
+                        _barra_update.set(pct)
+            except Exception:
+                pass
+
         try:
-            janela_login.after(
-                0,
-                lambda: _status(f"{texto} ({int(pct * 100)}%)" if 0 < pct < 1 else texto),
-            )
+            janela_login.after(0, _atualizar_progresso)
         except Exception:
             pass
 
@@ -1645,6 +1690,7 @@ def _executar_instalacao_update(confirmar_usuario: bool = True):
                     fechar_sistema(janela_login)
             else:
                 _auto_update_disparada = False
+                _fechar_popup_atualizacao()
                 _status("")
                 msg_final = str(msg or "").strip()
                 if msg_final in {"Sistema atualizado", "Sem novas atualizações"}:

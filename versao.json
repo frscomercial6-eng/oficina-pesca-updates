@@ -1,11 +1,11 @@
 {
-  "versao": "1.0.56",
-  "novidades": "v1.0.56: Atualização de versão automática.",
-  "url_download": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.56/Oficina_Pesca_Instalador.exe",
-  "download_url": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.56/Oficina_Pesca_Instalador.exe",
+  "versao": "1.0.57",
+  "novidades": "v1.0.57: Atualização de versão automática.",
+  "url_download": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.57/Oficina_Pesca_Instalador.exe",
+  "download_url": "https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/download/v1.0.57/Oficina_Pesca_Instalador.exe",
   "force_update": false,
   "apk": {
-    "versao": "1.0.56",
+    "versao": "1.0.57",
     "canal": "nativo"
   }
 }

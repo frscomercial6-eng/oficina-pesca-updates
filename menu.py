@@ -2677,7 +2677,28 @@ class FrmMenu(ctk.CTk):
 
         # Inicializa Dashboard Modular
         self.modulos_usuario = self._obter_modulos_usuario()
-        self._criar_dashboard_modular()
+        try:
+            self._criar_dashboard_modular()
+        except Exception as exc_dashboard:
+            logger.exception("Falha ao montar o dashboard inicial: %s", exc_dashboard)
+            try:
+                if self.dashboard_content is not None and self.dashboard_content.winfo_exists():
+                    for _w in self.dashboard_content.winfo_children():
+                        _w.destroy()
+                    ctk.CTkLabel(
+                        self.dashboard_content,
+                        text=t("ui_dashboard"),
+                        font=("Arial", 28, "bold"),
+                        text_color="orange",
+                    ).pack(anchor="w", pady=(0, 10))
+                    ctk.CTkLabel(
+                        self.dashboard_content,
+                        text=t("ui_sem_pend_ncias", default="Sem pendências no momento."),
+                        font=("Arial", 12),
+                        text_color="#9ca3af",
+                    ).pack(anchor="w")
+            except Exception:
+                pass
         self._iniciar_auto_refresh_dashboard()
         self.after_idle(self._mostrar_menu_pronto)
 
@@ -3386,17 +3407,43 @@ class FrmMenu(ctk.CTk):
         else:
             mode = "COMPLETO"
 
-        oficina = self._obter_indicadores_oficina() if tem_oficina else {
-            "bancada": 0,
-            "receber": 0.0,
-            "pendentes": 0,
-            "finalizados": 0,
-            "aguardando_retirada": 0,
-            "rejeitados_abandono_itens": [],
-            "rejeitados_abandono_tem_aviso1": False,
-            "rejeitados_abandono_tem_aviso2": False,
-        }
-        pdv = self._obter_indicadores_pdv() if tem_pdv else {"volume_vendas": 0.0, "vendas_dia": 0.0, "estoque_es": "0/0"}
+        try:
+            oficina = self._obter_indicadores_oficina() if tem_oficina else {
+                "bancada": 0,
+                "receber": 0.0,
+                "pendentes": 0,
+                "finalizados": 0,
+                "aguardando_retirada": 0,
+                "rejeitados_abandono_itens": [],
+                "rejeitados_abandono_tem_aviso1": False,
+                "rejeitados_abandono_tem_aviso2": False,
+            }
+        except Exception as exc_indicadores:
+            logger.info("Dashboard: falha ao obter indicadores da oficina: %s", exc_indicadores)
+            oficina = {}
+        try:
+            pdv = self._obter_indicadores_pdv() if tem_pdv else {"volume_vendas": 0.0, "vendas_dia": 0.0, "estoque_es": "0/0"}
+        except Exception as exc_indicadores_pdv:
+            logger.info("Dashboard: falha ao obter indicadores do PDV: %s", exc_indicadores_pdv)
+            pdv = {}
+
+        # Fallback de segurança: se qualquer indicador falhar, o dashboard
+        # continua sendo montado (com zeros) em vez de ficar em branco.
+        if not isinstance(oficina, dict) or not oficina:
+            logger.info("Dashboard: indicadores da oficina indisponíveis; usando valores padrão.")
+            oficina = {
+                "bancada": 0,
+                "receber": 0.0,
+                "pendentes": 0,
+                "finalizados": 0,
+                "aguardando_retirada": 0,
+                "rejeitados_abandono_itens": [],
+                "rejeitados_abandono_tem_aviso1": False,
+                "rejeitados_abandono_tem_aviso2": False,
+            }
+        if not isinstance(pdv, dict) or not pdv:
+            logger.info("Dashboard: indicadores do PDV indisponíveis; usando valores padrão.")
+            pdv = {"volume_vendas": 0.0, "vendas_dia": 0.0, "estoque_es": "0/0"}
 
         if mode == "OFICINA":
             self._criar_linha_cards(
@@ -3648,7 +3695,8 @@ class FrmMenu(ctk.CTk):
                 (limite,),
             )
             aguardando_retirada = cursor.fetchall()
-        return orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada
+
+            return orcamentos, bancada, aguardando_retirada, aguardando_orcamento, aguardando_retirada
 
     def _exibir_popup_pendencias_login(self, orcamentos, bancada, status_finalizados):
         pop = ctk.CTkToplevel(self)

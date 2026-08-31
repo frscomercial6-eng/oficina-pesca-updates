@@ -514,7 +514,6 @@ class FrmPDV(ctk.CTkToplevel):
 
         linha_pagto = ctk.CTkFrame(painel_pagamento, fg_color="transparent")
         linha_pagto.grid(row=2, column=0, sticky="ew", pady=(8, 6))
-        linha_pagto.grid_columnconfigure(4, weight=1)
         ctk.CTkLabel(linha_pagto, text=t("col_valor"), text_color="#cbd5e1").grid(row=0, column=0, padx=(0, 6))
         self.ent_valor_pagamento = ctk.CTkEntry(
             linha_pagto,
@@ -542,62 +541,76 @@ class FrmPDV(ctk.CTkToplevel):
             command=self._limpar_venda,
         ).grid(row=0, column=3)
 
-        acoes_venda = ctk.CTkFrame(linha_pagto, fg_color="transparent")
-        acoes_venda.grid(row=0, column=4, padx=(12, 0), sticky="e")
+        acoes_venda = ctk.CTkFrame(painel_pagamento, fg_color="transparent")
+        acoes_venda.grid(row=3, column=0, sticky="ew", pady=(2, 4))
+        for coluna in range(3):
+            acoes_venda.grid_columnconfigure(coluna, weight=1, uniform="acoes_pdv")
 
         ctk.CTkButton(
             acoes_venda,
             text=t('btn_imprimir_cupom').upper(),
-            width=128,
-            height=34,
+            width=156,
+            height=32,
+            font=("Arial", 11, "bold"),
+            anchor="center",
             fg_color="#0ea5e9",
             command=self._imprimir_nao_fiscal_da_tela,
-        ).grid(row=0, column=0, padx=(0, 6))
+        ).grid(row=0, column=0, padx=(0, 4), pady=(0, 4), sticky="ew")
 
         ctk.CTkButton(
             acoes_venda,
             text=t('btn_emitir_nota').upper(),
-            width=108,
-            height=34,
+            width=156,
+            height=32,
+            font=("Arial", 11, "bold"),
+            anchor="center",
             fg_color="#f59e0b",
             command=self._gerar_xml_fiscal_da_tela,
-        ).grid(row=0, column=1, padx=6)
+        ).grid(row=0, column=1, padx=4, pady=(0, 4), sticky="ew")
 
         ctk.CTkButton(
             acoes_venda,
             text=t('btn_consultar').upper(),
-            width=104,
-            height=34,
+            width=156,
+            height=32,
+            font=("Arial", 11, "bold"),
+            anchor="center",
             fg_color="#2563eb",
             command=self._consultar_nota_fiscal_da_tela,
-        ).grid(row=0, column=2, padx=6)
+        ).grid(row=0, column=2, padx=(4, 0), pady=(0, 4), sticky="ew")
 
         ctk.CTkButton(
             acoes_venda,
             text=t('btn_imprimir_danfe_pdv').upper(),
-            width=138,
-            height=34,
+            width=156,
+            height=32,
+            font=("Arial", 11, "bold"),
+            anchor="center",
             fg_color="#7c3aed",
             command=self._imprimir_danfe_fiscal_da_tela,
-        ).grid(row=0, column=3, padx=6)
+        ).grid(row=1, column=0, padx=(0, 4), sticky="ew")
 
         ctk.CTkButton(
             acoes_venda,
             text=t('btn_gerar_pdf').upper(),
-            width=108,
-            height=34,
+            width=156,
+            height=32,
+            font=("Arial", 11, "bold"),
+            anchor="center",
             fg_color="#64748b",
             command=self._gerar_pdf_da_tela,
-        ).grid(row=0, column=4, padx=6)
+        ).grid(row=1, column=1, padx=4, sticky="ew")
 
         ctk.CTkButton(
             acoes_venda,
             text=t("ui_fechamento_de_caixa"),
-            width=168,
-            height=34,
+            width=156,
+            height=32,
+            font=("Arial", 11, "bold"),
+            anchor="center",
             fg_color="#16a34a",
             command=self._fechamento_de_caixa,
-        ).grid(row=0, column=5, padx=(6, 0))
+        ).grid(row=1, column=2, padx=(4, 0), sticky="ew")
 
         self.tree_pagamentos = ttk.Treeview(
             painel_pagamento,
@@ -610,7 +623,7 @@ class FrmPDV(ctk.CTkToplevel):
         self.tree_pagamentos.heading("valor", text=t("col_valor"))
         self.tree_pagamentos.column("metodo", width=170, anchor="w")
         self.tree_pagamentos.column("valor", width=130, anchor="e")
-        self.tree_pagamentos.grid(row=3, column=0, sticky="ew")
+        self.tree_pagamentos.grid(row=4, column=0, sticky="ew")
 
         painel_resumo = ctk.CTkFrame(rodape, fg_color="#111827", corner_radius=8)
         painel_resumo.grid(row=0, column=1, sticky="nsew", padx=(8, 10), pady=10)
