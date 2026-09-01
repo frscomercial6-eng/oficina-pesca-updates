@@ -25,27 +25,17 @@ class MainActivity : AppCompatActivity() {
         val emailValidado = getSharedPreferences(IdentificacaoActivity.PREFS_NAME, MODE_PRIVATE)
             .getString(IdentificacaoActivity.KEY_EMAIL_VALIDADO, null)
 
-        if (emailValidado.isNullOrBlank()) {
-            Log.i(TAG, "Nenhuma licença validada neste dispositivo. Exibindo tela de identificação.")
-            startActivity(
-                Intent(this, IdentificacaoActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                    intent.getStringExtra(IdentificacaoActivity.EXTRA_EMAIL_DESKTOP)?.let { emailDesktop ->
-                        putExtra(IdentificacaoActivity.EXTRA_EMAIL_DESKTOP, emailDesktop)
-                    }
-                }
-            )
-            finish()
-            return
-        }
-
-        StartupConnectionState.setConnecting()
+        Log.i(TAG, "Revalidando licença móvel antes de abrir telas operacionais.")
         startActivity(
-            Intent(this, SistemaPrincipalActivity::class.java).apply {
+            Intent(this, IdentificacaoActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                intent.getStringExtra(IdentificacaoActivity.EXTRA_EMAIL_DESKTOP)?.let { emailDesktop ->
+                    putExtra(IdentificacaoActivity.EXTRA_EMAIL_DESKTOP, emailDesktop)
+                } ?: emailValidado?.let { emailSalvo ->
+                    putExtra(IdentificacaoActivity.EXTRA_EMAIL_DESKTOP, emailSalvo)
+                }
             }
         )
-        FirebaseStartupCoordinator.start(applicationContext)
         finish()
     }
 }

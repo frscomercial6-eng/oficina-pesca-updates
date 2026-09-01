@@ -193,6 +193,11 @@ try:
 except Exception:
     load_dotenv = None
 
+try:
+    from supabase import create_client as supabase_create_client
+except Exception:
+    supabase_create_client = None
+
 # Carrega variÃ¡veis de ambiente locais (desenvolvimento/build) sem quebrar em produÃ§Ã£o.
 try:
     if load_dotenv:
@@ -377,6 +382,29 @@ INFINITEPAY_API_CHECKOUT_URL = _CFG.get(
 ).strip()
 INFINITEPAY_API_TOKEN = _CFG.get('pagamento', 'infinitepay_api_token', fallback='').strip()
 INFINITEPAY_HANDLE = _CFG.get('pagamento', 'infinitepay_handle', fallback='frsoficinadepesca').strip()
+
+
+def _obter_cfg_supabase() -> tuple[str, str]:
+    cfg = _ler_cfg()
+    url = (
+        os.environ.get("SUPABASE_URL", "").strip()
+        or os.environ.get("OFP_SUPABASE_URL", "").strip()
+        or cfg.get("supabase", "url", fallback="").strip()
+        or cfg.get("supabase", "supabase_url", fallback="").strip()
+    )
+    key = (
+        os.environ.get("SUPABASE_KEY", "").strip()
+        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        or os.environ.get("OFP_SUPABASE_KEY", "").strip()
+        or cfg.get("supabase", "key", fallback="").strip()
+        or cfg.get("supabase", "supabase_key", fallback="").strip()
+    )
+    return url, key
+
+
+def supabase_licencas_configurado() -> bool:
+    url, key = _obter_cfg_supabase()
+    return bool(url and key and supabase_create_client is not None)
 
 # Chave mestre de IA/sincronizacao (uso interno, sem exposicao na UI).
 # Prioriza OFP_GOOGLE_AI_MASTER_KEY; mantem fallbacks para compatibilidade.
@@ -4111,6 +4139,56 @@ def publicar_licenca_drive(chave: str) -> tuple[bool, str]:
         return False, f"Falha ao publicar licença no Drive: {e}"
 
 
+def publicar_licenca_supabase(
+    chave: str,
+    email: str = "",
+    cliente: str = "",
+    tipo: str = "",
+    plano: str = "",
+) -> tuple[bool, str]:
+    chave_limpa = _normalizar_texto_chave_licenca(chave)
+    if not chave_limpa:
+        return False, "Chave de licença vazia."
+
+    valida, msg, payload = validar_chave_licenca(chave_limpa)
+    if not valida:
+        return False, msg
+
+    email_norm = str(email or obter_user_id_token_padrao() or "").strip().lower()
+    if not validar_email_basico(email_norm):
+        return False, "E-mail válido não encontrado para sincronizar licença no Supabase."
+
+    url, key = _obter_cfg_supabase()
+    if not url or not key:
+        return False, "SUPABASE_URL/SUPABASE_KEY não configurados."
+    if supabase_create_client is None:
+        return False, "Pacote supabase não instalado no ambiente."
+
+    validade = str((payload or {}).get("val") or "PERMANENTE").strip()
+    tipo_final = _normalizar_tipo_licenca(tipo or str((payload or {}).get("tipo") or ""), validade)
+    plano_final = str(plano or tipo_final or "").strip().upper()
+    cliente_final = str(cliente or email_norm).strip()
+    hw = _normalizar_hw_para_assinatura(str((payload or {}).get("hw") or ""))
+
+    row = {
+        "chave": chave_limpa,
+        "data_expiracao": validade,
+        "chave_instalacao": hw,
+        "data_geracao": datetime.now().isoformat(timespec="seconds"),
+        "email": email_norm,
+        "cliente": cliente_final,
+        "tipo": tipo_final,
+        "plano": plano_final,
+    }
+
+    try:
+        client = supabase_create_client(url, key)
+        client.table("licencas_geradas").insert(row).execute()
+        return True, f"Licença sincronizada no Supabase para {email_norm}."
+    except Exception as e:
+        return False, f"Falha ao sincronizar licença no Supabase: {e}"
+
+
 def obter_chave_licenca_drive() -> tuple[bool, str, str]:
     creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
     if not creds:
@@ -4257,6 +4335,28 @@ def ativar_licenca(chave: str):
             f.write(chave_limpa)
     except Exception as exc:
         return False, f"Licença validada, mas falhou ao gravar arquivo licenca.key: {exc}"
+
+    try:
+        ok_supabase, msg_supabase = publicar_licenca_supabase(
+            chave_limpa,
+            email=obter_user_id_token_padrao(),
+            cliente=cliente,
+            tipo=tipo,
+            plano=tipo,
+        )
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_supabase_sync', ?)",
+                ("1" if ok_supabase else "0",),
+            )
+            cursor.execute(
+                "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_supabase_sync_msg', ?)",
+                (msg_supabase,),
+            )
+            conn.commit()
+    except Exception:
+        pass
 
     return True, "Licenca ativada com sucesso."
 

@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Oficina Pesca</string>
+    <string name="identificacao_subtitulo">Informe o e-mail cadastrado no sistema Desktop para liberar o aplicativo.</string>
+    <string name="identificacao_email_hint">seu-email@exemplo.com</string>
+    <string name="identificacao_entrar">ENTRAR</string>
+    <string name="identificacao_email_invalido">Informe um e-mail válido.</string>
+    <string name="identificacao_falha_conexao">Falha de conexão. Verifique a internet e tente novamente.</string>
+    <string name="identificacao_falha_conexao_detalhada">Falha de conexão ou endpoint indisponível.\n\nDiagnóstico:\n%1$s</string>
+    <string name="identificacao_trial_bloqueado">O uso da versão trial não é permitido no aplicativo móvel. Para acessar o app, escolha um plano e ative sua licença.</string>
+    <string name="identificacao_licenca_inativa">Licença não encontrada, expirada ou não liberada para o aplicativo móvel.</string>
+    <string name="identificacao_planos_validos">Planos disponíveis: Mensal, Trimestral, Semestral e Anual.</string>
+    <string name="identificacao_comprar_ativar">Comprar ou ativar licença</string>
+    <string name="identificacao_falha_abrir_planos">Não foi possível abrir o navegador automaticamente. Tente novamente ou acesse o site oficial de planos.</string>
 </resources>

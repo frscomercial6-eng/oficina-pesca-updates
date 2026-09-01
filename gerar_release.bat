@@ -14,8 +14,8 @@ set "ISCC_EXE=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 set "APP_NAME=Oficina_Pesca"
 set "DIST_DIR=dist\%APP_NAME%"
 set "STAGE_DIR=INSTALADOR_FINAL\%APP_NAME%"
-set "SETUP_NAME=Setup_OficinaPesca_v1.0.59.exe"
-set "APK_FIXED=apk_celular_distribuicao\oficina_app_signed.apk"
+set "SETUP_NAME=Setup_OficinaPesca_v1.0.60.exe"
+set "APK_FIXED=apk_celular_distribuicao\oficina_pesca_v1.0.60.apk"
 set "APK_DEBUG=apk_celular_distribuicao\app-debug.apk"
 
 echo ============================================
@@ -173,7 +173,7 @@ echo [6/9] Build PyInstaller ^(sem usar .spec legado^)...
     --hidden-import googleapiclient ^
     --hidden-import googleapiclient.discovery ^
     --hidden-import googleapiclient.http ^
-    --add-data "apk_celular_distribuicao\oficina_app_signed.apk;apk_celular_distribuicao" ^
+    --add-data "apk_celular_distribuicao\oficina_pesca_v1.0.60.apk;apk_celular_distribuicao" ^
     --add-data "apk_celular_distribuicao\instrucoes_instalacao.txt;apk_celular_distribuicao" ^
     --add-data "Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf;." ^
     !PYI_OPTIONAL! ^
@@ -194,7 +194,7 @@ if exist "config.json" (
 ) else (
     echo [AVISO] config.json nao encontrado na raiz; usando fallback de modulos no executavel.
 )
-if not exist "%DIST_DIR%\_internal\apk_celular_distribuicao\oficina_app_signed.apk" (
+if not exist "%DIST_DIR%\_internal\apk_celular_distribuicao\oficina_pesca_v1.0.60.apk" (
     echo [ERRO] APK nao foi embutido no _internal.
     exit /b 1
 )

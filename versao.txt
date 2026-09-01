@@ -1,2 +1,2 @@
-versao=1.0.59
-novidades=v1.0.59: Ajuste na coluna Finalizados do painel de pendências.
+versao=1.0.60
+novidades=v1.0.60: APK limpo versionado e sincronização de licenças por e-mail com Supabase.

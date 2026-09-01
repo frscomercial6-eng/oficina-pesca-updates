@@ -53,6 +53,40 @@ def resolverPainelInternoUrl = {
     ).toString()
 }
 def enforcedMobilePublicUrl = resolverPainelInternoUrl()
+def resolverLicenseApiBaseUrl = {
+    def fallback = 'https://oficina-pesca-updates2.onrender.com'
+    def raw = (System.getenv('OFP_LICENSE_API_BASE_URL') ?: cfgValue('servidor_url', fallback)).trim()
+    if (!raw) {
+        return fallback
+    }
+
+    def parsed
+    try {
+        parsed = new URI(raw)
+    } catch (Exception ignored) {
+        return fallback
+    }
+
+    def scheme = (parsed.scheme ?: '').toLowerCase()
+    def host = (parsed.host ?: '').toLowerCase()
+    if (scheme != 'https' || !host) {
+        return fallback
+    }
+    if (host == 'localhost' || host == '0.0.0.0' || host == '127.0.0.1' || host.startsWith('127.')) {
+        return fallback
+    }
+    if (host.startsWith('10.') || host.startsWith('192.168.')) {
+        return fallback
+    }
+    if (host ==~ /^172\.(1[6-9]|2[0-9]|3[0-1])\..*/) {
+        return fallback
+    }
+
+    return new URI('https', parsed.userInfo, host, parsed.port, parsed.path ?: '', parsed.query, parsed.fragment)
+        .toString()
+        .replaceAll('/+$', '')
+}
+def enforcedLicenseApiBaseUrl = resolverLicenseApiBaseUrl()
 
 android {
     namespace 'com.oficinapesca.mobile'
@@ -77,7 +111,7 @@ android {
         buildConfigField "String", "FIREBASE_SYNC_CHANNEL", "\"${System.getenv('OFP_FIREBASE_SYNC_CHANNEL') ?: 'global'}\""
         buildConfigField "String", "FIREBASE_AUTH_PATH", "\"${System.getenv('OFP_FIREBASE_AUTH_PATH') ?: 'mobile_auth'}\""
         buildConfigField "String", "MOBILE_PUBLIC_URL", "\"${enforcedMobilePublicUrl}\""
-        buildConfigField "String", "LICENSE_API_BASE_URL", "\"${cfgValue('servidor_url', 'https://oficina-pesca-updates2.onrender.com').trim().replaceAll('/+$', '')}\""
+        buildConfigField "String", "LICENSE_API_BASE_URL", "\"${enforcedLicenseApiBaseUrl}\""
         buildConfigField "String", "PLANO_LINK_PROMO", "\"${cfgValue('infinitepay_link_promo_lancamento', 'https://checkout.infinitepay.io/frsoficinadepesca/7O04uAqkj')}\""
         buildConfigField "String", "PLANO_LINK_MENSAL", "\"${cfgValue('infinitepay_link_mensal', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/7n8vLUjOnD')}\""
         buildConfigField "String", "PLANO_LINK_TRIMESTRAL", "\"${cfgValue('infinitepay_link_trimestral', 'https://invoice.infinitepay.io/plans/frsoficinadepesca/2arDagkoGn')}\""
@@ -91,6 +125,7 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.debug
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
         debug {

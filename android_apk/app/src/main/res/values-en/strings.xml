@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Oficina Pesca</string>
+    <string name="identificacao_subtitulo">Enter the email registered in the Desktop system to unlock the mobile app.</string>
+    <string name="identificacao_email_hint">your-email@example.com</string>
+    <string name="identificacao_entrar">SIGN IN</string>
+    <string name="identificacao_email_invalido">Enter a valid email address.</string>
+    <string name="identificacao_falha_conexao">Connection failed. Check your internet connection and try again.</string>
+    <string name="identificacao_falha_conexao_detalhada">Connection failed or endpoint unavailable.\n\nDiagnostic:\n%1$s</string>
+    <string name="identificacao_trial_bloqueado">Trial access is not allowed in the mobile app. To use the app, choose a plan and activate your license.</string>
+    <string name="identificacao_licenca_inativa">License not found, expired, or not enabled for the mobile app.</string>
+    <string name="identificacao_planos_validos">Available plans: Monthly, Quarterly, Semiannual, and Annual.</string>
+    <string name="identificacao_comprar_ativar">Buy or activate license</string>
+    <string name="identificacao_falha_abrir_planos">The browser could not be opened automatically. Try again or visit the official plans website.</string>
+</resources>

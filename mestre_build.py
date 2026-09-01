@@ -12,7 +12,7 @@ import time
 import zipfile
 
 DIV = "═" * 50
-VERSAO = "1.0.59"
+VERSAO = "1.0.60"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -27,7 +27,7 @@ ANDROID_PROJECT_DIR = "android_apk"
 ANDROID_APK_DIST_DIR = os.path.join("dist", "apk_celular")
 ANDROID_APK_PACKAGE_DIR = os.path.join(DISTRIBUTION_DIR, "apk_celular")
 ANDROID_APK_LEGACY_DIR = "apk_celular_distribuicao"
-ANDROID_APK_NAME = "Oficina_Pesca_Nativo.apk"
+ANDROID_APK_NAME = "oficina_pesca.apk"
 ANDROID_APK_INSTALLER_NAME = "oficina_app_signed.apk"
 AUTO_MODE = "--auto" in sys.argv or os.environ.get("OFP_BUILD_AUTO") == "1"
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -267,7 +267,7 @@ def _sincronizar_manifests(nova_versao: str) -> None:
     with open("versao.txt", "w", encoding="utf-8") as _f:
         _f.write(
             f"versao={nova_versao}\n"
-            f"novidades=v{nova_versao}: Ajuste na coluna Finalizados do painel de pendências.\n"
+            f"novidades=v{nova_versao}: APK limpo versionado e sincronização de licenças por e-mail com Supabase.\n"
         )
     _cfg = configparser.ConfigParser()
     if os.path.exists("config.cfg"):
@@ -344,6 +344,7 @@ def _atualizar_eula(nova_versao: str) -> None:
 
 
 def _atualizar_scripts_instalador(nova_versao: str) -> None:
+    apk_final = _nome_apk_final(nova_versao)
     iss_files = [
         "instalar.iss",
         "instalar_oficial_completo.iss",
@@ -370,6 +371,11 @@ def _atualizar_scripts_instalador(nova_versao: str) -> None:
                 f'OutputBaseFilename=Instalador_Oficina_Pesca_Oficial_v{nova_versao}',
                 novo,
             )
+        novo = re.sub(
+            r'apk_celular_distribuicao\\(?:oficina_app_signed|Oficina_Pesca_Nativo(?:_v[0-9]+(?:\.[0-9]+){2,})?)\.apk',
+            lambda _m: f'apk_celular_distribuicao\\{apk_final}',
+            novo,
+        )
         if novo != txt:
             _write_text(path, novo, enc)
             print(f"✅ Script de instalador atualizado: {path}")
@@ -399,6 +405,16 @@ def _atualizar_scripts_instalador(nova_versao: str) -> None:
         novo = re.sub(
             r'(?im)^\s*set\s+"FINAL_SETUP=Setup_OficinaPesca_v[0-9]+(?:\.[0-9]+){2,}_FINAL\.exe"\s*$',
             f'set "FINAL_SETUP=Setup_OficinaPesca_v{nova_versao}_FINAL.exe"',
+            novo,
+        )
+        novo = re.sub(
+            r'(?im)^\s*set\s+"APK_FIXED=apk_celular_distribuicao\\.*\.apk"\s*$',
+            lambda _m: f'set "APK_FIXED=apk_celular_distribuicao\\{apk_final}"',
+            novo,
+        )
+        novo = re.sub(
+            r'apk_celular_distribuicao\\(?:oficina_app_signed|Oficina_Pesca_Nativo(?:_v[0-9]+(?:\.[0-9]+){2,})?)\.apk',
+            lambda _m: f'apk_celular_distribuicao\\{apk_final}',
             novo,
         )
         if novo != txt:
@@ -433,6 +449,11 @@ def _resolver_comando_gradle() -> list[str]:
     raise FileNotFoundError(
         "Gradle não encontrado. Gere o wrapper em android_apk/ ou instale gradle no PATH."
     )
+
+
+def _nome_apk_final(versao: str) -> str:
+    versao_limpa = re.sub(r"[^0-9A-Za-z._-]", "_", str(versao or VERSAO).strip() or VERSAO)
+    return f"oficina_pesca_v{versao_limpa}.apk"
 
 
 def _gerar_wrapper_gradle_android() -> str:
@@ -478,6 +499,7 @@ def _resolver_caminho_apk_compat(caminho_apk: str) -> str:
         nomes_candidatos.append(base_sem_ext + ".apk")
     if versao:
         nomes_candidatos.extend([
+            f"oficina_pesca_v{versao}.apk",
             f"Oficina_Pesca_Nativo_v{versao}.apk",
             f"Oficina_Pesca_WebView_v{versao}.apk",
             f"Oficina_Pesca_Nativo.apk",
@@ -485,6 +507,7 @@ def _resolver_caminho_apk_compat(caminho_apk: str) -> str:
         ])
     else:
         nomes_candidatos.extend([
+            "oficina_pesca.apk",
             "Oficina_Pesca_Nativo.apk",
             "Oficina_Pesca_WebView.apk",
         ])
@@ -607,24 +630,45 @@ def _limpar_apks_em_pasta(destino_dir: str) -> None:
 
 
 def _build_apk_android(versao: str) -> tuple[str, str]:
-    print("📱 Usando APK Nativo pré-compilado já presente no repositório...")
+    print("📱 Compilando APK Android limpo via Gradle release...")
+    origem_apk = ""
+    if os.path.isdir(ANDROID_PROJECT_DIR):
+        gradle_cmd = _resolver_comando_gradle()
+        env = os.environ.copy()
+        env["OFP_APK_VERSION"] = str(versao or VERSAO).strip() or VERSAO
 
-    candidatos_origem = [
-        os.path.join(ANDROID_PROJECT_DIR, "build", "outputs", "apk", "debug", "app-debug.apk"),
-        os.path.join(ANDROID_PROJECT_DIR, "app", "build", "outputs", "apk", "debug", "app-debug.apk"),
-        os.path.join(ANDROID_PROJECT_DIR, "app", "build", "outputs", "apk", "release", "app-release.apk"),
-        os.path.join(ANDROID_PROJECT_DIR, "app", "build", "outputs", "apk", "debug", "app-debug-unaligned.apk"),
-        os.path.join("dist", "apk_celular", f"Oficina_Pesca_Nativo_v{versao}.apk"),
-        os.path.join("dist", "apk_celular", "Oficina_Pesca_Nativo.apk"),
-        os.path.join("apk_celular_distribuicao", "Oficina_Pesca_Nativo.apk"),
-        os.path.join("apk_celular_distribuicao", f"Oficina_Pesca_Nativo_v{versao}.apk"),
-        os.path.join("apk_celular_distribuicao", "oficina_app_signed.apk"),
-        os.path.join(DISTRIBUTION_DIR, "apk_celular", "Oficina_Pesca_Nativo.apk"),
-    ]
+        try:
+            subprocess.run([*gradle_cmd, "--stop"], cwd=ANDROID_PROJECT_DIR, check=False, env=env)
+        except Exception:
+            pass
 
-    origem_apk = next((c for c in candidatos_origem if os.path.exists(c)), "")
+        for rel_cache in [os.path.join("app", "build", "kotlin"), os.path.join(".gradle", "kotlin")]:
+            cache_path = os.path.join(ANDROID_PROJECT_DIR, rel_cache)
+            if os.path.exists(cache_path):
+                shutil.rmtree(cache_path, ignore_errors=True)
+
+        subprocess.run(
+            [*gradle_cmd, "clean", "assembleRelease", "--no-daemon", "--stacktrace"],
+            cwd=ANDROID_PROJECT_DIR,
+            check=True,
+            env=env,
+        )
+
+        origem_apk = os.path.join(ANDROID_PROJECT_DIR, "app", "build", "outputs", "apk", "release", "app-release.apk")
+        if not os.path.exists(origem_apk):
+            origem_apk = os.path.join(ANDROID_PROJECT_DIR, "app", "build", "outputs", "apk", "release", "app-release-unsigned.apk")
+
+    if not origem_apk or not os.path.exists(origem_apk):
+        candidatos_origem = [
+            os.path.join("apk_celular_distribuicao", _nome_apk_final(versao)),
+            os.path.join("apk_celular_distribuicao", "Oficina_Pesca_Nativo.apk"),
+            os.path.join("apk_celular_distribuicao", "oficina_app_signed.apk"),
+            os.path.join("dist", "apk_celular", _nome_apk_final(versao)),
+            os.path.join(DISTRIBUTION_DIR, "apk_celular", _nome_apk_final(versao)),
+        ]
+        origem_apk = next((c for c in candidatos_origem if os.path.exists(c)), "")
     if not origem_apk:
-        raise FileNotFoundError("Falha ao localizar APK pré-compilado para distribuição")
+        raise FileNotFoundError("Falha ao localizar APK release gerado pelo Gradle")
 
     _validar_apk_gerado(origem_apk)
 
@@ -638,33 +682,25 @@ def _build_apk_android(versao: str) -> tuple[str, str]:
     _limpar_apks_em_pasta(ANDROID_APK_PACKAGE_DIR)
     _limpar_pasta_apk_legada()
 
-    nome_versionado = f"Oficina_Pesca_Nativo_v{versao}.apk"
-    destino_dist = os.path.join(ANDROID_APK_DIST_DIR, nome_versionado)
-    destino_pacote = os.path.join(ANDROID_APK_PACKAGE_DIR, ANDROID_APK_NAME)
-    destino_legacy = os.path.join(ANDROID_APK_LEGACY_DIR, ANDROID_APK_INSTALLER_NAME)
-    destino_legacy_nome_fixo = os.path.join(ANDROID_APK_LEGACY_DIR, ANDROID_APK_NAME)
-    destino_legacy_versionado = os.path.join(ANDROID_APK_LEGACY_DIR, nome_versionado)
+    nome_final = _nome_apk_final(versao)
+    destino_dist = os.path.join(ANDROID_APK_DIST_DIR, nome_final)
+    destino_pacote = os.path.join(ANDROID_APK_PACKAGE_DIR, nome_final)
+    destino_legacy = os.path.join(ANDROID_APK_LEGACY_DIR, nome_final)
 
     shutil.copy2(staging_apk, destino_dist)
     _validar_apk_gerado(destino_dist)
-    if not os.path.basename(destino_dist).endswith(f"v{versao}.apk"):
+    if os.path.basename(destino_dist) != nome_final:
         raise RuntimeError("APK versionado inválido para distribuição.")
 
     shutil.copy2(destino_dist, destino_pacote)
     shutil.copy2(destino_dist, destino_legacy)
-    shutil.copy2(destino_dist, destino_legacy_nome_fixo)
-    shutil.copy2(destino_dist, destino_legacy_versionado)
 
     _validar_apk_gerado(destino_pacote)
     _validar_apk_gerado(destino_legacy)
-    _validar_apk_gerado(destino_legacy_nome_fixo)
-    _validar_apk_gerado(destino_legacy_versionado)
 
     print(f"📦 APK Nativo copiado para dist: {destino_dist}")
     print(f"📤 APK Nativo copiado para distribuição: {destino_pacote}")
     print(f"📤 APK Nativo copiado para pasta legada do instalador: {destino_legacy}")
-    print(f"📤 APK Nativo copiado para {ANDROID_APK_LEGACY_DIR}: {destino_legacy_nome_fixo}")
-    print(f"📤 APK Nativo versionado copiado para {ANDROID_APK_LEGACY_DIR}: {destino_legacy_versionado}")
     return destino_dist, destino_pacote
 
 
@@ -1308,7 +1344,7 @@ def _copiar_artefatos_para_instalador_final(instalador: str, bootstrapper_bundle
 def _validar_pacote_distribuicao(instalador_destino: str, bootstrapper_destino: str) -> None:
     faltando: list[str] = []
     zip_portatil = os.path.join(DISTRIBUTION_DIR, PORTABLE_ZIP_NAME)
-    apk_distribuicao = os.path.join(ANDROID_APK_PACKAGE_DIR, ANDROID_APK_NAME)
+    apk_distribuicao = os.path.join(ANDROID_APK_PACKAGE_DIR, _nome_apk_final(VERSAO))
     for caminho in [instalador_destino, bootstrapper_destino, zip_portatil, apk_distribuicao]:
         if not os.path.exists(caminho):
             faltando.append(caminho)

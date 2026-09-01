@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
 import android.util.Log
@@ -23,6 +24,7 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.Locale
 
 /**
  * Tela de identificação exibida na primeira abertura do APK: pede o e-mail
@@ -30,6 +32,11 @@ import java.net.URLEncoder
  * Render antes de liberar a tela principal (WebView).
  */
 class IdentificacaoActivity : AppCompatActivity() {
+
+    private data class ResultadoLicenca(
+        val payload: JSONObject?,
+        val diagnostico: String = "",
+    )
 
     companion object {
         private const val TAG = "OficinaPesca"
@@ -40,6 +47,8 @@ class IdentificacaoActivity : AppCompatActivity() {
 
     private lateinit var campoEmail: EditText
     private lateinit var botaoEntrar: Button
+    private lateinit var botaoPlanos: Button
+    private lateinit var textoPlanos: TextView
     private lateinit var textoMensagem: TextView
     private lateinit var progresso: ProgressBar
 
@@ -69,14 +78,14 @@ class IdentificacaoActivity : AppCompatActivity() {
         }
 
         val subtitulo = TextView(this).apply {
-            text = "Informe o e-mail cadastrado no sistema Desktop para liberar o aplicativo."
+            text = getString(R.string.identificacao_subtitulo)
             setTextColor(Color.parseColor("#B8C0CC"))
             textSize = 15f
             setPadding(0, 24, 0, 32)
         }
 
         campoEmail = EditText(this).apply {
-            hint = "seu-email@exemplo.com"
+            hint = getString(R.string.identificacao_email_hint)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
             setTextColor(Color.WHITE)
             setHintTextColor(Color.parseColor("#7A8699"))
@@ -96,15 +105,32 @@ class IdentificacaoActivity : AppCompatActivity() {
             visibility = View.GONE
         }
 
+        textoPlanos = TextView(this).apply {
+            text = getString(R.string.identificacao_planos_validos)
+            setTextColor(Color.parseColor("#B8C0CC"))
+            textSize = 13f
+            setPadding(0, 18, 0, 0)
+            visibility = View.GONE
+        }
+
+        botaoPlanos = Button(this).apply {
+            text = getString(R.string.identificacao_comprar_ativar)
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#2563EB"))
+            setPadding(0, 24, 0, 24)
+            visibility = View.GONE
+            setOnClickListener { abrirPlanosNoNavegador() }
+        }
+
         botaoEntrar = Button(this).apply {
-            text = "ENTRAR"
+            text = getString(R.string.identificacao_entrar)
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.parseColor("#27AE60"))
             setPadding(0, 28, 0, 28)
             setOnClickListener {
                 val email = campoEmail.text.toString().trim()
                 if (!Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
-                    exibirMensagem("Informe um e-mail válido.")
+                    exibirMensagem(getString(R.string.identificacao_email_invalido), mostrarPlanos = false)
                     return@setOnClickListener
                 }
                 validarEmail(email)
@@ -122,6 +148,13 @@ class IdentificacaoActivity : AppCompatActivity() {
         root.addView(subtitulo)
         root.addView(campoEmail)
         root.addView(textoMensagem)
+        root.addView(textoPlanos)
+        root.addView(
+            botaoPlanos,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = 18
+            },
+        )
         root.addView(
             botaoEntrar,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
@@ -133,9 +166,11 @@ class IdentificacaoActivity : AppCompatActivity() {
         setContentView(ScrollView(this).apply { addView(root) })
     }
 
-    private fun exibirMensagem(mensagem: String) {
+    private fun exibirMensagem(mensagem: String, mostrarPlanos: Boolean = true) {
         textoMensagem.text = mensagem
         textoMensagem.visibility = View.VISIBLE
+        textoPlanos.visibility = if (mostrarPlanos) View.VISIBLE else View.GONE
+        botaoPlanos.visibility = if (mostrarPlanos) View.VISIBLE else View.GONE
     }
 
     private fun definirCarregando(carregando: Boolean) {
@@ -146,49 +181,112 @@ class IdentificacaoActivity : AppCompatActivity() {
     private fun validarEmail(email: String) {
         definirCarregando(true)
         textoMensagem.visibility = View.GONE
+        textoPlanos.visibility = View.GONE
+        botaoPlanos.visibility = View.GONE
 
         Thread {
             val resultado = consultarStatusLicencaPorEmail(email)
             runOnUiThread {
                 definirCarregando(false)
-                if (resultado == null) {
-                    exibirMensagem("Falha de conexão. Verifique a internet e tente novamente.")
+                if (resultado.payload == null) {
+                    val mensagem = getString(R.string.identificacao_falha_conexao_detalhada, resultado.diagnostico.ifBlank { "sem detalhes" })
+                    exibirMensagem(mensagem, mostrarPlanos = false)
                     return@runOnUiThread
                 }
-                val ativa = resultado.optBoolean("ativa", false)
-                if (ativa) {
+                val payload = resultado.payload
+                val ativa = payload.optBoolean("ativa", false)
+                if (ativa && !licencaEhTrial(payload)) {
                     salvarEmailValidado(email)
                     abrirSistemaPrincipal()
                 } else {
-                    val mensagem = resultado.optString("mensagem", "Licença não encontrada ou expirada.")
-                    exibirMensagem(mensagem.ifBlank { "Licença não encontrada ou expirada." })
+                    limparEmailValidado()
+                    val mensagem = if (licencaEhTrial(payload)) {
+                        getString(R.string.identificacao_trial_bloqueado)
+                    } else {
+                        getString(R.string.identificacao_licenca_inativa)
+                    }
+                    exibirMensagem(mensagem)
                 }
             }
         }.start()
     }
 
-    private fun consultarStatusLicencaPorEmail(email: String): JSONObject? {
+    private fun licencaEhTrial(resultado: JSONObject): Boolean {
+        val campos = listOf("tipo", "plano", "status", "mensagem")
+        return campos.any { chave ->
+            resultado.optString(chave, "").trim().uppercase(Locale.ROOT).contains("TRIAL")
+        }
+    }
+
+    private fun urlPlanosRegional(): String {
+        val locale = Locale.getDefault()
+        val idioma = locale.language.lowercase(Locale.ROOT)
+        val pais = locale.country.uppercase(Locale.ROOT)
+        return if (pais == "BR" || idioma == "PT") {
+            "https://www.frssolutions.com.br/planos"
+        } else {
+            "https://www.frssolutions.com.br/plans"
+        }
+    }
+
+    private fun abrirPlanosNoNavegador() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(urlPlanosRegional())))
+        } catch (exc: Exception) {
+            Log.w(TAG, "Falha ao abrir planos no navegador: ${exc.message}")
+            exibirMensagem(getString(R.string.identificacao_falha_abrir_planos), mostrarPlanos = true)
+        }
+    }
+
+    private fun consultarStatusLicencaPorEmail(email: String): ResultadoLicenca {
         val baseUrl = BuildConfig.LICENSE_API_BASE_URL.trim().trimEnd('/')
         if (baseUrl.isBlank()) {
             Log.w(TAG, "LICENSE_API_BASE_URL não configurada no build.")
-            return null
+            return ResultadoLicenca(null, "LICENSE_API_BASE_URL vazio no BuildConfig")
         }
         val emailCodificado = URLEncoder.encode(email, "UTF-8")
-        val url = URL("$baseUrl/api/licencas/status-email?email=$emailCodificado")
+        val rotas = listOf(
+            "/licencas/status-email",
+            "/api/licencas/status-email",
+        )
+        val diagnosticos = mutableListOf<String>()
+
+        for (rota in rotas) {
+            val urlCompleta = "$baseUrl$rota?email=$emailCodificado"
+            val resultado = consultarUrlLicenca(URL(urlCompleta))
+            if (resultado.payload != null) {
+                return resultado
+            }
+            diagnosticos.add(resultado.diagnostico)
+        }
+
+        return ResultadoLicenca(null, diagnosticos.joinToString("\n\n"))
+    }
+
+    private fun consultarUrlLicenca(url: URL): ResultadoLicenca {
         var conexao: HttpURLConnection? = null
         return try {
             conexao = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 12000
-                readTimeout = 12000
+                connectTimeout = 30000
+                readTimeout = 30000
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("User-Agent", "OficinaPescaMobile/${BuildConfig.VERSION_NAME}")
             }
             val codigo = conexao.responseCode
             val leitor = if (codigo in 200..299) conexao.inputStream else conexao.errorStream
-            val corpo = BufferedReader(InputStreamReader(leitor)).use { it.readText() }
-            JSONObject(corpo)
+            val corpo = leitor?.let { BufferedReader(InputStreamReader(it)).use { reader -> reader.readText() } }.orEmpty()
+            val diagnostico = "URL: $url\nHTTP $codigo\nResposta: ${corpo.take(500).ifBlank { "<vazia>" }}"
+            Log.w(TAG, diagnostico)
+            if (codigo in 200..299) {
+                ResultadoLicenca(JSONObject(corpo), diagnostico)
+            } else {
+                ResultadoLicenca(null, diagnostico)
+            }
         } catch (exc: Exception) {
-            Log.w(TAG, "Falha ao consultar status de licença por e-mail: ${exc.message}")
-            null
+            val diagnostico = "URL: $url\nErro: ${exc.javaClass.simpleName}\nMensagem: ${exc.message ?: "sem mensagem"}"
+            Log.w(TAG, diagnostico, exc)
+            ResultadoLicenca(null, diagnostico)
         } finally {
             conexao?.disconnect()
         }
@@ -198,6 +296,13 @@ class IdentificacaoActivity : AppCompatActivity() {
         getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_EMAIL_VALIDADO, email)
+            .apply()
+    }
+
+    private fun limparEmailValidado() {
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_EMAIL_VALIDADO)
             .apply()
     }
 

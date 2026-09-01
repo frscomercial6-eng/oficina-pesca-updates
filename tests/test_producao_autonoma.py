@@ -80,7 +80,11 @@ class ProducaoAutonomaTests(unittest.TestCase):
                         destino_dist, destino_pacote = mestre_build._build_apk_android("1.2.3")
                     self.assertTrue(os.path.exists(destino_dist))
                     self.assertTrue(os.path.exists(destino_pacote))
-                    self.assertTrue(os.path.exists(origem_apk))
+                    self.assertEqual(os.path.basename(destino_dist), "oficina_pesca_v1.2.3.apk")
+                    self.assertEqual(os.path.basename(destino_pacote), "oficina_pesca_v1.2.3.apk")
+                    self.assertEqual(sorted(os.listdir(os.path.dirname(destino_dist))), ["oficina_pesca_v1.2.3.apk"])
+                    self.assertEqual(sorted(os.listdir(os.path.dirname(destino_pacote))), ["oficina_pesca_v1.2.3.apk"])
+                    self.assertEqual(sorted(os.listdir(mestre_build.ANDROID_APK_LEGACY_DIR)), ["oficina_pesca_v1.2.3.apk"])
                 finally:
                     mestre_build.ANDROID_APK_DIST_DIR = old_dist
                     mestre_build.ANDROID_APK_PACKAGE_DIR = old_package
