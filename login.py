@@ -16,6 +16,7 @@ import atexit
 import threading
 import webbrowser
 import sqlite3
+import warnings
 from urllib.parse import quote_plus
 from datetime import datetime
 import tkinter as tk
@@ -36,7 +37,7 @@ set_default_locale()
 # CONFIGURAÇÃO DE DIRETÓRIO DO PYINSTALLER (Mantém o que já está funcionando)
 # ==============================================================================
 if getattr(sys, 'frozen', False):
-    base_dir = sys._MEIPASS
+    base_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     if base_dir not in sys.path:
         sys.path.insert(0, base_dir)
     
@@ -94,6 +95,7 @@ from config import (
     obter_status_acesso_centralizado,
     modo_cliente_final_licenciado,
     bloqueio_loop_update_ativo,
+    INFINITEPAY_LINK_PAGAMENTO,
 )
 from shutdown_utils import fechar_sistema
 
@@ -126,6 +128,7 @@ _APP_INIT_DONE = False
 _STARTUP_LOCK_PATH = ""
 _LOGIN_SUCESSO_DADOS = None #
 _LOGIN_TRANSICAO_EM_ANDAMENTO = False
+PLANOS_EXTERNOS_URL = "https://www.frssolutions.com.br/plans"
 
 
 def _trial_ativo_prioritario() -> tuple[bool, int, str]:
@@ -628,15 +631,107 @@ def _inicializar_fluxo_pos_termos() -> None:
 
 
 
-def abrir_janela_planos(evento=None):
-    """Abre a pagina oficial de planos no navegador padrao."""
+def _obter_locais_sistema_para_planos() -> list[str]:
+    locais: list[str] = []
+    for variavel in ("OFICINA_LOCALE", "LANG", "LC_ALL", "LC_MESSAGES"):
+        valor = os.environ.get(variavel, "")
+        if valor:
+            locais.append(valor)
+
     try:
-        webbrowser.open("https://www.frssolutions.com.br/planos")
+        import locale
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            par = locale.getdefaultlocale()
+        if par and par[0]:
+            locais.append(par[0])
+    except Exception:
+        pass
+
+    try:
+        import locale
+
+        getwindowslocale = getattr(locale, "getwindowslocale", None)
+        if getwindowslocale:
+            nome = getwindowslocale()[0] or ""
+            if nome:
+                locais.append(nome)
+    except Exception:
+        pass
+
+    try:
+        detectado = detectar_idioma_sistema() or ""
+        if detectado:
+            locais.append(detectado)
+    except Exception:
+        pass
+
+    return locais
+
+
+def _cliente_regiao_brasil(locais: list[str] | None = None) -> bool:
+    origem = _obter_locais_sistema_para_planos() if locais is None else locais
+    textos = [str(valor or "").strip().lower().replace("-", "_") for valor in origem]
+    textos = [texto.split(".")[0] for texto in textos if texto]
+    if not textos:
+        return True
+
+    if any("brazil" in texto or "brasil" in texto or texto.endswith("_br") or texto == "pt_br" for texto in textos):
+        return True
+    if any(texto.startswith(("en_", "es_")) or texto in {"en", "es", "en_us", "es_uy"} for texto in textos):
+        return False
+    return True
+
+
+def _abrir_planos_externos() -> None:
+    try:
+        if webbrowser.open(PLANOS_EXTERNOS_URL, new=2):
+            return
     except Exception as exc:
-        try:
-            messagebox.showerror("Oficina de Pesca", "Nao foi possivel abrir o link: %s" % exc)
-        except Exception:
-            pass
+        logger.info("Falha ao abrir planos externos com webbrowser: %s", exc)
+
+    try:
+        if hasattr(os, "startfile"):
+            os.startfile(PLANOS_EXTERNOS_URL)  # type: ignore[attr-defined]
+            return
+    except Exception as exc:
+        logger.info("Falha ao abrir planos externos com os.startfile: %s", exc)
+
+    try:
+        janela_login.clipboard_clear()
+        janela_login.clipboard_append(PLANOS_EXTERNOS_URL)
+    except Exception:
+        pass
+
+    messagebox.showwarning(
+        "Planos",
+        "Não foi possível abrir o link automaticamente. O link foi copiado para a área de transferência.",
+        parent=janela_login,
+    )
+
+
+def abrir_janela_planos(evento=None, dias_restantes_alerta: int | None = None):
+    if isinstance(evento, int) and dias_restantes_alerta is None:
+        dias_restantes_alerta = evento
+
+    if not _cliente_regiao_brasil():
+        _abrir_planos_externos()
+        return
+
+    try:
+        janela_vendas(
+            parent=janela_login,
+            forcar_abertura=True,
+            dias_restantes_alerta=dias_restantes_alerta,
+        )
+    except Exception as exc:
+        logger.exception("Falha ao abrir janela de planos: %s", exc)
+        messagebox.showerror(
+            "Planos",
+            "Não foi possível abrir a tela de planos no momento.",
+            parent=janela_login,
+        )
 
 
 def _checar_alerta_vencimento_licenca():
