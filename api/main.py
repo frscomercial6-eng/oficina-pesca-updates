@@ -113,8 +113,8 @@ def _status_licenca_por_email(email: str) -> dict[str, Any]:
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_norm):
         return {"ok": False, "ativa": False, "mensagem": "E-mail invalido."}
 
-    client = get_supabase_client_cached()
     try:
+        client = get_supabase_client_cached()
         response = (
             client.table("licencas_geradas")
             .select("data_expiracao, cliente, tipo, plano, data_geracao")
