@@ -375,7 +375,7 @@ def _atualizar_scripts_instalador(nova_versao: str) -> None:
                 novo,
             )
         novo = re.sub(
-            r'apk_celular_distribuicao\\(?:oficina_app_signed|Oficina_Pesca_Nativo(?:_v[0-9]+(?:\.[0-9]+){2,})?)\.apk',
+            r'apk_celular_distribuicao\\[A-Za-z0-9_.\-]+\.apk',
             lambda _m: f'apk_celular_distribuicao\\{apk_final}',
             novo,
         )
@@ -416,7 +416,7 @@ def _atualizar_scripts_instalador(nova_versao: str) -> None:
             novo,
         )
         novo = re.sub(
-            r'apk_celular_distribuicao\\(?:oficina_app_signed|Oficina_Pesca_Nativo(?:_v[0-9]+(?:\.[0-9]+){2,})?)\.apk',
+            r'apk_celular_distribuicao\\[A-Za-z0-9_.\-]+\.apk',
             lambda _m: f'apk_celular_distribuicao\\{apk_final}',
             novo,
         )
