@@ -1,4 +1,4 @@
-versao=1.0.57
-novidades=v1.0.57: Correcoes na Consulta de O.S., Fluxo de Caixa, Dashboard e PDV, com auto-update inteligente.
+versao=1.0.58
+novidades=v1.0.58: Ajustes no dashboard da Oficina e atualização de versão automática.
 url_download=https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe
 download_url=https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe

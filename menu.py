@@ -2744,14 +2744,12 @@ class FrmMenu(ctk.CTk):
                 self.after_cancel(self._dashboard_auto_after_id)
         except Exception:
             pass
-        self._dashboard_auto_after_id = self.after(15000, self._auto_refresh_dashboard_tick)
+        # O dashboard já é atualizado pelos callbacks de O.S./PDV. Recriá-lo
+        # periodicamente destruía todos os widgets e causava pisca-pisca.
+        self._dashboard_auto_after_id = None
 
     def _auto_refresh_dashboard_tick(self):
         self._dashboard_auto_after_id = None
-        if self._encerrando_aplicacao or not self.winfo_exists():
-            return
-        self._atualizar_dashboard_modular()
-        self._dashboard_auto_after_id = self.after(15000, self._auto_refresh_dashboard_tick)
 
     def _adicionar_status_nuvem(self):
         if hasattr(self, "lbl_status_nuvem") and self.lbl_status_nuvem.winfo_exists():
@@ -3291,7 +3289,7 @@ class FrmMenu(ctk.CTk):
         for titulo, valor in cards:
             self._criar_card_dashboard(linha, titulo, valor)
 
-    def _criar_painel_pendencias_fixo(self, parent, orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada):
+    def _criar_painel_pendencias_fixo(self, parent, orcamentos, bancada, status_finalizados, aguardando_orcamento):
         bloco = ctk.CTkFrame(parent, fg_color="#121a24", corner_radius=12)
         bloco.pack(fill="both", expand=True, pady=(2, 2))
 
@@ -3304,7 +3302,7 @@ class FrmMenu(ctk.CTk):
 
         corpo = ctk.CTkFrame(bloco, fg_color="#121a24")
         corpo.pack(fill="both", expand=True, padx=8, pady=(0, 6))
-        corpo.grid_columnconfigure((0, 1, 2, 3, 4), weight=1)
+        corpo.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
         def _linha_item(item):
             if len(item) < 3:
@@ -3316,11 +3314,10 @@ class FrmMenu(ctk.CTk):
             return f"OS {os_id} | {data} | {cliente}{extra}"
 
         cards = [
+            ("AGUARDANDO ORÇAMENTO", "#f39c12", aguardando_orcamento),
             ("ORÇAMENTOS", "#f1c40f", orcamentos),
             ("NA BANCADA", "#3498db", bancada),
             ("FINALIZADOS", "#27ae60", status_finalizados),
-            ("AGUARDANDO ORÇAMENTO", "#f39c12", aguardando_orcamento),
-            ("AGUARDANDO RETIRADA", "#e74c3c", aguardando_retirada),
         ]
 
         for col, (titulo, cor, dados) in enumerate(cards):
@@ -3457,7 +3454,6 @@ class FrmMenu(ctk.CTk):
             linha_oficina_2 = ctk.CTkFrame(parent_dash, fg_color="transparent")
             linha_oficina_2.pack(fill="x", pady=(0, 2))
             self._criar_card_dashboard(linha_oficina_2, "Finalizados", oficina["finalizados"])
-            self._criar_card_dashboard(linha_oficina_2, "Aguardando Retirada", oficina["aguardando_retirada"])
             self._criar_card_rejeitados_abandono(
                 linha_oficina_2,
                 oficina["rejeitados_abandono_itens"],
@@ -3499,7 +3495,6 @@ class FrmMenu(ctk.CTk):
             linha_admin_oficina_2 = ctk.CTkFrame(col_oficina, fg_color="transparent")
             linha_admin_oficina_2.pack(fill="x", pady=(0, 2))
             self._criar_card_dashboard(linha_admin_oficina_2, "Finalizados", oficina["finalizados"])
-            self._criar_card_dashboard(linha_admin_oficina_2, "Aguardando Retirada", oficina["aguardando_retirada"])
             self._criar_card_rejeitados_abandono(
                 linha_admin_oficina_2,
                 oficina["rejeitados_abandono_itens"],
@@ -3527,7 +3522,7 @@ class FrmMenu(ctk.CTk):
                 logger.info("Falha ao montar painel fixo de pendencias: %s", exc)
                 orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada = ([], [], [], [], [])
 
-            self._criar_painel_pendencias_fixo(parent_dash, orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada)
+            self._criar_painel_pendencias_fixo(parent_dash, orcamentos, bancada, status_finalizados, aguardando_orcamento)
 
         self._atualizar_fundo()
 
@@ -3688,15 +3683,14 @@ class FrmMenu(ctk.CTk):
                 SELECT id, COALESCE(data,''), COALESCE(cliente,''), COALESCE(equipamento,'')
                 FROM orcamentos_aguardo
                 WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
-                  AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
                   AND {fmt_data} >= ?
                 ORDER BY id DESC
                 """,
                 (limite,),
             )
-            aguardando_retirada = cursor.fetchall()
+            status_finalizados = cursor.fetchall()
 
-            return orcamentos, bancada, aguardando_retirada, aguardando_orcamento, aguardando_retirada
+            return orcamentos, bancada, status_finalizados, aguardando_orcamento, []
 
     def _exibir_popup_pendencias_login(self, orcamentos, bancada, status_finalizados):
         pop = ctk.CTkToplevel(self)

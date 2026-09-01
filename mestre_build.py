@@ -12,7 +12,7 @@ import time
 import zipfile
 
 DIV = "═" * 50
-VERSAO = "1.0.57"
+VERSAO = "1.0.58"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -736,7 +736,7 @@ def _sincronizar_fonte_para_build() -> None:
     if os.path.abspath(BUILD_ROOT) == os.path.abspath(REPO_ROOT):
         return
 
-        itens = [
+    itens = [
         ENTRY_SCRIPT,
         "config.py",
         "configuracao_fiscal.py",
@@ -1162,9 +1162,16 @@ def _montar_stage_portatil(dist_dir: str, bootstrapper_bundle: str) -> str:
     if os.path.exists(stage_dir):
         shutil.rmtree(stage_dir, ignore_errors=True)
 
+    def _copiar_arquivo_stage(origem: str, destino: str) -> str:
+        try:
+            return shutil.copy2(origem, destino)
+        except FileNotFoundError:
+            print(f"⚠️  Arquivo transitório ignorado no stage portátil: {origem}")
+            return destino
+
     print(f"🧾 Stage portátil -> origem bundle: {os.path.abspath(dist_dir)}")
     print(f"🧾 Stage portátil -> destino: {os.path.abspath(stage_dir)}")
-    shutil.copytree(dist_dir, stage_dir, dirs_exist_ok=True)
+    shutil.copytree(dist_dir, stage_dir, dirs_exist_ok=True, copy_function=_copiar_arquivo_stage)
 
     destino_bootstrapper = os.path.join(stage_dir, "Atualizador.exe")
     _copiar_executavel_com_retry(bootstrapper_bundle, destino_bootstrapper)
