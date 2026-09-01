@@ -4146,6 +4146,12 @@ def publicar_licenca_supabase(
     tipo: str = "",
     plano: str = "",
 ) -> tuple[bool, str]:
+    """Publica a licença OFICIAL no Supabase.
+
+    Chamado estritamente na ativação/compra da licença (via ativar_licenca).
+    Usuários em trial não possuem chave válida e, portanto, nunca geram
+    registros ou estruturas na nuvem.
+    """
     chave_limpa = _normalizar_texto_chave_licenca(chave)
     if not chave_limpa:
         return False, "Chave de licença vazia."
@@ -4361,6 +4367,39 @@ def ativar_licenca(chave: str):
     return True, "Licenca ativada com sucesso."
 
 
+EMAIL_LICENCA_PERMANENTE = "frscomercial6@gmail.com"
+
+
+def _email_pertence_licenca_permanente(email: str = "") -> bool:
+    """E-mail institucional com licença permanente — nunca bloqueado (desktop/APK)."""
+    try:
+        uid = str(email or obter_user_id_token_padrao() or "").strip().lower()
+    except Exception:
+        uid = str(email or "").strip().lower()
+    return uid == EMAIL_LICENCA_PERMANENTE
+
+
+def _registrar_licenca_permanente_local(email: str) -> None:
+    """Grava localmente a licença permanente (sem gravar estruturas na nuvem)."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            for chave, valor in (
+                ("licenca_chave", f"PERMANENTE::{email}"),
+                ("licenca_cliente", email),
+                ("licenca_validade", "PERMANENTE"),
+                ("licenca_tipo", "PERMANENTE"),
+                ("licenca_ja_ativada", "1"),
+            ):
+                cursor.execute(
+                    "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)",
+                    (chave, valor),
+                )
+            conn.commit()
+    except Exception:
+        pass
+
+
 def obter_status_licenca():
     """Retorna status da licença ativa (chave local/Drive ou token).
 
@@ -4403,6 +4442,12 @@ def obter_status_licenca():
             return True, "Licença válida.", cliente, validade
 
     uid = str(obter_user_id_token_padrao() or "").strip().lower()
+
+    # Licença permanente institucional: e-mail corporativo nunca é bloqueado (desktop/APK).
+    if _email_pertence_licenca_permanente(uid):
+        _registrar_licenca_permanente_local(uid)
+        return True, "Licença permanente institucional ativa.", uid, "PERMANENTE"
+
     if not uid:
         return False, "Licença inativa", "", "SEM_TOKEN"
 

@@ -2659,7 +2659,7 @@ class FrmMenu(ctk.CTk):
         if self.role == "ADMIN":
             botoes_menu.append((f"💰  {t('menu_financeiro')}", self.abrir_caixa, "#16a085"))
 
-        botoes_menu.append((f"📱  {t('menu_app_celular', default='APP CELULAR')}", self.abrir_app_celular_sidebar, "#25D366"))
+        botoes_menu.append((f"📱  {t('menu_app_celular', default='APPs')}", self.abrir_app_celular_sidebar, "#25D366"))
 
         if self.role == "ADMIN":
             botoes_menu.extend([
@@ -2725,7 +2725,7 @@ class FrmMenu(ctk.CTk):
         if self.role == "ADMIN":
             botoes_menu.append((f"💰  {t('menu_financeiro')}", self.abrir_caixa, "#16a085"))
 
-        botoes_menu.append((f"📱  {t('menu_app_celular', default='APP CELULAR')}", self.abrir_app_celular_sidebar, "#25D366"))
+        botoes_menu.append((f"📱  {t('menu_app_celular', default='APPs')}", self.abrir_app_celular_sidebar, "#25D366"))
 
         if self.role == "ADMIN":
             botoes_menu.extend([
@@ -2758,7 +2758,7 @@ class FrmMenu(ctk.CTk):
 
         self.lbl_status_nuvem = ctk.CTkLabel(
             self.sidebar,
-            text=t("status_drive_verificando", default="Drive: Verificando..."),
+            text=t("status_drive_verificando", default="APK: Verificando..."),
             text_color="#f1c40f",
             font=("Arial", 9, "bold"),
             fg_color="#0d1b2a",
@@ -2770,7 +2770,7 @@ class FrmMenu(ctk.CTk):
         def _worker_nuvem():
             try:
                 online = checar_status_firebase()
-                status = "Drive: Online" if online else "Drive: Offline"
+                status = "APK: Online" if online else "APK: Offline"
                 cor = "#2ecc71" if online else "#e74c3c"
                 try:
                     ok_token, msg_token = renovar_token_acesso_drive_se_necessario(force=False)
@@ -2781,7 +2781,7 @@ class FrmMenu(ctk.CTk):
                 except Exception as exc_token:
                     logger.warning("Falha ao atualizar token de acesso: %s", exc_token)
             except Exception:
-                status = "Drive: Offline"
+                status = "APK: Offline"
                 cor = "#e74c3c"
 
             def _aplicar():
@@ -3639,52 +3639,45 @@ class FrmMenu(ctk.CTk):
         btn.pack(fill="x", padx=10, pady=2, side=side)
 
     def _consultar_pendencias_login(self):
-        limite = (datetime.now() - timedelta(days=15)).strftime("%Y-%m-%d")
-        fmt_data = "date(substr(data,7,4)||'-'||substr(data,4,2)||'-'||substr(data,1,2))"
+        # Painel expõe orçamentos de qualquer idade (sem corte de 15 dias).
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                f"""
+                """
                 SELECT id, COALESCE(data,''), COALESCE(cliente,''), COALESCE(equipamento,'')
                 FROM orcamentos_aguardo
-                                WHERE UPPER(COALESCE(status,'')) = 'ORÇAMENTO'
-                  AND {fmt_data} >= ?
+                WHERE UPPER(COALESCE(status,'')) = 'ORÇAMENTO'
                 ORDER BY id DESC
                 """,
-                (limite,),
             )
             orcamentos = cursor.fetchall()
 
             cursor.execute(
-                f"""
+                """
                 SELECT id, COALESCE(data,''), COALESCE(cliente,''), COALESCE(equipamento,'')
                 FROM orcamentos_aguardo
-                                WHERE UPPER(COALESCE(status,'')) = 'AGUARDANDO ORÇAMENTO'
-                  AND {fmt_data} >= ?
+                WHERE UPPER(COALESCE(status,'')) = 'AGUARDANDO ORÇAMENTO'
                 ORDER BY id DESC
                 """,
-                (limite,),
             )
             aguardando_orcamento = cursor.fetchall()
 
             cursor.execute(
-                f"""
+                """
                 SELECT id, COALESCE(data,''), COALESCE(cliente,''), COALESCE(equipamento,'')
                 FROM orcamentos_aguardo
                 WHERE UPPER(COALESCE(status,'')) IN ('EM ANDAMENTO', 'APROVADO')
-                  AND {fmt_data} >= ?
                 ORDER BY id DESC
                 """,
-                (limite,),
             )
             bancada = cursor.fetchall()
 
             cursor.execute(
-                                """
+                """
                 SELECT id, COALESCE(data,''), COALESCE(cliente,''), COALESCE(equipamento,'')
                 FROM orcamentos_aguardo
                 WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
-                                    AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
+                    AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
                 ORDER BY id DESC
                 """,
             )

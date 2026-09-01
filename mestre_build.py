@@ -30,6 +30,9 @@ ANDROID_APK_LEGACY_DIR = "apk_celular_distribuicao"
 ANDROID_APK_NAME = "oficina_pesca.apk"
 ANDROID_APK_INSTALLER_NAME = "oficina_app_signed.apk"
 AUTO_MODE = "--auto" in sys.argv or os.environ.get("OFP_BUILD_AUTO") == "1"
+NO_BUMP = "--no-bump" in sys.argv
+NO_GIT = "--no-git" in sys.argv
+IS_CI = os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("CI") == "true"
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -610,6 +613,121 @@ def _limpar_pasta_apk_legada() -> None:
                 f"Falha ao limpar a pasta de distribuição APK legada: {caminho}"
             ) from exc
     print(f"🧹 Pasta {ANDROID_APK_LEGACY_DIR} limpa ({removidos} item(ns) removido(s)).")
+
+
+def _incrementar_versao_patch() -> str:
+    """Incrementa o patch da VERSAO na fonte única (este arquivo) e no módulo."""
+    partes = str(VERSAO).split(".")
+    if len(partes) != 3 or not all(p.isdigit() for p in partes):
+        print(f"⚠️  Versão atual ({VERSAO}) não é X.Y.Z; incremento automático ignorado.")
+        return VERSAO
+    nova = f"{partes[0]}.{partes[1]}.{int(partes[2]) + 1}"
+    caminho_self = os.path.abspath(__file__)
+    try:
+        with open(caminho_self, encoding="utf-8") as f:
+            conteudo = f.read()
+        novo_conteudo, n = re.subn(
+            r'^VERSAO\s*=\s*"[^"]+"\s*$',
+            f'VERSAO = "{nova}"',
+            conteudo,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if n == 0:
+            print("⚠️  Não foi possível reescrever VERSAO no arquivo; incremento ignorado.")
+            return VERSAO
+        with open(caminho_self, "w", encoding="utf-8", newline="") as f:
+            f.write(novo_conteudo)
+    except Exception as exc:
+        print(f"⚠️  Falha ao incrementar versão no arquivo: {exc}")
+        return VERSAO
+    anterior = VERSAO
+    globals()["VERSAO"] = nova
+    print(f"⬆️  Versão incrementada automaticamente: {anterior} -> {nova}")
+    return nova
+
+
+def _limpar_obsoletos_distribuicao(versao: str) -> None:
+    """Mantém na distribuição somente os artefatos da versão atual.
+
+    - Remove EXEs/ZIPs obsoletos com versão embutida no nome (exceto Atualizador.exe
+      e qualquer artefato do ACBr, que é empacotado à parte pelo instalador).
+    - Mantém apenas o APK atual em apk_celular/ (e limpa o diretório legado).
+    """
+    print(DIV)
+    print("🧹 Limpando artefatos obsoletos da distribuição...")
+    apk_atual = _nome_apk_final(versao)
+    removidos = 0
+    if os.path.isdir(DISTRIBUTION_DIR):
+        for nome in sorted(os.listdir(DISTRIBUTION_DIR)):
+            caminho = os.path.join(DISTRIBUTION_DIR, nome)
+            if not os.path.isfile(caminho):
+                continue
+            lower = nome.lower()
+            if lower == DISTRIBUTION_BOOTSTRAPPER_NAME.lower():
+                continue  # Atualizador.exe é sempre o mais recente
+            if lower == DISTRIBUTION_INSTALLER_NAME.lower():
+                continue  # instalador recém-copiado desta build
+            if lower == PORTABLE_ZIP_NAME.lower():
+                continue  # ZIP portátil recém-gerado desta build
+            if "acbr" in lower:
+                continue  # pacote ACBr é gerenciado pelo instalador
+            if not (lower.endswith(".exe") or lower.endswith(".zip")):
+                continue
+            try:
+                os.remove(caminho)
+                removidos += 1
+                print(f"   🗑️  Removido obsoleto: {nome}")
+            except Exception as exc:
+                print(f"   ⚠️  Não foi possível remover {nome}: {exc}")
+    for pasta_apk in (ANDROID_APK_PACKAGE_DIR, ANDROID_APK_DIST_DIR, ANDROID_APK_LEGACY_DIR):
+        if not os.path.isdir(pasta_apk):
+            continue
+        for nome in sorted(os.listdir(pasta_apk)):
+            caminho = os.path.join(pasta_apk, nome)
+            if not os.path.isfile(caminho) or not nome.lower().endswith(".apk"):
+                continue
+            if nome == apk_atual:
+                continue
+            try:
+                os.remove(caminho)
+                removidos += 1
+                print(f"   🗑️  APK antigo removido de {pasta_apk}: {nome}")
+            except Exception as exc:
+                print(f"   ⚠️  Não foi possível remover {nome}: {exc}")
+    print(f"✅ Distribuição limpa ({removidos} artefato(s) obsoleto(s) removido(s)); somente a versão {versao} permanece.")
+    print(DIV)
+
+
+def _git_publicar_versao(versao: str) -> None:
+    """Commita os artefatos de versão, cria a tag v<versao> e envia para origin."""
+    print(DIV)
+    print(f"🚀 Publicando v{versao} no Git (commit + tag + push)...")
+    tag = f"v{versao}"
+
+    def _git_out(*args: str) -> str:
+        r = subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True, text=True)
+        return (r.stdout or "").strip()
+
+    try:
+        subprocess.run(["git", "add", "-A"], cwd=REPO_ROOT, check=True)
+        if not _git_out("status", "--porcelain"):
+            print("ℹ️  Nada a commitar; repositório já estava sincronizado.")
+        else:
+            subprocess.run(
+                ["git", "commit", "-m", f"chore(release): v{versao} — build autônomo via mestre_build.py"],
+                cwd=REPO_ROOT,
+                check=True,
+            )
+        if tag in _git_out("tag", "--list", tag).split():
+            subprocess.run(["git", "tag", "-d", tag], cwd=REPO_ROOT, check=False)
+        subprocess.run(["git", "tag", "-a", tag, "-m", f"Release v{versao}"], cwd=REPO_ROOT, check=True)
+        subprocess.run(["git", "push", "origin", "HEAD"], cwd=REPO_ROOT, check=True)
+        subprocess.run(["git", "push", "origin", tag], cwd=REPO_ROOT, check=True)
+        print(f"✅ Commit + tag {tag} enviados para origin/main.")
+    except subprocess.CalledProcessError as exc:
+        print(f"⚠️  Falha ao publicar no Git (código {exc.returncode}); build mantido localmente.")
+    print(DIV)
 
 
 def _limpar_apks_em_pasta(destino_dir: str) -> None:
@@ -1501,6 +1619,10 @@ def main():
     print_header()
     if not _validar_pasta_trabalho():
         sys.exit(1)
+    if NO_BUMP or IS_CI:
+        print("ℹ️  Incremento automático de versão desativado (--no-bump/CI).")
+    else:
+        _incrementar_versao_patch()
     _limpeza_total_pre_build()
     projeto, versao = get_input()
     if versao != VERSAO:
@@ -1516,6 +1638,13 @@ def main():
         sys.exit(1)
     limpar_pastas()
     instalador, destino_distribuicao = build(projeto, versao)
+    _limpar_obsoletos_distribuicao(versao)
+    if IS_CI:
+        print("ℹ️  Publicação Git automática desativada (CI).")
+    elif NO_GIT:
+        print("ℹ️  Publicação Git desativada por --no-git.")
+    else:
+        _git_publicar_versao(versao)
 
     print(DIV)
     print(f"🎉 Fluxo concluído com sucesso. Instalador: {instalador}")
