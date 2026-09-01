@@ -60,6 +60,19 @@ def build_sql() -> list[str]:
             criado_em timestamptz default now()
         );
         """,
+        """
+        create table if not exists public.licencas_geradas (
+            id bigserial primary key,
+            chave text,
+            data_expiracao text not null,
+            chave_instalacao text default '',
+            data_geracao timestamptz default now(),
+            email text default '',
+            cliente text default '',
+            tipo text default '',
+            plano text default ''
+        );
+        """,
     ]
 
 

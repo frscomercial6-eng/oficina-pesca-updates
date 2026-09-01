@@ -1,5 +1,6 @@
 import os
-from datetime import datetime, timedelta, timezone
+import re
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,17 @@ class OrdemServicoPayload(BaseModel):
     observacoes: str | None = None
 
 
+class LicencaStatusEmailResponse(BaseModel):
+    ok: bool
+    ativa: bool
+    mensagem: str
+    cliente: str = ""
+    tipo: str = ""
+    plano: str = ""
+    validade: str = ""
+    data_geracao: str = ""
+
+
 class TokenPayload(BaseModel):
     sub: str
     exp: int
@@ -96,9 +108,68 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return plain_password == hashed_password
 
 
+def _status_licenca_por_email(email: str) -> dict[str, Any]:
+    email_norm = str(email or "").strip().lower()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_norm):
+        return {"ok": False, "ativa": False, "mensagem": "E-mail invalido."}
+
+    client = get_supabase_client_cached()
+    try:
+        response = (
+            client.table("licencas_geradas")
+            .select("data_expiracao, cliente, tipo, plano, data_geracao")
+            .eq("email", email_norm)
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "ativa": False,
+            "mensagem": f"Falha ao consultar licenca por e-mail: {exc}",
+        }
+
+    rows = getattr(response, "data", None) or []
+    if not rows:
+        return {"ok": True, "ativa": False, "mensagem": "Nenhuma licenca encontrada para este e-mail."}
+
+    row = rows[0] or {}
+    validade = str(row.get("data_expiracao") or "").strip()
+    if validade.upper() == "PERMANENTE":
+        ativa = True
+    else:
+        try:
+            ativa = date.fromisoformat(validade[:10]) >= date.today()
+        except ValueError:
+            ativa = False
+
+    mensagem = "Licenca ativa." if ativa else f"Licenca expirada em {validade}." if validade else "Licenca inativa."
+    return {
+        "ok": True,
+        "ativa": ativa,
+        "mensagem": mensagem,
+        "cliente": str(row.get("cliente") or "").strip(),
+        "tipo": str(row.get("tipo") or "").strip(),
+        "plano": str(row.get("plano") or "").strip(),
+        "validade": validade,
+        "data_geracao": str(row.get("data_geracao") or "").strip(),
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"status": "ok", "service": "oficina-pesca-api"}
+
+
+@app.get("/licencas/status-email", response_model=LicencaStatusEmailResponse)
+def licenca_status_por_email(email: str) -> dict[str, Any]:
+    return _status_licenca_por_email(email)
+
+
+@app.get("/api/licencas/status-email", response_model=LicencaStatusEmailResponse)
+def api_licenca_status_por_email(email: str) -> dict[str, Any]:
+    return _status_licenca_por_email(email)
 
 
 @app.post("/auth/login", response_model=TokenResponse)
