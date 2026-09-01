@@ -3072,6 +3072,7 @@ class FrmMenu(ctk.CTk):
                 SELECT COUNT(*)
                 FROM orcamentos_aguardo
                 WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
+                  AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
                 """
             )
             os_finalizados = int((cursor.fetchone() or [0])[0] or 0)
@@ -3679,14 +3680,13 @@ class FrmMenu(ctk.CTk):
             bancada = cursor.fetchall()
 
             cursor.execute(
-                f"""
+                                """
                 SELECT id, COALESCE(data,''), COALESCE(cliente,''), COALESCE(equipamento,'')
                 FROM orcamentos_aguardo
                 WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
-                  AND {fmt_data} >= ?
+                                    AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
                 ORDER BY id DESC
                 """,
-                (limite,),
             )
             status_finalizados = cursor.fetchall()
 

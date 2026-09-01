@@ -12,7 +12,7 @@ import time
 import zipfile
 
 DIV = "═" * 50
-VERSAO = "1.0.58"
+VERSAO = "1.0.59"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -260,10 +260,15 @@ def atualizar_versao_json(nova_versao):
 
 
 def _sincronizar_manifests(nova_versao: str) -> None:
-    """Propaga a versão para config.cfg, config.json, versao.json e version.txt."""
+    """Propaga a versão para config.cfg, config.json, versao.json, versao.txt e version.txt."""
     atualizar_versao_json(nova_versao)
     with open("version.txt", "w", encoding="utf-8") as _f:
         _f.write(nova_versao + "\n")
+    with open("versao.txt", "w", encoding="utf-8") as _f:
+        _f.write(
+            f"versao={nova_versao}\n"
+            f"novidades=v{nova_versao}: Ajuste na coluna Finalizados do painel de pendências.\n"
+        )
     _cfg = configparser.ConfigParser()
     if os.path.exists("config.cfg"):
         _cfg.read("config.cfg", encoding="utf-8")
@@ -272,7 +277,7 @@ def _sincronizar_manifests(nova_versao: str) -> None:
     _cfg.set("versao", "versao_atual", nova_versao)
     with open("config.cfg", "w", encoding="utf-8") as _f:
         _cfg.write(_f)
-    print(f"✅ Manifests sincronizados: config.cfg, config.json, versao.json, version.txt → {nova_versao}.")
+    print(f"✅ Manifests sincronizados: config.cfg, config.json, versao.json, versao.txt, version.txt → {nova_versao}.")
 
 
 def _read_text_any(path: str) -> tuple[str, str]:

@@ -1,4 +1,2 @@
-versao=1.0.58
-novidades=v1.0.58: Ajustes no dashboard da Oficina e atualização de versão automática.
-url_download=https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe
-download_url=https://github.com/frscomercial6-eng/oficina-pesca-updates/releases/latest/download/Oficina_Pesca_Instalador.exe
+versao=1.0.59
+novidades=v1.0.59: Ajuste na coluna Finalizados do painel de pendências.
