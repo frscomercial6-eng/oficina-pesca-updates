@@ -34,17 +34,27 @@ jobs:
 
       - name: Garantir google-services.json no módulo Android
         shell: pwsh
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           $src = "google-services.json"
           $dest = "android_apk/app/google-services.json"
           New-Item -ItemType Directory -Path (Split-Path -Parent $dest) -Force | Out-Null
 
+          if (-not [string]::IsNullOrWhiteSpace($env:GOOGLE_SERVICES_JSON)) {
+            Set-Content -Path $dest -Value $env:GOOGLE_SERVICES_JSON -Encoding utf8
+            Write-Host "google-services.json escrito a partir do secret GOOGLE_SERVICES_JSON."
+            exit 0
+          }
+
           if (Test-Path $src) {
             Copy-Item -Force $src $dest
             Write-Host "google-services.json copiado do repositório para o módulo Android."
-          } else {
-            Write-Warning "google-services.json não encontrado no repositório. Gerando placeholder para o build no CI."
-            $placeholder = @{
+            exit 0
+          }
+
+          Write-Warning "google-services.json não encontrado no repositório/secret. Gerando placeholder compatível com o applicationId com.frs.oficinadepesca para permitir o build no CI."
+          $placeholder = @{
               project_info = @{
                 project_id = "oficina-pesca-ci"
                 project_number = "000000000000"
@@ -57,7 +67,7 @@ jobs:
                   client_info = @{
                     mobilesdk_app_id = "1:000000000000:android:0000000000000000"
                     android_client_info = @{
-                      package_name = "com.oficinapesca.mobile"
+                      package_name = "com.frs.oficinadepesca"
                     }
                   }
                   oauth_client = @()
@@ -76,7 +86,6 @@ jobs:
               configuration_version = "1"
             } | ConvertTo-Json -Depth 10
             Set-Content -Path $dest -Value $placeholder -Encoding utf8
-          }
 
       - name: Instalar Inno Setup
         shell: pwsh
@@ -145,7 +154,7 @@ jobs:
           path: |
             PACOTE_ENVIO/Oficina_Pesca_Instalador.exe
             PACOTE_ENVIO/Oficina_Pesca_Portatil.zip
-            PACOTE_ENVIO/apk_celular/Oficina_Pesca_Nativo.apk
+            PACOTE_ENVIO/apk_celular/*.apk
           if-no-files-found: error
 
       - name: Ler versão do projeto
@@ -170,7 +179,7 @@ jobs:
           artifacts: >-
             PACOTE_ENVIO/Oficina_Pesca_Instalador.exe,
             PACOTE_ENVIO/Oficina_Pesca_Portatil.zip,
-            PACOTE_ENVIO/apk_celular/Oficina_Pesca_Nativo.apk,
+            PACOTE_ENVIO/apk_celular/*.apk,
             PACOTE_ENVIO/Atualizador.exe
           artifactErrorsFailBuild: true
           body: |
@@ -179,5 +188,5 @@ jobs:
             Artefatos publicados:
             - Instalador: Oficina_Pesca_Instalador.exe
             - Portátil: Oficina_Pesca_Portatil.zip
-            - APK Nativo: Oficina_Pesca_Nativo.apk
+            - APK Nativo: oficina_pesca_v${{ steps.version.outputs.version }}.apk
             - Bootstrapper: Atualizador.exe
