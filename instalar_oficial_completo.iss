@@ -4,7 +4,7 @@
 ; ==============================================================
 
 #define AppName "Oficina de Pesca versão {#AppVersion} - Instalador"
-#define AppVersion "1.0.62"
+#define AppVersion "1.0.63"
 #define AppPublisher "FRS Solutions"
 #define AppExeName "Oficina_Pesca.exe"
 
@@ -16,7 +16,7 @@ AppPublisher={#AppPublisher}
 DefaultDirName={localappdata}\OficinaPesca
 DefaultGroupName={#AppName}
 OutputDir=Output
-OutputBaseFilename=Instalador_Oficina_Pesca_Oficial_v1.0.62
+OutputBaseFilename=Instalador_Oficina_Pesca_Oficial_v1.0.63
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -59,9 +59,9 @@ Source: "client_secret_desktop.json"; DestDir: "{app}\_internal"; Flags: ignorev
 Source: "client_secret_desktop.json"; DestDir: "{app}\_internal\assets"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; APK Android assinado dentro da pasta apk_celular_distribuicao
-Source: "apk_celular_distribuicao\oficina_pesca_v1.0.62.apk"; DestDir: "{app}\apk_celular_distribuicao"; DestName: "oficina_app.apk"; Flags: ignoreversion
+Source: "apk_celular_distribuicao\oficina_pesca_v1.0.63.apk"; DestDir: "{app}\apk_celular_distribuicao"; DestName: "oficina_app.apk"; Flags: ignoreversion
 Source: "apk_celular_distribuicao\instrucoes_instalacao.txt"; DestDir: "{app}\apk_celular_distribuicao"; Flags: ignoreversion skipifsourcedoesntexist
-Source: "apk_celular_distribuicao\oficina_pesca_v1.0.62.apk"; DestDir: "{app}\_internal\apk_celular_distribuicao"; DestName: "oficina_app.apk"; Flags: ignoreversion
+Source: "apk_celular_distribuicao\oficina_pesca_v1.0.63.apk"; DestDir: "{app}\_internal\apk_celular_distribuicao"; DestName: "oficina_app.apk"; Flags: ignoreversion
 Source: "apk_celular_distribuicao\instrucoes_instalacao.txt"; DestDir: "{app}\_internal\apk_celular_distribuicao"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; Documentos de contrato e termos de uso
