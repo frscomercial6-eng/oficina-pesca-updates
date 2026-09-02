@@ -8,7 +8,7 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.61"
+#define AppVersion "1.0.62"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
@@ -27,7 +27,7 @@ DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.61
+OutputBaseFilename=Setup_OficinaPesca_v1.0.62
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -60,9 +60,9 @@ Name: "desktopicon"; Description: "Criar ícone na Área de Trabalho"; GroupDesc
 ; Todos os arquivos gerados pelo PyInstaller (excluindo .env para nao expor credenciais)
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Components: core; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,apk_celular_distribuicao\*,*.db,config.cfg,config.json,versao.json,licenca.key,licenca.json,licencas.json"
 ; Apenas os dois arquivos de distribuicao mobile (APK assinado + instrucoes)
-Source: "apk_celular_distribuicao\oficina_pesca_v1.0.61.apk"; DestDir: "{app}\apk_celular_distribuicao"; Components: core; Flags: ignoreversion
+Source: "apk_celular_distribuicao\oficina_pesca_v1.0.62.apk"; DestDir: "{app}\apk_celular_distribuicao"; Components: core; Flags: ignoreversion
 Source: "apk_celular_distribuicao\instrucoes_instalacao.txt"; DestDir: "{app}\apk_celular_distribuicao"; Components: core; Flags: ignoreversion skipifsourcedoesntexist
-Source: "apk_celular_distribuicao\oficina_pesca_v1.0.61.apk"; DestDir: "{app}\_internal\apk_celular_distribuicao"; Components: core; Flags: ignoreversion
+Source: "apk_celular_distribuicao\oficina_pesca_v1.0.62.apk"; DestDir: "{app}\_internal\apk_celular_distribuicao"; Components: core; Flags: ignoreversion
 Source: "apk_celular_distribuicao\instrucoes_instalacao.txt"; DestDir: "{app}\_internal\apk_celular_distribuicao"; Components: core; Flags: ignoreversion skipifsourcedoesntexist
 ; Imagens de fundo do menu
 Source: "fundomenu.png";      DestDir: "{app}"; Components: core; Flags: ignoreversion
