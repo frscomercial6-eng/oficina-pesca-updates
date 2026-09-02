@@ -128,7 +128,7 @@ _APP_INIT_DONE = False
 _STARTUP_LOCK_PATH = ""
 _LOGIN_SUCESSO_DADOS = None #
 _LOGIN_TRANSICAO_EM_ANDAMENTO = False
-PLANOS_EXTERNOS_URL = "https://www.frssolutions.com.br/plans"
+PLANOS_EXTERNOS_URL = "https://www.frssolutions.com.br/planos"
 
 
 def _trial_ativo_prioritario() -> tuple[bool, int, str]:
@@ -1560,7 +1560,7 @@ btn_ativar = ctk.CTkButton(
 btn_pagamento = ctk.CTkButton(
     main_frame,
     text=t("ui_comprar_licen_a"),
-    command=abrir_janela_planos,
+    command=_abrir_planos_externos,
     width=320,
     height=38,
     fg_color="#8e44ad",

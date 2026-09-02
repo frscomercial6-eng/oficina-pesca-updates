@@ -43,6 +43,12 @@ class IdentificacaoActivity : AppCompatActivity() {
         const val PREFS_NAME = "ofp_licenca_prefs"
         const val KEY_EMAIL_VALIDADO = "email_validado"
         const val EXTRA_EMAIL_DESKTOP = "email_desktop"
+
+        // Timeouts generosos (>= 30s) para acomodar o cold start do servidor no
+        // Render (plano gratuito), que pode demorar dezenas de segundos.
+        private const val HTTP_CONNECT_TIMEOUT_MS = 45000
+        private const val HTTP_READ_TIMEOUT_MS = 45000
+        private const val COLD_START_RETRY_DELAY_MS = 5000L
     }
 
     private lateinit var campoEmail: EditText
@@ -239,6 +245,28 @@ class IdentificacaoActivity : AppCompatActivity() {
     }
 
     private fun consultarStatusLicencaPorEmail(email: String): ResultadoLicenca {
+        val primeiraTentativa = consultarStatusLicencaPorEmailUmaVez(email)
+        if (primeiraTentativa.payload != null) {
+            return primeiraTentativa
+        }
+
+        // Cold start do Render (plano gratuito) pode estourar o timeout da
+        // primeira tentativa: aguarda o servidor acordar e tenta mais uma vez.
+        Log.w(
+            TAG,
+            "Licença não validada na 1ª tentativa (possível cold start do Render). " +
+                "Nova tentativa em ${COLD_START_RETRY_DELAY_MS}ms.",
+        )
+        try {
+            Thread.sleep(COLD_START_RETRY_DELAY_MS)
+        } catch (exc: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return primeiraTentativa
+        }
+        return consultarStatusLicencaPorEmailUmaVez(email)
+    }
+
+    private fun consultarStatusLicencaPorEmailUmaVez(email: String): ResultadoLicenca {
         val baseUrl = BuildConfig.LICENSE_API_BASE_URL.trim().trimEnd('/')
         if (baseUrl.isBlank()) {
             Log.w(TAG, "LICENSE_API_BASE_URL não configurada no build.")
@@ -268,8 +296,8 @@ class IdentificacaoActivity : AppCompatActivity() {
         return try {
             conexao = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 30000
-                readTimeout = 30000
+                connectTimeout = HTTP_CONNECT_TIMEOUT_MS
+                readTimeout = HTTP_READ_TIMEOUT_MS
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("User-Agent", "OficinaPescaMobile/${BuildConfig.VERSION_NAME}")
             }

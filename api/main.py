@@ -1,5 +1,8 @@
 import os
 import re
+import threading
+import time
+import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -19,6 +22,48 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 app = FastAPI(title="Oficina Pesca API", version="0.1.0")
 security = HTTPBearer(auto_error=False)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# ---------------------------------------------------------------------------
+# Keep-alive do Render (plano gratuito): a instância dorme após ~15 min sem
+# tráfego. Uma thread em background faz ping periódico no próprio /health
+# através da URL pública (RENDER_EXTERNAL_URL), mantendo a instância acordada.
+# ---------------------------------------------------------------------------
+KEEP_ALIVE_INTERVAL_SEG = max(60, int(os.getenv("RENDER_KEEP_ALIVE_INTERVAL_SEG", "600")))
+KEEP_ALIVE_DISABLED = os.getenv("RENDER_KEEP_ALIVE_DISABLED", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _url_keep_alive() -> str:
+    base = (os.getenv("RENDER_KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    return f"{base}/health" if base else ""
+
+
+def _executar_keep_alive(alvo: str) -> None:
+    while True:
+        try:
+            with urllib.request.urlopen(alvo, timeout=15) as resposta:
+                print(f"[keep-alive] ping {alvo} -> HTTP {resposta.status}")
+        except Exception as exc:  # ping nunca deve derrubar a API
+            print(f"[keep-alive] falha no ping {alvo}: {exc}")
+        time.sleep(KEEP_ALIVE_INTERVAL_SEG)
+
+
+@app.on_event("startup")
+def _iniciar_keep_alive_render() -> None:
+    if KEEP_ALIVE_DISABLED:
+        print("[keep-alive] desativado por RENDER_KEEP_ALIVE_DISABLED.")
+        return
+    alvo = _url_keep_alive()
+    if not alvo:
+        # Fora do Render (ou URL não configurada): comportamento atual preservado.
+        print("[keep-alive] RENDER_EXTERNAL_URL/RENDER_KEEP_ALIVE_URL ausente; keep-alive inativo.")
+        return
+    threading.Thread(
+        target=_executar_keep_alive,
+        args=(alvo,),
+        name="render-keep-alive",
+        daemon=True,
+    ).start()
+    print(f"[keep-alive] ping automático ativo ({KEEP_ALIVE_INTERVAL_SEG}s) -> {alvo}")
 
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key")
 ALGORITHM = "HS256"

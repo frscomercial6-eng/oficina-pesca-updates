@@ -1,0 +1,42 @@
+name: Keep-Alive Render
+
+# Mantém a instância gratuita do Render sempre ativa: evita o sleep por
+# inatividade (~15 min) e o cold start lento sentido pelo APK/Desktop.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL base da API no Render (opcional; sobrepõe a padrão)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keep-alive-render
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping /health da API no Render
+        env:
+          URL_PADRAO: "https://oficina-pesca-updates2.onrender.com"
+          URL_VAR: ${{ vars.RENDER_KEEP_ALIVE_URL }}
+          URL_INPUT: ${{ github.event.inputs.url }}
+        run: |
+          BASE="${URL_INPUT:-${URL_VAR:-$URL_PADRAO}}"
+          BASE="${BASE%/}"
+          ALVO="$BASE/health"
+          echo "Ping keep-alive em: $ALVO"
+          CODIGO=$(curl -sS -o /tmp/ping_body.txt -w "%{http_code}" --max-time 120 "$ALVO" || echo "000")
+          echo "HTTP $CODIGO"
+          head -c 500 /tmp/ping_body.txt || true
+          if [ "$CODIGO" = "000" ]; then
+            echo "::warning::Ping não completou (rede/servidor frio). O tráfego já ajuda a acordar a instância."
+          fi

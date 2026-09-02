@@ -58,3 +58,7 @@ android_apk/keystore.properties
 
 # Render / deployment local artifacts
 .render/
+
+# Local build logs (mestre_build)
+build_v1062_log.txt
+build_v1062_err.txt

@@ -15,7 +15,7 @@ import java.util.Locale
 
 object FirebaseStartupCoordinator {
     private const val TAG = "OficinaPesca"
-    private const val AUTH_TIMEOUT_MS = 15000L
+    private const val AUTH_TIMEOUT_MS = 45000L // >= 30s: acomoda o cold start do Render
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
