@@ -80,42 +80,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [6/9] Build PyInstaller...
+echo [6/9] Build PyInstaller (usando .spec file)...
 "%VENV_PY%" -m PyInstaller ^
-    --noconfirm --clean --onedir --windowed ^
-    --name "%APP_NAME%" ^
-    --icon "icone_oficina.ico" ^
-    --collect-all customtkinter ^
-    --collect-all reportlab ^
-    --collect-all fpdf ^
-    --hidden-import menu ^
-    --hidden-import config ^
-    --hidden-import tela_planos ^
-    --hidden-import tela_os ^
-    --hidden-import tela_financeiro ^
-    --hidden-import clientes ^
-    --hidden-import gestao_os ^
-    --hidden-import util_recibo ^
-    --hidden-import=core ^
-    --hidden-import=core.modulos ^
-    --hidden-import=core.financeiro ^
-    --hidden-import=core.financeiro.calculos ^
-    --hidden-import sqlite3 ^
-    --hidden-import fpdf ^
-    --hidden-import reportlab.graphics.shapes ^
-    --hidden-import reportlab.platypus ^
-    --hidden-import google.auth ^
-    --hidden-import google.auth.transport.requests ^
-    --hidden-import google.oauth2.credentials ^
-    --hidden-import google_auth_oauthlib ^
-    --hidden-import google_auth_oauthlib.flow ^
-    --hidden-import googleapiclient ^
-    --hidden-import googleapiclient.discovery ^
-    --hidden-import googleapiclient.http ^
-    --add-data "apk_celular_distribuicao\oficina_app_signed.apk;apk_celular_distribuicao" ^
-    --add-data "apk_celular_distribuicao\instrucoes_instalacao.txt;apk_celular_distribuicao" ^
-    --add-data "Contrato_Oficina_de_Pesca_V3_Maio_2026.rtf;." ^
-    login.py
+    --noconfirm --clean ^
+    Oficina_Pesca.spec
 set "PYI_ERRORLEVEL=%ERRORLEVEL%"
 
 echo [6b/9] Restaurando fontes .py originais (pos-build)...
