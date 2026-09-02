@@ -10,6 +10,7 @@ import subprocess
 import re
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 DIV = "═" * 50
 VERSAO = "1.0.63"
@@ -699,8 +700,94 @@ def _limpar_obsoletos_distribuicao(versao: str) -> None:
     print(DIV)
 
 
+def _remotos_push_git() -> list[str]:
+    """Resolve as URLs de push de `origin` (pode haver várias: principal + Render)."""
+    resultado = subprocess.run(
+        ["git", "config", "--get-all", "remote.origin.pushurl"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    urls: list[str] = []
+    if resultado.returncode == 0:
+        urls = [linha.strip() for linha in (resultado.stdout or "").splitlines() if linha.strip()]
+    if not urls:
+        resultado = subprocess.run(
+            ["git", "remote", "get-url", "--push", "origin"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if resultado.returncode == 0:
+            urls = [linha.strip() for linha in (resultado.stdout or "").splitlines() if linha.strip()]
+
+    # Deduplicação preservando a ordem de configuração.
+    unicos: list[str] = []
+    vistos: set[str] = set()
+    for url in urls:
+        chave = url.rstrip("/").lower()
+        if chave and chave not in vistos:
+            vistos.add(chave)
+            unicos.append(url)
+    return unicos
+
+
+def _nome_repositorio_git(url: str) -> str:
+    nome = url.rstrip("/").rsplit("/", 1)[-1]
+    return nome[:-4] if nome.lower().endswith(".git") else nome
+
+
+def _push_git_paralelo(tag: str) -> None:
+    """Envia o branch atual + a tag para TODAS as URLs de push de origin, em paralelo."""
+    urls = _remotos_push_git()
+    if not urls:
+        print("⚠️  Nenhuma URL de push configurada em origin; envio manual necessário.")
+        return
+
+    print(f"📤 Push paralelo (branch atual + tag {tag}) para {len(urls)} destino(s)...")
+
+    def _enviar(url: str) -> tuple[str, bool, str]:
+        def _rodar(argumentos: list[str]) -> tuple[int, str]:
+            r = subprocess.run(
+                ["git", *argumentos],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
+
+        try:
+            codigo, detalhe = _rodar(["push", url, "HEAD", f"refs/tags/{tag}"])
+            if codigo == 0:
+                return url, True, detalhe
+            # Falha parcial comum em mirrors (tag divergente / "already exists"):
+            # realinha cada ref separadamente — o branch nunca é forçado; a tag
+            # pertence ao fluxo de release e pode ser realinhada com segurança.
+            codigo_branch, detalhe_branch = _rodar(["push", url, "HEAD"])
+            codigo_tag, detalhe_tag = _rodar(["push", "--force", url, f"refs/tags/{tag}"])
+            ok = codigo_branch == 0 and codigo_tag == 0
+            detalhe_final = detalhe_tag if ok else (detalhe_branch or detalhe_tag or detalhe)
+            return url, ok, detalhe_final
+        except OSError as exc:
+            return url, False, str(exc)
+
+    with ThreadPoolExecutor(max_workers=max(1, len(urls))) as executor:
+        futuros = [(url, executor.submit(_enviar, url)) for url in urls]
+        falhas = 0
+        for _url, futuro in futuros:
+            url, ok, detalhe = futuro.result()
+            nome = _nome_repositorio_git(url)
+            if ok:
+                print(f"✅ Push OK -> {nome}")
+            else:
+                falhas += 1
+                print(f"⚠️  Push falhou -> {nome}: {detalhe[-400:]}")
+    if falhas:
+        print(f"⚠️  {falhas} destino(s) ficaram desatualizado(s); reenvie manualmente.")
+
+
 def _git_publicar_versao(versao: str) -> None:
-    """Commita os artefatos de versão, cria a tag v<versao> e envia para origin."""
+    """Commita os artefatos de versão, cria a tag v<versao> e envia em paralelo para todos os remotos de push de origin (principal + Render)."""
     print(DIV)
     print(f"🚀 Publicando v{versao} no Git (commit + tag + push)...")
     tag = f"v{versao}"
@@ -722,9 +809,7 @@ def _git_publicar_versao(versao: str) -> None:
         if tag in _git_out("tag", "--list", tag).split():
             subprocess.run(["git", "tag", "-d", tag], cwd=REPO_ROOT, check=False)
         subprocess.run(["git", "tag", "-a", tag, "-m", f"Release v{versao}"], cwd=REPO_ROOT, check=True)
-        subprocess.run(["git", "push", "origin", "HEAD"], cwd=REPO_ROOT, check=True)
-        subprocess.run(["git", "push", "origin", tag], cwd=REPO_ROOT, check=True)
-        print(f"✅ Commit + tag {tag} enviados para origin/main.")
+        _push_git_paralelo(tag)
     except subprocess.CalledProcessError as exc:
         print(f"⚠️  Falha ao publicar no Git (código {exc.returncode}); build mantido localmente.")
     print(DIV)
