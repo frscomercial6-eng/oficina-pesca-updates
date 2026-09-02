@@ -4698,3 +4698,22 @@ def obter_status_trial():
     data_limite = date.fromordinal(limite_ordinal).strftime("%d/%m/%Y")
 
     return dias_restantes > 0, dias_restantes, data_limite
+
+
+def sincronizar_licenca_com_supabase(email_nuvem, tipo_licenca):
+    url = os.environ.get("SUPABASE_URL", "")
+    key = os.environ.get("SUPABASE_KEY", "")
+
+    supabase = supabase_create_client(url, key)
+
+    payload = {
+        "email": email_nuvem,
+        "tipo_licenca": tipo_licenca,
+        "ativo": True
+    }
+
+    try:
+        resposta = supabase.table("licencas").upsert(payload, on_conflict=["email"]).execute()
+        return True, resposta
+    except Exception as e:
+        return False, str(e)
