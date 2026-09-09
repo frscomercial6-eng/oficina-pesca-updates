@@ -1,0 +1,40 @@
+Analysis Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+Python version: sys.version_info(major=3, minor=11, micro=0, releaselevel='final', serial=0)
+firebase_admin: 7.4.0
+Starting Analysis...
+Traceback (most recent call last):
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\_test_analysis_isolated3.py", line 53, in <module>
+    result = python.call(run_analysis)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\isolated\_parent.py", line 334, in call
+    raise RuntimeError(f"Child process call to {function.__name__}() failed with:\n" + output)
+RuntimeError: Child process call to run_analysis() failed with:
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\isolated\_child.py", line 63, in run_next_command
+    output = function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\_test_analysis_isolated3.py", line 34, in run_analysis
+    a = Analysis(
+        ^^^^^^^^^
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\building\build_main.py", line 469, in __init__
+    super().__init__()
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\building\datastruct.py", line 158, in __init__
+    self.tocfilename = os.path.join(CONF['workpath'], '%s-%02d.toc' % (self.__class__.__name__, self.invcnum))
+                                    ~~~~^^^^^^^^^^^^
+KeyError: 'workpath'
+Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+  Isolated Python started
+ERROR: RuntimeError: Child process call to run_analysis() failed with:
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\isolated\_child.py", line 63, in run_next_command
+    output = function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\_test_analysis_isolated3.py", line 34, in run_analysis
+    a = Analysis(
+        ^^^^^^^^^
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\building\build_main.py", line 469, in __init__
+    super().__init__()
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\building\datastruct.py", line 158, in __init__
+    self.tocfilename = os.path.join(CONF['workpath'], '%s-%02d.toc' % (self.__class__.__name__, self.invcnum))
+                                    ~~~~^^^^^^^^^^^^
+KeyError: 'workpath'
+
+Done

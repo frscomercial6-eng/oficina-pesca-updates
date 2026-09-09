@@ -1,0 +1,54 @@
+============================================================
+OFICINA DE PESCA v1.0.64 - BUILD ISOLATED
+============================================================
+
+[1] Verificando ambiente...
+
+>>> F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe --version...
+    Python 3.11.0
+    EXIT: 0
+
+>>> F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe -m PyInstaller...
+    6.22.2
+    EXIT: 0
+
+>>> F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe -c import sys; print(sys.executable)...
+    F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+    EXIT: 0
+
+>>> F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe -c import customtkinter, firebase_admin, googleapiclient, reportlab, fpdf; print('ALL_OK')...
+    ALL_OK
+    EXIT: 0
+
+[2] Verificando sintaxe...
+
+>>> F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe -m py_compile...
+    EXIT: 0
+  OK: menu.py
+
+>>> F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe -m py_compile...
+    EXIT: 0
+  OK: tela_os.py
+
+>>> F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe -m py_compile...
+    EXIT: 0
+  OK: mestre_build.py
+
+[3] Compilando EXE com PyInstaller...
+Removendo F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\dist...
+Removendo F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\build...
+
+[3b] Executando PyInstaller (timeout=3600s)...
+
+    EXITCODE: 1
+    STDERR (500 chars): 368 INFO: PyInstaller: 6.22.2, contrib hooks: 2026.7
+368 INFO: Python: 3.11.0
+381 INFO: Platform: Windows-10-10.0.19045-SP0
+381 INFO: Python environment: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv
+383 INFO: wrote F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\Oficina_Pesca.spec
+408 INFO: Module search paths (PYTHONPATH):
+['F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip',
+ 'C:\\Users\\User\
+
+    ERRO: PyInstaller falhou.

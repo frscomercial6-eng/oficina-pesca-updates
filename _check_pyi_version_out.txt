@@ -1,0 +1,27 @@
+System Python: C:\Users\User\AppData\Local\Programs\Python\Python311\python.exe
+Exists: True
+Version: Python 3.11.0
+DLL: C:\Users\User\AppData\Local\Programs\Python\Python311\python311.dll
+DLL Exists: True
+DLL Size: 5,758,328 bytes (5.5 MB)
+DLL Info:
+
+LastWriteTime       CreationTime       
+-------------       ------------       
+24/10/2022 18:34:50 24/10/2022 18:34:50
+
+
+
+
+Venv Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+Exists: True
+Version: Python 3.11.0
+
+Python DLL from sys:
+Handle and executable:
+140721836130304 F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+
+
+Checking multiprocessing.spawn in system Python:
+multiprocessing.spawn attributes: ['WINEXE', 'WINSERVICE', '__all__', '__builtins__', '__cached__', '__doc__', '__file__', '__loader__', '__name__', '__package__', '__spec__', '_check_not_importing_main', '_fixup_main_from_name', '_fixup_main_from_path', '_main', '_python_exe', 'freeze_support', 'get_command_line', 'get_executable', 'get_preparation_data', 'get_start_method', 'import_main_path', 'is_forking', 'old_main_modules', 'os', 'prepare', 'process', 'reduction', 'runpy', 'set_executable', 'set_start_method', 'spawn_main', 'sys', 'types', 'util']
+

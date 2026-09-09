@@ -1,0 +1,46 @@
+174 INFO: PyInstaller: 6.22.2, contrib hooks: 2026.7
+174 INFO: Python: 3.11.0
+180 INFO: Platform: Windows-10-10.0.19045-SP0
+181 INFO: Python environment: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv
+958 WARNING: Failed to collect submodules for 'google._async_resumable_media.requests' because importing 'google._async_resumable_media.requests' raised: ModuleNotFoundError: No module named 'aiohttp'
+10000 WARNING: collect_data_files - skipping data collection for module 'google_auth' as it is not a package.
+10001 WARNING: collect_dynamic_libs - skipping library collection for module 'google_auth' as it is not a package.
+10311 WARNING: collect_data_files - skipping data collection for module 'google_api_python_client' as it is not a package.
+10312 WARNING: collect_dynamic_libs - skipping library collection for module 'google_api_python_client' as it is not a package.
+11681 INFO: Module search paths (PYTHONPATH):
+['F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\DLLs',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\Lib',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv',
+ 'F:\\PROGRAMA\\OFICINA DE '
+ 'PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL']
+12497 INFO: Appending 'datas' from .spec
+12715 INFO: checking Analysis
+12716 INFO: Building Analysis because Analysis-00.toc is non existent
+12716 INFO: Looking for Python shared library...
+12716 INFO: Using Python shared library: C:\Users\User\AppData\Local\Programs\Python\Python311\python311.dll
+12716 INFO: Running Analysis Analysis-00.toc
+12716 INFO: Target bytecode optimization level: 0
+12716 INFO: Initializing module dependency graph...
+12718 INFO: Initializing module graph hook caches...
+13005 WARNING: Runtime hooks for cryptography have already been defined. Skipping the runtime hooks for cryptography that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for enchant have already been defined. Skipping the runtime hooks for enchant that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for findlibs have already been defined. Skipping the runtime hooks for findlibs that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for ffpyplayer have already been defined. Skipping the runtime hooks for ffpyplayer that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for osgeo have already been defined. Skipping the runtime hooks for osgeo that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for traitlets have already been defined. Skipping the runtime hooks for traitlets that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for usb have already been defined. Skipping the runtime hooks for usb that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for nltk have already been defined. Skipping the runtime hooks for nltk that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for pyproj have already been defined. Skipping the runtime hooks for pyproj that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for pygraphviz have already been defined. Skipping the runtime hooks for pygraphviz that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for pythoncom have already been defined. Skipping the runtime hooks for pythoncom that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for pyqtgraph have already been defined. Skipping the runtime hooks for pyqtgraph that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for pywintypes have already been defined. Skipping the runtime hooks for pywintypes that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13006 WARNING: Runtime hooks for tensorflow have already been defined. Skipping the runtime hooks for tensorflow that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+13008 INFO: Analyzing modules for base_library.zip ...
+14672 INFO: Processing standard module hook 'hook-encodings.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+15745 INFO: Processing standard module hook 'hook-heapq.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+^C

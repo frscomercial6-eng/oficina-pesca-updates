@@ -1,0 +1,1 @@
+['', 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip', 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\DLLs']

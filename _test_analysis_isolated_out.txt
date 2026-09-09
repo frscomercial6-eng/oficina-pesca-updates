@@ -1,0 +1,22 @@
+Traceback (most recent call last):
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\_test_analysis_isolated.py", line 22, in <module>
+    result2 = python.call(
+              ^^^^^^^^^^^^
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\isolated\_parent.py", line 334, in call
+    raise RuntimeError(f"Child process call to {function.__name__}() failed with:\n" + output)
+RuntimeError: Child process call to <lambda>() failed with:
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\isolated\_child.py", line 67, in run_next_command
+    marshalled = dumps((True, output))
+                 ^^^^^^^^^^^^^^^^^^^^^
+ValueError: unmarshallable object
+Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+Testing Analysis via isolated subprocess...
+  Isolated Python started OK
+  PyInstaller version = 6.22.2
+ERROR: RuntimeError: Child process call to <lambda>() failed with:
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\isolated\_child.py", line 67, in run_next_command
+    marshalled = dumps((True, output))
+                 ^^^^^^^^^^^^^^^^^^^^^
+ValueError: unmarshallable object
+
+Done

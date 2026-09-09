@@ -1,0 +1,35 @@
+﻿=== Venv python.exe type ===
+symlink: False
+abspath: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+realpath: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+
+
+
+=== System Python executable ===
+exists: True
+islink: False
+
+=== Python DLLs in system Python ===
+DLL dir: C:\Users\User\AppData\Local\Programs\Python\Python311
+  python3.dll: 64KB
+  python311.dll: 5623KB
+  vcruntime140.dll: 96KB
+  vcruntime140_1.dll: 37KB
+
+=== Python DLLs in venv ===
+Venv Lib: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\..\Lib
+  site-packages
+
+=== Python DLL in venv Scripts ===
+Scripts: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts
+
+=== PATH environment ===
+PATH[:500]: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts;c:\Users\User\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\debugCommand;c:\Users\User\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\copilotCli;C:\Program Files\Microsoft\jdk-17.0.20.101-hotspot\bin;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files (x86)\QuickTime\QTSystem\;C:\Program Files\Git\cmd;C:\Users\U
+
+=== PYTHONPATH ===
+PYTHONPATH: (not set)
+
+=== Test PyInstaller subprocess ===
+stdout: 6.22.2
+stderr: 
+rc: 0

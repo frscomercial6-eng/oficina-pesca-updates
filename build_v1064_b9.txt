@@ -1,0 +1,68 @@
+START: 13:59:23\n244 INFO: PyInstaller: 6.22.2, contrib hooks: 2026.7
+244 INFO: Python: 3.11.0
+257 INFO: Platform: Windows-10-10.0.19045-SP0
+257 INFO: Python environment: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv
+902 WARNING: Failed to collect submodules for 'google._async_resumable_media.requests' because importing 'google._async_resumable_media.requests' raised: ModuleNotFoundError: No module named 'aiohttp'
+9022 WARNING: collect_data_files - skipping data collection for module 'google_auth' as it is not a package.
+9024 WARNING: collect_dynamic_libs - skipping library collection for module 'google_auth' as it is not a package.
+9319 WARNING: collect_data_files - skipping data collection for module 'google_api_python_client' as it is not a package.
+9320 WARNING: collect_dynamic_libs - skipping library collection for module 'google_api_python_client' as it is not a package.
+10761 INFO: Module search paths (PYTHONPATH):
+['F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\DLLs',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\Lib',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv',
+ 'F:\\PROGRAMA\\OFICINA DE '
+ 'PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL']
+11563 INFO: Appending 'datas' from .spec
+11897 INFO: checking Analysis
+11897 INFO: Building Analysis because Analysis-00.toc is non existent
+11897 INFO: Looking for Python shared library...
+11897 INFO: Using Python shared library: C:\Users\User\AppData\Local\Programs\Python\Python311\python311.dll
+11897 INFO: Running Analysis Analysis-00.toc
+11897 INFO: Target bytecode optimization level: 0
+11897 INFO: Initializing module dependency graph...
+11900 INFO: Initializing module graph hook caches...
+12301 WARNING: Runtime hooks for cryptography have already been defined. Skipping the runtime hooks for cryptography that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12301 WARNING: Runtime hooks for enchant have already been defined. Skipping the runtime hooks for enchant that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12301 WARNING: Runtime hooks for findlibs have already been defined. Skipping the runtime hooks for findlibs that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12301 WARNING: Runtime hooks for ffpyplayer have already been defined. Skipping the runtime hooks for ffpyplayer that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12301 WARNING: Runtime hooks for osgeo have already been defined. Skipping the runtime hooks for osgeo that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12301 WARNING: Runtime hooks for traitlets have already been defined. Skipping the runtime hooks for traitlets that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12301 WARNING: Runtime hooks for usb have already been defined. Skipping the runtime hooks for usb that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12302 WARNING: Runtime hooks for nltk have already been defined. Skipping the runtime hooks for nltk that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12302 WARNING: Runtime hooks for pyproj have already been defined. Skipping the runtime hooks for pyproj that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12302 WARNING: Runtime hooks for pygraphviz have already been defined. Skipping the runtime hooks for pygraphviz that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12302 WARNING: Runtime hooks for pythoncom have already been defined. Skipping the runtime hooks for pythoncom that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12302 WARNING: Runtime hooks for pyqtgraph have already been defined. Skipping the runtime hooks for pyqtgraph that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12303 WARNING: Runtime hooks for pywintypes have already been defined. Skipping the runtime hooks for pywintypes that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12303 WARNING: Runtime hooks for tensorflow have already been defined. Skipping the runtime hooks for tensorflow that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+12305 INFO: Analyzing modules for base_library.zip ...
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\__main__.py", line 321, in <module>
+    run()
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\__main__.py", line 215, in run
+    run_build(pyi_config, spec_file, **vars(args))
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\__main__.py", line 70, in run_build
+    PyInstaller.building.build_main.main(pyi_config, spec_file, **kwargs)
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\building\build_main.py", line 1275, in main
+    build(specfile, distpath, workpath, clean_build)
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\building\build_main.py", line 1213, in build
+    exec(code, spec_namespace)
+  File "Oficina_Pesca.spec", line 25, in <module>
+    a = Analysis(
+        ^^^^^^^^^
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\building\build_main.py", line 584, in __init__
+    self.__postinit__()
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\building\datastruct.py", line 184, in __postinit__
+    self.assemble()
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\building\build_main.py", line 676, in assemble
+    self.graph = initialize_modgraph(excludes=self.excludes, user_hook_dirs=self.hookspath)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\depend\analysis.py", line 970, in initialize_modgraph
+EXIT:3221225786\n

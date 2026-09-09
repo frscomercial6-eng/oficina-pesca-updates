@@ -1,0 +1,26 @@
+Traceback (most recent call last):
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\_test_bytecode.py", line 65, in <module>
+    result = python.call('os.getpid')
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv_build\Lib\site-packages\PyInstaller\isolated\_parent.py", line 314, in call
+    self._send(function.__code__, function.__defaults__, function.__kwdefaults__, args, kwargs)
+               ^^^^^^^^^^^^^^^^^
+AttributeError: 'str' object has no attribute '__code__'
+Testing bytecode compilation...
+  OK: spawn.py
+  OK: __init__.py
+
+Errors: 0
+
+Testing critical imports...
+  OK: multiprocessing
+  OK: multiprocessing.spawn
+  OK: multiprocessing.context
+
+Total errors: 0
+
+Testing Analysis without multiprocessing subprocess...
+
+Testing Analysis isolated subprocess directly...
+Running simple isolated test...
+  ERROR: AttributeError: 'str' object has no attribute '__code__'

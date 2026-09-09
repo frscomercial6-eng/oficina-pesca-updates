@@ -8,12 +8,15 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.63"
+#define AppVersion "1.0.65"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
-#define SourceDir "dist\Oficina_Pesca"
-#define LicenseSecret "ALTERAR-EM-PRODUCAO"
+#define SourceDir "INSTALADOR_FINAL\\Oficina_Pesca"
+; LicenseSecret removido do uso como segredo em runtime (Fase A1 da v1.0.64).
+; O segredo do licenciamento e configurado por meios seguros:
+;   - variavel de ambiente OFP_LICENCA_SECRET, ou
+;   - chave [licenca] secret no config.cfg.
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -27,7 +30,7 @@ DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.63
+OutputBaseFilename=Setup_OficinaPesca_v1.0.65
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -58,11 +61,11 @@ Name: "desktopicon"; Description: "Criar ícone na Área de Trabalho"; GroupDesc
 
 [Files]
 ; Todos os arquivos gerados pelo PyInstaller (excluindo .env para nao expor credenciais)
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Components: core; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,apk_celular_distribuicao\*,*.db,config.cfg,config.json,versao.json,licenca.key,licenca.json,licencas.json"
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Components: core; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,apk_celular_distribuicao\*,*.db,config.cfg,config.json,versao.json,licenca.key,licenca.json,licencas.json,*.pyd"
 ; Apenas os dois arquivos de distribuicao mobile (APK assinado + instrucoes)
-Source: "apk_celular_distribuicao\oficina_pesca_v1.0.63.apk"; DestDir: "{app}\apk_celular_distribuicao"; Components: core; Flags: ignoreversion
+; Source: "apk_celular_distribuicao\oficina_pesca_v1.0.65.apk"; DestDir: "{app}\apk_celular_distribuicao"; Components: core; Flags: ignoreversion
 Source: "apk_celular_distribuicao\instrucoes_instalacao.txt"; DestDir: "{app}\apk_celular_distribuicao"; Components: core; Flags: ignoreversion skipifsourcedoesntexist
-Source: "apk_celular_distribuicao\oficina_pesca_v1.0.63.apk"; DestDir: "{app}\_internal\apk_celular_distribuicao"; Components: core; Flags: ignoreversion
+; Source: "apk_celular_distribuicao\oficina_pesca_v1.0.65.apk"; DestDir: "{app}\_internal\apk_celular_distribuicao"; Components: core; Flags: ignoreversion
 Source: "apk_celular_distribuicao\instrucoes_instalacao.txt"; DestDir: "{app}\_internal\apk_celular_distribuicao"; Components: core; Flags: ignoreversion skipifsourcedoesntexist
 ; Imagens de fundo do menu
 Source: "fundomenu.png";      DestDir: "{app}"; Components: core; Flags: ignoreversion

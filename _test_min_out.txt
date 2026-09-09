@@ -1,0 +1,26 @@
+360 INFO: Initializing module dependency graph...
+374 INFO: Initializing module graph hook caches...
+406 INFO: Analyzing modules for base_library.zip ...
+2771 INFO: Processing standard module hook 'hook-heapq.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+3197 INFO: Processing standard module hook 'hook-encodings.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+6641 INFO: Processing standard module hook 'hook-math.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+6904 INFO: Processing standard module hook 'hook-pickle.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+10196 INFO: Caching module dependency graph...
+Traceback (most recent call last):
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\_test_min_pyi.py", line 39, in <module>
+    print(f"  OK: graph nodes={len(result.nodes())}")
+                               ^^^^^^^^^^^^^^^^^^^
+TypeError: object of type 'generator' has no len()
+Teste 1: PyInstaller --help
+  Exit: 0
+
+Teste 2: import PyInstaller
+  OK: 6.22.2
+
+Teste 3: import depend.analysis
+  OK
+
+Teste 4: initialize_modgraph()
+  ERRO: object of type 'generator' has no len()
+
+Feito.

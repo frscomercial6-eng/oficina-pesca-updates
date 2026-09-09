@@ -1,0 +1,16 @@
+Ambiente:
+  Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+  Version: 3.11.0 (main, Oct 24 2022, 18:26:48) [MSC v.1933 64 bit (AMD64)]
+  Platform: win32
+
+Subprocesso test: import sys; print(sys.executable); import pickle; ...
+  Exit: 0
+  STDOUT: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+pickle OK
+
+
+Rodando hook-pickle.py em subprocesso...
+  Exit: 0
+  STDOUT: 
+
+Feito.

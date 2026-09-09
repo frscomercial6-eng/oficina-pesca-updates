@@ -1,0 +1,13 @@
+Python version: sys.version_info(major=3, minor=11, micro=0, releaselevel='final', serial=0)
+
+spawn.py size: 9421
+Has 'spawn' function def: False
+Has 'spawn_main' function def: True
+
+Searching for 'from .spawn import' or conditional imports:
+  Line 89:         prog = 'from multiprocessing.spawn import spawn_main; spawn_main(%s)'
+
+
+Checking multiprocessing/__init__.py:
+Size: 916
+Has 'from .spawn import': False

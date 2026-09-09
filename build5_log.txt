@@ -1,0 +1,24 @@
+213 INFO: PyInstaller: 6.22.2, contrib hooks: 2026.7
+213 INFO: Python: 3.11.0
+222 INFO: Platform: Windows-10-10.0.19045-SP0
+222 INFO: Python environment: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv
+225 INFO: wrote F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\Oficina_Pesca.spec
+791 WARNING: Failed to collect submodules for 'google._async_resumable_media.requests' because importing 'google._async_resumable_media.requests' raised: ModuleNotFoundError: No module named 'aiohttp'
+8221 WARNING: collect_data_files - skipping data collection for module 'google_auth' as it is not a package.
+8222 WARNING: collect_dynamic_libs - skipping library collection for module 'google_auth' as it is not a package.
+8456 WARNING: collect_data_files - skipping data collection for module 'google_api_python_client' as it is not a package.
+8457 WARNING: collect_dynamic_libs - skipping library collection for module 'google_api_python_client' as it is not a package.
+10129 INFO: Module search paths (PYTHONPATH):
+['F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\DLLs',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\Lib',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv',
+ 'F:\\PROGRAMA\\OFICINA DE '
+ 'PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL']
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\__main__.py", line 321, in <module>

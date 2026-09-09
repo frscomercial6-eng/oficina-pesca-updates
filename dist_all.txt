@@ -1,0 +1,3 @@
+﻿T1_MINIMO
+T1_MINIMO\_internal
+T1_MINIMO\T1_MINIMO.exe

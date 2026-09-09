@@ -1,0 +1,44 @@
+Isolated _parent.py size: 18005
+  Line 270:         # Wait for the child process to exit. The timeout is necessary for corner cases when the sub-process fails to
+  Line 273:         # timeout is relatively short.
+  Line 280:             self._child.wait(timeout=5)
+  Line 281:         except subprocess.TimeoutExpired:
+  Line 286:                 self._child.wait(timeout=15)
+  Line 287:             except subprocess.TimeoutExpired:
+
+Searching for 'call' method...
+  302:     def call(self, function, *args, **kwargs):
+  303:         """
+  304:         Call a function in the child Python. Retrieve its return value. Usage of this method is identical to that
+  305:         of the :func:`call` function.
+  306:         """
+  307:         # If already running in an isolated subprocess, directly execute the function.
+  308:         if self._already_isolated:
+  309:             return function(*args, **kwargs)
+  310: 
+  311:         if self._child is None:
+  312:             raise RuntimeError("An isolated.Python object must be used in a 'with' clause.")
+  313: 
+  314:         self._send(function.__code__, function.__defaults__, function.__kwdefaults__, args, kwargs)
+  315: 
+  316:         # Read a single line of output back from the child. This contains if the function worked and either its return
+  317:         # value or a traceback. This will block indefinitely until it receives a '\n' byte.
+  318:         try:
+  319:             ok, output = loads(b64decode(self._read_handle.readline()))
+  320:         except (EOFError, BrokenPipeError):
+  321:             # Subprocess appears to have died in an unhandleable way (e.g. SIGSEV). Raise an error.
+  322:             raise SubprocessDiedError(
+  323:                 f"Child process died calling {function.__name__}() with args={args} and "
+  324:                 f"kwargs={kwargs}. Its exit code was {self._child.wait()}."
+  325:             ) from None
+  326: 
+  327:         # If all went well, then ``output`` is the return value.
+  328:         if ok:
+  329:             return output
+  330: 
+  331:         # Otherwise an error happened and ``output`` is a string-ified stacktrace. Raise an error appending the
+  332:         # stacktrace. Having the output in this order gives a nice fluent transition from parent to child in the stack
+  333:         # trace.
+  334:         raise RuntimeError(f"Child process call to {function.__name__}() failed with:\n" + output)
+  335: 
+  336:     def _send(self, *objects):

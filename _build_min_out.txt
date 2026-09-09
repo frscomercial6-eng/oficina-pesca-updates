@@ -1,0 +1,107 @@
+Removing: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\Oficina_Pesca.spec
+Removing: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\build
+Removing: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\dist
+Spec: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\Oficina_Pesca.spec
+Building...
+PID: 20344
+297 INFO: PyInstaller: 6.22.2, contrib hooks: 2026.7
+297 INFO: Python: 3.11.0
+310 INFO: Platform: Windows-10-10.0.19045-SP0
+310 INFO: Python environment: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv
+341 INFO: Module search paths (PYTHONPATH):
+['F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\DLLs',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\Lib',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv',
+ 'F:\\PROGRAMA\\OFICINA DE '
+ 'PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL']
+944 INFO: checking Analysis
+945 INFO: Building Analysis because Analysis-00.toc is non existent
+945 INFO: Looking for Python shared library...
+945 INFO: Using Python shared library: C:\Users\User\AppData\Local\Programs\Python\Python311\python311.dll
+945 INFO: Running Analysis Analysis-00.toc
+945 INFO: Target bytecode optimization level: 0
+945 INFO: Initializing module dependency graph...
+947 INFO: Initializing module graph hook caches...
+1249 WARNING: Runtime hooks for cryptography have already been defined. Skipping the runtime hooks for cryptography that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for enchant have already been defined. Skipping the runtime hooks for enchant that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for findlibs have already been defined. Skipping the runtime hooks for findlibs that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for ffpyplayer have already been defined. Skipping the runtime hooks for ffpyplayer that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for osgeo have already been defined. Skipping the runtime hooks for osgeo that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for traitlets have already been defined. Skipping the runtime hooks for traitlets that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for usb have already been defined. Skipping the runtime hooks for usb that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for nltk have already been defined. Skipping the runtime hooks for nltk that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for pyproj have already been defined. Skipping the runtime hooks for pyproj that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for pygraphviz have already been defined. Skipping the runtime hooks for pygraphviz that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for pythoncom have already been defined. Skipping the runtime hooks for pythoncom that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for pyqtgraph have already been defined. Skipping the runtime hooks for pyqtgraph that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for pywintypes have already been defined. Skipping the runtime hooks for pywintypes that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1250 WARNING: Runtime hooks for tensorflow have already been defined. Skipping the runtime hooks for tensorflow that are defined in F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+1252 INFO: Analyzing modules for base_library.zip ...
+3245 INFO: Processing standard module hook 'hook-encodings.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+6304 INFO: Processing standard module hook 'hook-math.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+6646 INFO: Processing standard module hook 'hook-pickle.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+10055 INFO: Processing standard module hook 'hook-heapq.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+11105 INFO: Caching module dependency graph...
+11269 INFO: Analyzing F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\login.py
+12586 INFO: Processing standard module hook 'hook-webbrowser.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+12615 INFO: Processing standard module hook 'hook-sqlite3.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+13993 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+13996 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+14898 INFO: Processing standard module hook 'hook-_tkinter.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+15142 INFO: Processing standard module hook 'hook-platform.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+15545 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+15753 INFO: Processing standard module hook 'hook-xml.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+16552 INFO: Processing standard module hook 'hook-_ctypes.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+17591 INFO: Processing standard module hook 'hook-cryptography.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+20677 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
+21111 INFO: Processing standard module hook 'hook-bcrypt.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+22826 INFO: Processing standard module hook 'hook-difflib.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+23295 INFO: Processing standard module hook 'hook-sysconfig.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+23935 INFO: Processing standard module hook 'hook-urllib3.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+24115 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+24117 INFO: SetuptoolsInfo: initializing cached setuptools info...
+25125 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+25134 INFO: Processing standard module hook 'hook-setuptools.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+25154 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+25155 INFO: Processing pre-find-module-path hook 'hook-distutils.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+25693 INFO: Processing standard module hook 'hook-distutils.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+25724 INFO: Processing standard module hook 'hook-distutils.util.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+25784 INFO: Processing standard module hook 'hook-_osx_support.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+25860 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26045 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26265 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26266 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
+26281 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+26283 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26462 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26463 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
+26804 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26805 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
+26845 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+26962 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26995 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
+27521 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+27522 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
+28447 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+30573 INFO: Processing standard module hook 'hook-certifi.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+30656 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+31435 INFO: Processing standard module hook 'hook-pycparser.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+33070 INFO: Processing standard module hook 'hook-anyio.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+35673 INFO: Processing standard module hook 'hook-pygments.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+37476 INFO: Processing standard module hook 'hook-customtkinter.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+38085 INFO: Processing standard module hook 'hook-PIL.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+38248 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+38763 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+38941 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+39508 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+41432 INFO: Processing standard module hook 'hook-google.api_core.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+41651 INFO: Processing standard module hook 'hook-httplib2.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+42429 INFO: Processing standard module hook 'hook-jinja2.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+44028 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+44426 INFO: Processing standard module hook 'hook-googleapiclient.model.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+45359 INFO: Processing standard module hook 'hook-pydantic.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+46559 INFO: Processing standard module hook 'hook-zoneinfo.py' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'

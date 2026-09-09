@@ -99,6 +99,14 @@ from config import (
 )
 from shutdown_utils import fechar_sistema
 
+# Sincronização de licença com o Supabase (Fase 1 — v1.0.63).
+# Import tolerante: enquanto o config compilado (config.pyd) não incluir a
+# função, o login continua funcionando e o gancho de startup fica inativo.
+try:
+    from config import sincronizar_licenca_supabase_pendente
+except ImportError:
+    sincronizar_licenca_supabase_pendente = None
+
 # Compatibilidade com versões de config.py que não expõem mais estas funções.
 try:
     from config import preparar_banco_local_priorizando_drive  # type: ignore
@@ -422,6 +430,19 @@ def _executar_varredura_inicializacao() -> None:
         logger.info("[startup] Configuração: %s", msg_cfg)
     else:
         logger.warning("[startup] Configuração: %s", msg_cfg)
+
+    # Sincronização de licença pendente com o Supabase (idempotente, background).
+    # Não bloqueia a inicialização e nunca quebra o startup com Supabase
+    # indisponível (o orquestrador captura exceções e registra falhas localmente).
+    if sincronizar_licenca_supabase_pendente is not None:
+        try:
+            threading.Thread(
+                target=sincronizar_licenca_supabase_pendente,
+                daemon=True,
+                name="ofp-licenca-sync-startup",
+            ).start()
+        except Exception as exc:
+            logger.warning("[startup] Não foi possível agendar sincronização de licença: %s", exc)
 
 
 

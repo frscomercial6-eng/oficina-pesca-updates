@@ -1,0 +1,9 @@
+Hook dirs:
+  F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\hooks: EXISTS
+  F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\hooks\contrib: NOT FOUND
+  F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib: EXISTS
+
+Searching for firebase_admin hooks...
+
+
+Searching ALL hooks for 'firebase'...

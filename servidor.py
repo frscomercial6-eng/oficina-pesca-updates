@@ -153,12 +153,46 @@ def _encerrar_discovery_udp() -> None:
     _DISCOVERY_STOP_EVENT.set()
 
 # ─── CONFIGURAÇÃO JWT ────────────────────────────────────────────────────────
-JWT_SECRET = os.environ.get(
-    "OFP_JWT_SECRET",
-    _CFG.get("servidor", "jwt_secret", fallback="OFP-JWT-ALTERAR-EM-PRODUCAO")
-)
+JWT_SECRET = str(
+    os.environ.get("OFP_JWT_SECRET", "")
+    or _CFG.get("servidor", "jwt_secret", fallback="")
+    or ""
+).strip()
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HORAS = 8
+
+
+def _exigir_jwt_secret() -> str:
+    "Finalidade: falha controlada e explicita quando JWT_SECRET nao estiver configurado."
+    if not JWT_SECRET or JWT_SECRET in ("OFP-JWT-ALTERAR-EM-PRODUCAO", "ALTERAR-EM-PRODUCAO", "dev-secret-key"):
+        raise HTTPException(status_code=500, detail="Configuracao do servidor incompleta: JWT nao configurado.")
+    return JWT_SECRET
+
+
+def _origens_cors_permitidas() -> list[str]:
+    """Origens CORS permitidas (nunca "*"). Configuravel por ambiente/config."""
+    via_env = str(os.environ.get("OFP_CORS_ORIGINS", "") or "").strip()
+    if via_env:
+        return [o.strip() for o in via_env.split(",") if o.strip()]
+    try:
+        via_cfg = str(_CFG.get("servidor", "cors_origins", fallback="") or "").strip()
+    except Exception:
+        via_cfg = ""
+    if via_cfg:
+        return [o.strip() for o in via_cfg.split(",") if o.strip()]
+    origens = ["http://localhost:8000", "http://127.0.0.1:8000"]
+    try:
+        publica = str(_CFG.get("app", "url_app_celular_publica", fallback="") or "").strip()
+        if publica:
+            from urllib.parse import urlparse
+            partes = urlparse(publica)
+            if partes.scheme and partes.netloc:
+                origem = "{0}://{1}".format(partes.scheme, partes.netloc)
+                if origem not in origens:
+                    origens.append(origem)
+    except Exception:
+        pass
+    return origens
 
 # ─── APP ─────────────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -170,7 +204,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origens_cors_permitidas(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -509,12 +543,12 @@ def _registrar_licenca_hub_log(payload: dict) -> None:
 def _criar_token(usuario: str, role: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HORAS)
     payload = {"sub": usuario, "role": role, "exp": expire}
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, _exigir_jwt_secret(), algorithm=JWT_ALGORITHM)
 
 
 def _decodificar_token(token: str) -> dict:
     try:
-        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return jwt.decode(token, _exigir_jwt_secret(), algorithms=[JWT_ALGORITHM])
     except JWTError:
         raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
 
@@ -1394,12 +1428,46 @@ _ZEROCONF_INSTANCE = None
 _ZEROCONF_SERVICE_INFO = None
 
 # ─── CONFIGURAÇÃO JWT ────────────────────────────────────────────────────────
-JWT_SECRET = os.environ.get(
-    "OFP_JWT_SECRET",
-    _CFG.get("servidor", "jwt_secret", fallback="OFP-JWT-ALTERAR-EM-PRODUCAO")
-)
+JWT_SECRET = str(
+    os.environ.get("OFP_JWT_SECRET", "")
+    or _CFG.get("servidor", "jwt_secret", fallback="")
+    or ""
+).strip()
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HORAS = 8
+
+
+def _exigir_jwt_secret() -> str:
+    "Finalidade: falha controlada e explicita quando JWT_SECRET nao estiver configurado."
+    if not JWT_SECRET or JWT_SECRET in ("OFP-JWT-ALTERAR-EM-PRODUCAO", "ALTERAR-EM-PRODUCAO", "dev-secret-key"):
+        raise HTTPException(status_code=500, detail="Configuracao do servidor incompleta: JWT nao configurado.")
+    return JWT_SECRET
+
+
+def _origens_cors_permitidas() -> list[str]:
+    """Origens CORS permitidas (nunca "*"). Configuravel por ambiente/config."""
+    via_env = str(os.environ.get("OFP_CORS_ORIGINS", "") or "").strip()
+    if via_env:
+        return [o.strip() for o in via_env.split(",") if o.strip()]
+    try:
+        via_cfg = str(_CFG.get("servidor", "cors_origins", fallback="") or "").strip()
+    except Exception:
+        via_cfg = ""
+    if via_cfg:
+        return [o.strip() for o in via_cfg.split(",") if o.strip()]
+    origens = ["http://localhost:8000", "http://127.0.0.1:8000"]
+    try:
+        publica = str(_CFG.get("app", "url_app_celular_publica", fallback="") or "").strip()
+        if publica:
+            from urllib.parse import urlparse
+            partes = urlparse(publica)
+            if partes.scheme and partes.netloc:
+                origem = "{0}://{1}".format(partes.scheme, partes.netloc)
+                if origem not in origens:
+                    origens.append(origem)
+    except Exception:
+        pass
+    return origens
 
 # ─── APP ─────────────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -1411,7 +1479,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origens_cors_permitidas(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1557,12 +1625,12 @@ class CloudBackupIn(BaseModel):
 def _criar_token(usuario: str, role: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRE_HORAS)
     payload = {"sub": usuario, "role": role, "exp": expire}
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, _exigir_jwt_secret(), algorithm=JWT_ALGORITHM)
 
 
 def _decodificar_token(token: str) -> dict:
     try:
-        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return jwt.decode(token, _exigir_jwt_secret(), algorithms=[JWT_ALGORITHM])
     except JWTError:
         raise HTTPException(status_code=401, detail="Token inválido ou expirado.")
 

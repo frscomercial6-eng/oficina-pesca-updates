@@ -1,2 +1,2 @@
-versao=1.0.63
-novidades=v1.0.63: APK limpo versionado e sincronização de licenças por e-mail com Supabase.
+versao=1.0.65
+novidades=v1.0.65: APK limpo versionado e sincronização de licenças por e-mail com Supabase.

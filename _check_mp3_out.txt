@@ -1,0 +1,57 @@
+File size: 9421 bytes
+Has 'def spawn': True
+Has 'spawn_main': True
+
+Lines: 302
+
+First 50 lines:
+  1: #
+  2: # Code used to start processes when using the spawn or forkserver
+  3: # start methods.
+  4: #
+  5: # multiprocessing/spawn.py
+  6: #
+  7: # Copyright (c) 2006-2008, R Oudkerk
+  8: # Licensed to PSF under a Contributor Agreement.
+  9: #
+ 10: 
+ 11: import os
+ 12: import sys
+ 13: import runpy
+ 14: import types
+ 15: 
+ 16: from . import get_start_method, set_start_method
+ 17: from . import process
+ 18: from .context import reduction
+ 19: from . import util
+ 20: 
+ 21: __all__ = ['_main', 'freeze_support', 'set_executable', 'get_executable',
+ 22:            'get_preparation_data', 'get_command_line', 'import_main_path']
+ 23: 
+ 24: #
+ 25: # _python_exe is the assumed path to the python executable.
+ 26: # People embedding Python want to modify it.
+ 27: #
+ 28: 
+ 29: if sys.platform != 'win32':
+ 30:     WINEXE = False
+ 31:     WINSERVICE = False
+ 32: else:
+ 33:     WINEXE = getattr(sys, 'frozen', False)
+ 34:     WINSERVICE = sys.executable.lower().endswith("pythonservice.exe")
+ 35: 
+ 36: def set_executable(exe):
+ 37:     global _python_exe
+ 38:     if sys.platform == 'win32':
+ 39:         _python_exe = os.fsdecode(exe)
+ 40:     else:
+ 41:         _python_exe = os.fsencode(exe)
+ 42: 
+ 43: def get_executable():
+ 44:     return _python_exe
+ 45: 
+ 46: if WINSERVICE:
+ 47:     set_executable(os.path.join(sys.exec_prefix, 'python.exe'))
+ 48: else:
+ 49:     set_executable(sys.executable)
+ 50: 

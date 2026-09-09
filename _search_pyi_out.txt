@@ -1,0 +1,10 @@
+Searching for multiprocessing.spawn.spawn in PyInstaller...
+FOUND in: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv_build\Lib\site-packages\PyInstaller\hooks\rthooks\pyi_rth_multiprocessing.py
+  Line 81:             multiprocessing.spawn.spawn_main(**kwds)
+
+Searching for how Analysis is run...
+  89:     Discover hook directories via pyinstaller40 entry points. Perform the discovery in an isolated subprocess
+  288:                 except isolated.SubprocessDiedError as e:
+  289:                     # Re-raise as `isolated.SubprocessDiedError` again, to trigger error-handling codepath in
+  291:                     raise isolated.SubprocessDiedError(
+  292:                         f"Isolated subprocess crashed while importing package {package!r}! "

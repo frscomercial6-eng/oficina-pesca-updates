@@ -3284,6 +3284,39 @@ class FrmOS(ctk.CTkToplevel):
 
         return encontrados
 
+        return encontrados
+
+    def _abrir_url_navegador(self, url: str, parent_win=None) -> tuple[bool, str]:
+        """Abre URL no navegador padrão com fallback robusto.
+        Retorna (sucesso: bool, método_usado: str).
+        Não bloqueia a interface. Não usa caminhos absolutos.
+        Usa apenas stdlib (webbrowser + subprocess).
+        """
+        # Tentativa 1: webbrowser.open()
+        try:
+            resultado = webbrowser.open(url)
+            logger.info("[DIAGRAMA] webbrowser.open('%s') -> %s", url, resultado)
+            if resultado:
+                return True, "webbrowser"
+        except Exception as exc:
+            logger.warning("[DIAGRAMA] webbrowser.open('%s') falhou: %s", url, exc)
+
+        # Tentativa 2: fallback Windows via subprocess (cmd /c start)
+        try:
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            logger.info("[DIAGRAMA] subprocess fallback abriu: %s", url)
+            return True, "subprocess"
+        except Exception as exc:
+            logger.warning("[DIAGRAMA] subprocess fallback falhou para '%s': %s", url, exc)
+
+        # Todas as tentativas falharam
+        logger.error("[DIAGRAMA] Todas as tentativas de abrir URL falharam: %s", url)
+        return False, ""
+
     def _popup_opcoes_diagrama(self, fabricante: str, modelo: str, opcoes: list[dict]) -> tuple[bool, bool]:
         resolvido = {"ok": False}
         tentou = {"flag": False}
@@ -3299,13 +3332,11 @@ class FrmOS(ctk.CTkToplevel):
 
         def abrir_e_validar(url_diagrama: str):
             tentou["flag"] = True
-            try:
-                webbrowser.open(url_diagrama)
-            except Exception:
+            sucesso, metodo = self._abrir_url_navegador(url_diagrama, win)
+            if not sucesso:
                 messagebox.showwarning(t('msg_titulo_diagrama'), t('msg_link_nao_aberto'), parent=win)
                 return
-            
-            # Salvamento automático sem perguntar
+            # Salvamento automatico sem perguntar
             self._salvar_diagrama_silencioso(fabricante, modelo, url_diagrama)
             self._registrar_sucesso_colaborativo(fabricante, modelo, url_diagrama)
 
@@ -3508,12 +3539,12 @@ class FrmOS(ctk.CTkToplevel):
         self._run_ai_alert_scan_and_notify(fabricante, modelo, termo_busca)
 
         def _open_and_save():
-            try:
-                webbrowser.open(url)
-                self._salvar_diagrama_silencioso(fabricante, modelo, url) # Step 5: Total Synchronization
+            sucesso, metodo = self._abrir_url_navegador(url, win)
+            if sucesso:
+                self._salvar_diagrama_silencioso(fabricante, modelo, url)
                 self._atualizar_status_busca_diagrama(f"Diagrama para '{display_name}' aberto e salvo.", cor="#2ecc71")
-            except Exception as e:
-                self._atualizar_status_busca_diagrama(f"Erro ao abrir diagrama: {e}", cor="#e74c3c")
+            else:
+                self._atualizar_status_busca_diagrama("Erro ao abrir diagrama.", cor="#e74c3c")
 
         win.after(100, _open_and_save)
 
@@ -3565,9 +3596,12 @@ class FrmOS(ctk.CTkToplevel):
             fabricante, modelo = self._extrair_fabricante_modelo(termo_busca)
             self._run_ai_alert_scan_and_notify(fabricante, modelo, termo_busca)
 
-            webbrowser.open(url_to_open)
-            self._salvar_diagrama_silencioso(fabricante, modelo, url_to_open) # Step 5: Total Synchronization
-            self._atualizar_status_busca_diagrama(f"Diagrama para '{display_name}' aberto e salvo.", cor="#2ecc71")
+            sucesso, metodo = self._abrir_url_navegador(url_to_open, win)
+            if sucesso:
+                self._salvar_diagrama_silencioso(fabricante, modelo, url_to_open)
+                self._atualizar_status_busca_diagrama(f"Diagrama para '{display_name}' aberto e salvo.", cor="#2ecc71")
+            else:
+                self._atualizar_status_busca_diagrama("Erro ao abrir diagrama.", cor="#e74c3c")
 
         for link_info in links:
             url = link_info["url"]

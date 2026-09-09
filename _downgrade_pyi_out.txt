@@ -1,0 +1,7 @@
+Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+Current: Name: pyinstaller
+
+Trying PyInstaller 6.11.0...
+Install result: 0
+After install: Name: pyinstaller
+After 2nd install: Name: pyinstaller

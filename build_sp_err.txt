@@ -1,0 +1,28 @@
+139 INFO: PyInstaller: 6.22.2, contrib hooks: 2026.7
+140 INFO: Python: 3.11.0
+179 INFO: Platform: Windows-10-10.0.19045-SP0
+183 INFO: Python environment: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv
+651 WARNING: Failed to collect submodules for 'google._async_resumable_media.requests' because importing 'google._async_resumable_media.requests' raised: ModuleNotFoundError: No module named 'aiohttp'
+6788 WARNING: collect_data_files - skipping data collection for module 'google_auth' as it is not a package.
+6789 WARNING: collect_dynamic_libs - skipping library collection for module 'google_auth' as it is not a package.
+6992 WARNING: collect_data_files - skipping data collection for module 'google_api_python_client' as it is not a package.
+7010 WARNING: collect_dynamic_libs - skipping library collection for module 'google_api_python_client' as it is not a package.
+8115 INFO: Module search paths (PYTHONPATH):
+['F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\DLLs',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\Lib',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv',
+ 'F:\\PROGRAMA\\OFICINA DE '
+ 'PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL']
+8641 INFO: Appending 'datas' from .spec
+8851 INFO: checking Analysis
+8860 INFO: Building Analysis because Analysis-00.toc is non existent
+8861 INFO: Looking for Python shared library...
+8861 INFO: Using Python shared library: C:\Users\User\AppData\Local\Programs\Python\Python311\python311.dll
+8862 INFO: Running Analysis Analysis-00.toc
+8863 INFO: Target bytecode optimization level: 0
+8864 INFO: Initializing module dependency graph...
+8867 INFO: Initializing module graph hook caches...

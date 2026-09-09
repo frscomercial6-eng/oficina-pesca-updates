@@ -1,0 +1,36 @@
+Checking hook files for 'isolated' imports...
+  HOOK WITH isolated: hook-gi.repository.Gst.py
+  HOOK WITH isolated: hook-matplotlib.backends.py
+  HOOK WITH isolated: hook-matplotlib.py
+  HOOK WITH isolated: hook-PySide2.Qwt5.py
+  HOOK WITH isolated: hook-setuptools._vendor.importlib_metadata.py
+  HOOK WITH isolated: hook-setuptools._vendor.jaraco.text.py
+  HOOK WITH isolated: hook-sqlalchemy.py
+
+Checking contrib hooks...
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\pre_safe_import_module\hook-win32com.py
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\stdhooks\hook-cryptography.py
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\stdhooks\hook-enchant.py
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\stdhooks\hook-ffpyplayer.py
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\stdhooks\hook-gribapi.py
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\stdhooks\hook-langchain.py
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\stdhooks\hook-pygraphviz.py
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\stdhooks\hook-pylsl.py
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\stdhooks\hook-pypemicro.py
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\stdhooks\hook-sentry_sdk.py
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\stdhooks\hook-tkinterdnd2.py
+  HOOK WITH isolated: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\_pyinstaller_hooks_contrib\stdhooks\hook-wx.lib.activex.py
+
+Checking PyInstaller isolated module...
+  Isolated dir: ['_child.py', '_parent.py', '__init__.py', '__pycache__']
+
+Isolated module: <module 'PyInstaller.isolated' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\isolated\\__init__.py'>
+Isolated file: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\isolated\__init__.py
+
+build_main: <module 'PyInstaller.building.build_main' from 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages\\PyInstaller\\building\\build_main.py'>
+build_main file: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\building\build_main.py
+
+PyInstaller env vars:
+
+PyInstaller path: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller
+PyInstaller size: 62,509 bytes

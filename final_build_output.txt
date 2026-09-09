@@ -1,0 +1,61 @@
+
+    🚀 FRS Solutions - Orquestrador de Build 🚀     
+══════════════════════════════════════════════════
+ℹ️  Incremento automático de versão desativado (--no-bump/CI).
+══════════════════════════════════════════════════
+🧼 Limpeza total pré-build (dist, build, __pycache__ e APKs antigos)...
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\annotated_types\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\bcrypt\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\certifi\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\charset_normalizer\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\click\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\hazmat\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\hazmat\backends\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\hazmat\backends\openssl\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\hazmat\bindings\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\hazmat\bindings\openssl\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\hazmat\decrepit\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\hazmat\decrepit\ciphers\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\hazmat\primitives\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\hazmat\primitives\asymmetric\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\hazmat\primitives\ciphers\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\hazmat\primitives\serialization\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\cryptography\x509\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\customtkinter\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\customtkinter\windows\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\customtkinter\windows\widgets\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\customtkinter\windows\widgets\appearance_mode\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\customtkinter\windows\widgets\core_rendering\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\customtkinter\windows\widgets\core_widget_classes\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\customtkinter\windows\widgets\font\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\customtkinter\windows\widgets\image\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\customtkinter\windows\widgets\scaling\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\customtkinter\windows\widgets\theme\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\customtkinter\windows\widgets\utility\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\darkdetect\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\defusedxml\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\dotenv\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\firebase_admin\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\google\api_core\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\google\auth\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\google\auth\crypt\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\google\auth\transport\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\google\oauth2\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\googleapiclient\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\google_auth_oauthlib\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\httplib2\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\httpx\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\httpx\_transports\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\idna\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\jwt\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\multidict\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\oauth2client\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\oauthlib\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\oauthlib\oauth1\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\oauthlib\oauth1\rfc5849\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\oauthlib\oauth1\rfc5849\endpoints\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\oauthlib\oauth2\__pycache__
+🧹 __pycache__ removido: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\oauthlib\oauth2\rfc6749\__pycache__

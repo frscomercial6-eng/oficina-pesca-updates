@@ -1,0 +1,7 @@
+Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv_build\Scripts\python.exe
+Python version: 3.11.0 (main, Oct 24 2022, 18:26:48) [MSC v.1933 64 bit (AMD64)]
+Traceback (most recent call last):
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\_test_analysis.py", line 14, in <module>
+    original_spawn = multiprocessing.spawn.spawn
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'multiprocessing.spawn' has no attribute 'spawn'

@@ -1,0 +1,5 @@
+330 INFO: PyInstaller: 6.11.0, contrib hooks: 2026.7
+330 INFO: Python: 3.11.0
+341 INFO: Platform: Windows-10-10.0.19045-SP0
+341 INFO: Python environment: F:\PROGRAMA\.venv_oficina_pesca_build
+^C

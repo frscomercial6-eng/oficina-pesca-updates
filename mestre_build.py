@@ -4,6 +4,7 @@ import json
 import configparser
 import hashlib
 import os
+from pathlib import Path
 import shutil
 import sys
 import subprocess
@@ -13,7 +14,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 DIV = "═" * 50
-VERSAO = "1.0.63"
+VERSAO = "1.0.64"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -173,16 +174,7 @@ PYINSTALLER_HIDDEN_IMPORTS = [
     "certifi",
 ]
 
-PYINSTALLER_COLLECT_ALL = [
-    "customtkinter",
-    "fpdf",
-    "googleapiclient",
-    "google_auth_oauthlib",
-    "google",
-    "google_auth",
-    "google_api_python_client",
-    "reportlab",
-]
+PYINSTALLER_COLLECT_ALL = []  # collect-all removidos
 
 def print_header():
     print(f"\n{'🚀 FRS Solutions - Orquestrador de Build 🚀':^50}")
@@ -428,6 +420,27 @@ def _atualizar_scripts_instalador(nova_versao: str) -> None:
             print(f"ℹ️  Script BAT já alinhado: {path}")
 
 
+def _ler_versao_estabelecida() -> str:
+    """Lê a versão já estabelecida nos manifests locais do projeto (version.txt/versao.txt)."""
+    try:
+        if os.path.exists("version.txt"):
+            with open("version.txt", encoding="utf-8") as _f:
+                _m = re.search(r"([0-9]+(?:\.[0-9]+){2})", _f.read())
+            if _m:
+                return _m.group(1)
+    except Exception:
+        pass
+    try:
+        if os.path.exists("versao.txt"):
+            with open("versao.txt", encoding="utf-8") as _f:
+                _m = re.search(r"(?m)^versao\s*=\s*([0-9]+(?:\.[0-9]+){2})\s*$", _f.read())
+            if _m:
+                return _m.group(1)
+    except Exception:
+        pass
+    return ""
+
+
 def _sincronizar_versao_global(nova_versao: str) -> None:
     print(DIV)
     print(f"🔁 Sincronizando versão global para {nova_versao}...")
@@ -617,34 +630,22 @@ def _limpar_pasta_apk_legada() -> None:
 
 
 def _incrementar_versao_patch() -> str:
-    """Incrementa o patch da VERSAO na fonte única (este arquivo) e no módulo."""
+    """Incrementa o patch da VERSAO apenas EM MEMÓRIA, para a execução atual.
+
+    Nenhuma execução pode reescrever permanentemente a constante VERSAO no
+    próprio mestre_build.py: o incremento não é mais persistido no
+    código-fonte. Execuções com --no-bump (ou CI) nem sequer incrementam.
+    """
+    if NO_BUMP or IS_CI:
+        return VERSAO
     partes = str(VERSAO).split(".")
     if len(partes) != 3 or not all(p.isdigit() for p in partes):
         print(f"⚠️  Versão atual ({VERSAO}) não é X.Y.Z; incremento automático ignorado.")
         return VERSAO
     nova = f"{partes[0]}.{partes[1]}.{int(partes[2]) + 1}"
-    caminho_self = os.path.abspath(__file__)
-    try:
-        with open(caminho_self, encoding="utf-8") as f:
-            conteudo = f.read()
-        novo_conteudo, n = re.subn(
-            r'^VERSAO\s*=\s*"[^"]+"\s*$',
-            f'VERSAO = "{nova}"',
-            conteudo,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        if n == 0:
-            print("⚠️  Não foi possível reescrever VERSAO no arquivo; incremento ignorado.")
-            return VERSAO
-        with open(caminho_self, "w", encoding="utf-8", newline="") as f:
-            f.write(novo_conteudo)
-    except Exception as exc:
-        print(f"⚠️  Falha ao incrementar versão no arquivo: {exc}")
-        return VERSAO
     anterior = VERSAO
     globals()["VERSAO"] = nova
-    print(f"⬆️  Versão incrementada automaticamente: {anterior} -> {nova}")
+    print(f"⬆️  Versão incrementada apenas em memória (código-fonte preservado): {anterior} -> {nova}")
     return nova
 
 
@@ -1039,20 +1040,43 @@ def _resolver_python_build() -> str:
     raise FileNotFoundError("Nenhum interpretador Python válido foi encontrado para o build.")
 
 
-def _limpar_pycache_recursivo(base_dir: str) -> int:
+
+def _limpar_pycache_recursivo(base_dir):
+    """
+    Remove caches Python SOMENTE do codigo do projeto.
+
+    IMPORTANTE:
+    Nunca remover __pycache__ dentro de .venv/site-packages,
+    pois essas areas pertencem ao ambiente de dependencias e ao
+    proprio PyInstaller.
+    """
+    base = Path(base_dir).resolve()
+    ignorados = {".venv", "venv", "site-packages", "site_packages"}
+
     removidos = 0
-    for raiz, dirs, _files in os.walk(base_dir):
-        for nome_dir in list(dirs):
-            if nome_dir != "__pycache__":
-                continue
-            caminho = os.path.join(raiz, nome_dir)
-            try:
-                shutil.rmtree(caminho, ignore_errors=True)
-                removidos += 1
-                print(f"🧹 __pycache__ removido: {caminho}")
-            except Exception as exc:
-                print(f"⚠️  Falha ao remover __pycache__ ({caminho}): {exc}")
+
+    for caminho in base.rglob("__pycache__"):
+        try:
+            relativo = caminho.relative_to(base)
+        except ValueError:
+            continue
+
+        partes = {parte.lower() for parte in relativo.parts}
+
+        if partes.intersection({x.lower() for x in ignorados}):
+            continue
+
+        if not caminho.is_dir():
+            continue
+
+        import shutil
+        shutil.rmtree(caminho, ignore_errors=False)
+        removidos += 1
+
+    print(f"__pycache__ do projeto removidos: {removidos}")
+    print(".venv/site-packages preservado.")
     return removidos
+
 
 
 def _limpar_apks_assets_internos(base_dir: str) -> int:
@@ -1072,6 +1096,39 @@ def _limpar_apks_assets_internos(base_dir: str) -> int:
                 print(f"🧹 APK antigo removido de assets/interno: {caminho}")
             except Exception as exc:
                 print(f"⚠️  Falha ao remover APK antigo ({caminho}): {exc}")
+    return removidos
+
+
+# Diretórios de ambientes de desenvolvimento/dependências que a limpeza de
+# .pyd do projeto NÃO deve percorrer (FASE B3). Os binários nativos da venv
+# são gerenciados pelo pip; só os .pyd do próprio projeto (compilados em
+# versões anteriores) devem ser candidatos à remoção.
+_PYD_CLEAN_PRUNED_DIRS = {".venv", "venv", "site-packages", "site_packages"}
+
+
+def _limpar_pyd_pre_build(base_dir: str) -> int:
+    """Remove .pyd obsoletos do projeto antes do build para evitar que
+    artefatos compilados de versões anteriores contaminem a distribuição.
+
+    Módulos do projeto são distribuídos como fonte (.py); não existe cadeia
+    oficial/versionada de compilação Cython/mypyc reproduzível no build atual.
+
+    A varredura recursiva poda subárvores de ambientes de desenvolvimento/
+    dependências (.venv, venv, site-packages) para não destruir os binários
+    nativos das dependências do build (FASE B3)."""
+    removidos = 0
+    for raiz, _dirs, arquivos in os.walk(base_dir):
+        _dirs[:] = [d for d in _dirs if d not in _PYD_CLEAN_PRUNED_DIRS]
+        for nome in arquivos:
+            if not nome.lower().endswith(".pyd"):
+                continue
+            caminho = os.path.join(raiz, nome)
+            try:
+                os.remove(caminho)
+                removidos += 1
+                print(f"🧹 .pyd antigo removido: {caminho}")
+            except Exception as exc:
+                print(f"⚠️  Falha ao remover .pyd antigo ({caminho}): {exc}")
     return removidos
 
 
@@ -1100,13 +1157,16 @@ def _limpeza_total_pre_build() -> None:
 
     total_pycache = 0
     total_apk_assets = 0
+    total_pyd = 0
     for base in bases:
         total_pycache += _limpar_pycache_recursivo(base)
         total_apk_assets += _limpar_apks_assets_internos(base)
+        total_pyd += _limpar_pyd_pre_build(base)
 
     print(
         f"✅ Limpeza total concluída: __pycache__ removidos={total_pycache}, "
-        f"APKs antigos em assets/_internal removidos={total_apk_assets}"
+        f"APKs antigos em assets/_internal removidos={total_apk_assets}, "
+        f".pyd antigos removidos={total_pyd}"
     )
     print(DIV)
 
@@ -1161,19 +1221,98 @@ def _validar_pasta_trabalho() -> bool:
     return True
 
 
+# Código executado pelo subprocesso do smoke test.
+#
+# `login.py` monta a janela e entra em `janela_login.mainloop()` no nível do
+# módulo (DURANTE o próprio `import login`). Por isso o callback NÃO pode ser
+# agendado após o import: o import só retornaria quando o mainloop terminasse,
+# o que nunca acontece (o processo ficaria preso até o timeout).
+#
+# Solução (validada no probe V3): interceptar `ctk.CTk.mainloop` ANTES do
+# import. Na primeira chamada — exatamente a que login.py faz na linha do
+# mainloop — agenda-se via `after(100, ...)` um callback DENTRO do event loop.
+# O callback registra o marcador de sucesso ANTES de chamar `destroy()`
+# (SafeCTk.destroy() dispara SystemExit(0) → encerramento esperado, rc 0).
+# O fallback pós-import cobre o caso do mainloop interno retornar cedo sem
+# processar o after (ex.: stdin em EOF).
+_SMOKE_CHILD_CODE = "\n".join([
+    "import sys",
+    "marker = sys.argv[1]",
+    "import customtkinter as ctk",
+    "_state = {'done': False}",
+    "def _make_cb(win):",
+    "    def _cb():",
+    "        if _state['done']:",
+    "            return",
+    "        _state['done'] = True",
+    "        open(marker, 'w').write('OK')",
+    "        print('SMOKE_LOGIN_OK', flush=True)",
+    "        win.destroy()",
+    "    return _cb",
+    "_orig_mainloop = ctk.CTk.mainloop",
+    "def _patched_mainloop(self, *args, **kwargs):",
+    "    if not _state['done']:",
+    "        self.after(100, _make_cb(self))",
+    "    return _orig_mainloop(self, *args, **kwargs)",
+    "ctk.CTk.mainloop = _patched_mainloop",
+    "import login",
+    "w = login.janela_login",
+    "if not _state['done'] and w.winfo_exists():",
+    "    w.after(100, _make_cb(w))",
+    "    w.mainloop()",
+    "print('SMOKE_IMPORT_RETURNED', flush=True)",
+])
+
+
 def executar_smoke_test() -> bool:
     print(DIV)
     print(f"🧪 Smoke test de imports: {ENTRY_SCRIPT}")
+    smoke_marker = os.path.join(REPO_ROOT, ".smoke_test_result")
     try:
+        # Remove marcador anterior, se existir
+        if os.path.exists(smoke_marker):
+            os.remove(smoke_marker)
         subprocess.run(
-            [sys.executable, "-c", "import menu; print('SMOKE_IMPORT_OK')"],
+            [sys.executable, "-u", "-c", _SMOKE_CHILD_CODE, smoke_marker],
             check=True,
+            timeout=30,
+            # Determinístico: o subprocesso precisa rodar no diretório do
+            # projeto para `import login` resolver independentemente do CWD
+            # de onde o mestre_build.py foi invocado.
+            cwd=REPO_ROOT,
         )
-        print("✅ Smoke test aprovado.")
-        return True
     except subprocess.CalledProcessError as exc:
-        print(f"❌ Smoke test falhou com código {exc.returncode}.")
+        # Encerramento com código != 0 é FALHA real (não mais sucesso genérico).
+        # SystemExit(0) do SafeCTk.destroy() sai com código 0 e é aceito como
+        # encerramento esperado SOMENTE se o marcador de sucesso foi criado
+        # antes do destroy().
+        if exc.returncode == 0 and os.path.exists(smoke_marker):
+            print("✅ Smoke test aprovado (login carregou; encerramento via destroy/SystemExit(0)).")
+            os.remove(smoke_marker)
+            return True
+        print(f"❌ Smoke test falhou: subprocesso encerrou com código de saída {exc.returncode}.")
+        if os.path.exists(smoke_marker):
+            try:
+                os.remove(smoke_marker)
+            except OSError:
+                pass
         return False
+    except subprocess.TimeoutExpired:
+        print("❌ Smoke test falhou: timeout (processo não encerrou).")
+        if os.path.exists(smoke_marker):
+            try:
+                os.remove(smoke_marker)
+            except OSError:
+                pass
+        return False
+    # Processo encerrou sem exceção (returncode 0): sucesso exige o marcador,
+    # gravado pelo callback ANTES do destroy().
+    if os.path.exists(smoke_marker):
+        print("✅ Smoke test aprovado (login carregou, marcador registrado e janela destruída).")
+        os.remove(smoke_marker)
+        return True
+    print("❌ Smoke test falhou: processo encerrou sem criar o marcador de sucesso.")
+    return False
 
 
 def validar_pre_build() -> bool:
@@ -1636,13 +1775,11 @@ def build(projeto, versao):
             venv_py, "-m", "PyInstaller",
             "--onedir",
             "--windowed",
-            "--clean",
             "--noconfirm",
             "--paths=.",
             "--name", nome,
             "--version-file", version_file_path,
             *hidden_import_args,
-            *collect_all_args,
             *add_data_args,
             ENTRY_SCRIPT
         ]
@@ -1651,7 +1788,7 @@ def build(projeto, versao):
             print(f"🎨 Ícone do executável configurado: {icone_build}")
         else:
             print("⚠️  Nenhum arquivo .ico encontrado; executável pode sair com ícone padrão.")
-        subprocess.run(cmd_build, check=True)
+        subprocess.run(cmd_build, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         dist_dir = os.path.join("dist", nome)
         if not os.path.exists(dist_dir):
@@ -1701,6 +1838,11 @@ def build(projeto, versao):
         os.chdir(old_cwd)
 
 def main():
+    # Garante saída UTF-8 mesmo em consoles Windows cp1252 (emojis/Unicode).
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, OSError):
+        pass
     print_header()
     if not _validar_pasta_trabalho():
         sys.exit(1)
@@ -1708,11 +1850,23 @@ def main():
         print("ℹ️  Incremento automático de versão desativado (--no-bump/CI).")
     else:
         _incrementar_versao_patch()
-    _limpeza_total_pre_build()
     projeto, versao = get_input()
-    if versao != VERSAO:
-        print(f"ℹ️  Versão informada ({versao}) ignorada. Usando fonte única do mestre_build.py: {VERSAO}")
-    versao = VERSAO
+    if NO_BUMP or IS_CI:
+        # Com --no-bump/CI a versão é imutável: propaga-se EXATAMENTE a versão
+        # estabelecida no projeto (constante VERSAO, que não é mais reescrita em
+        # disco por _incrementar_versao_patch()). Neste modo nenhum manifest é
+        # movido para uma versão diferente da versão estabelecida.
+        versao = VERSAO
+        _estabelecida = _ler_versao_estabelecida()
+        if _estabelecida and _estabelecida != VERSAO:
+            print(
+                f"ℹ️  --no-bump: manifests divergentes ({_estabelecida}) serão "
+                f"realinhados à versão estabelecida do projeto ({VERSAO})."
+            )
+    else:
+        if versao != VERSAO:
+            print(f"ℹ️  Versão informada ({versao}) ignorada. Usando fonte única do mestre_build.py: {VERSAO}")
+        versao = VERSAO
     _sincronizar_versao_global(versao)
     alteracoes = analisar_todos()
     if not resumo(projeto, versao, alteracoes):
@@ -1721,6 +1875,10 @@ def main():
     if not executar_smoke_test():
         print("❌ Abortando build por falha no smoke test.")
         sys.exit(1)
+    # Limpeza pré-build APÓS o smoke test aprovado: remover __pycache__ antes
+    # do teste forçaria recompilação de todos os módulos durante o smoke test
+    # (lento e suscetível a timeout falso).
+    _limpeza_total_pre_build()
     limpar_pastas()
     instalador, destino_distribuicao = build(projeto, versao)
     _limpar_obsoletos_distribuicao(versao)

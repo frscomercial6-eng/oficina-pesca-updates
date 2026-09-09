@@ -1,0 +1,4 @@
+  File "<string>", line 1
+    import sys; sys.path.insert(0,r\x27.\x27); import menu; print(len(menu.sys.path) if hasattr(menu,\x27sys\x27) else 0)
+                                    ^
+SyntaxError: unexpected character after line continuation character

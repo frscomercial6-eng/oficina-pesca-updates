@@ -1,0 +1,6 @@
+Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv_build\Scripts\python.exe
+Traceback (most recent call last):
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\_test_analysis2.py", line 16, in <module>
+    _orig_spawn = multiprocessing.spawn.spawn
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'multiprocessing.spawn' has no attribute 'spawn'

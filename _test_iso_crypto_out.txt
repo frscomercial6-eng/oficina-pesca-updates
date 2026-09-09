@@ -1,0 +1,13 @@
+Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+Version: sys.version_info(major=3, minor=11, micro=0, releaselevel='final', serial=0)
+Testing isolated subprocess with cryptography...
+  Isolated Python started OK
+  2+2 = 4
+  cryptography version = 48.0.0
+  cryptography test error: RuntimeError: Child process call to <lambda>() failed with:
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\isolated\_child.py", line 67, in run_next_command
+    marshalled = dumps((True, output))
+                 ^^^^^^^^^^^^^^^^^^^^^
+ValueError: unmarshallable object
+
+Done

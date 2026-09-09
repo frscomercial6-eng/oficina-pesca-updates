@@ -1,0 +1,19 @@
+Total lines: 302
+
+Searching for 'spawn' function definitions:
+  Line 36: def set_executable(exe):
+  Line 43: def get_executable():
+  Line 55: def is_forking(argv):
+  Line 65: def freeze_support():
+  Line 81: def get_command_line(**kwds):
+  Line 96: def spawn_main(pipe_handle, parent_pid=None, tracker_fd=None):
+  Line 124: def _main(fd, parent_sentinel):
+  Line 136: def _check_not_importing_main():
+  Line 154: def get_preparation_data(name):
+  Line 206: def prepare(data):
+  Line 244: def _fixup_main_from_name(mod_name):
+  Line 269: def _fixup_main_from_path(main_path):
+  Line 297: def import_main_path(main_path):
+
+
+Searching for 'spawn' references:

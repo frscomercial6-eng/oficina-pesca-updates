@@ -1,0 +1,15 @@
+Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv_build\Scripts\python.exe
+Version: 3.11.0 (main, Oct 24 2022, 18:26:48) [MSC v.1933 64 bit (AMD64)]
+Version info: sys.version_info(major=3, minor=11, micro=0, releaselevel='final', serial=0)
+spawn module: <module 'multiprocessing.spawn' from 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\multiprocessing\\spawn.py'>
+spawn module file: C:\Users\User\AppData\Local\Programs\Python\Python311\Lib\multiprocessing\spawn.py
+has spawn: False
+
+start_method: None
+spawn context: <multiprocessing.context.SpawnContext object at 0x000001BD3D591950>
+spawn context Process: <class 'multiprocessing.context.SpawnProcess'>
+
+spawn module file: C:\Users\User\AppData\Local\Programs\Python\Python311\Lib\multiprocessing\spawn.py
+File size: 9421 bytes
+Has 'def spawn': True
+Has 'spawn_main': True

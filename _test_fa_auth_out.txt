@@ -1,0 +1,8 @@
+Starting firebase_admin.auth import...
+firebase_admin.auth imported in 1.3s
+Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+Testing isolated with firebase_admin.auth...
+  Isolated Python started
+  Result: OK in 1.3s
+
+Done

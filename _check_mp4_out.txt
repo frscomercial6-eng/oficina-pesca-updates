@@ -1,0 +1,17 @@
+Total lines: 301
+
+Searching for 'def spawn':
+  Line 96: def spawn_main(pipe_handle, parent_pid=None, tracker_fd=None):
+   94: 
+   95: 
+   96: def spawn_main(pipe_handle, parent_pid=None, tracker_fd=None):
+   97:     '''
+   98:     Run code specified by data received over pipe
+   99:     '''
+  100:     assert is_forking(sys.argv), "Not forking"
+  101:     if sys.platform == 'win32':
+  102:         import msvcrt
+  103:         import _winapi
+  104: 
+  105:         if parent_pid is not None:
+

@@ -1,0 +1,7 @@
+Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv_build\Scripts\python.exe
+Version: 3.11.0 (main, Oct 24 2022, 18:26:48) [MSC v.1933 64 bit (AMD64)]
+PYINSTALLER_NO_MP: NOT SET
+mp_spawn dir: ['WINEXE', 'WINSERVICE', 'freeze_support', 'get_command_line', 'get_executable', 'get_preparation_data', 'get_start_method', 'import_main_path', 'is_forking', 'old_main_modules', 'os', 'prepare', 'process', 'reduction', 'runpy', 'set_executable', 'set_start_method', 'spawn_main', 'sys', 'types', 'util']
+has spawn: False
+spawn: NOT FOUND
+multiprocessing.spawn in sys.modules: True

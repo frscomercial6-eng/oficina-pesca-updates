@@ -1,0 +1,4 @@
+
+Nome da imagem            Identifi Nome da sess∆o       Sess∆o# Uso de mem¢r
+========================= ======== ================ =========== ============
+python.exe                    4336 Console                   17     11.120 K

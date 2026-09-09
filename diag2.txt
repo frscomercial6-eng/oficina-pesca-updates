@@ -1,0 +1,38 @@
+﻿=== System Python ===
+Python 3.11.0 
+
+=== Venv Python ===
+3.11.0 (main, Oct 24 2022, 18:26:48) [MSC v.1933 64 bit (AMD64)]
+Executable: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+
+=== Venv DLLs ===
+PyInstaller site-packages DLL dir: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\..\Lib\site-packages\PyInstaller
+  archive
+  bootloader
+  building
+  compat.py
+  config.py
+
+=== Python DLLs in venv ===
+DLL dir: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\..\Lib
+  site-packages
+
+=== Check tkinter in subprocess ===
+stdout: tkinter OK 8.6
+stderr: 
+rc: 0
+
+=== Check customtkinter ===
+stdout: CTK OK 5.2.2
+stderr: 
+rc: 0
+
+=== Check menu.py import ===
+stdout: menu OK
+stderr: 
+rc: 0
+
+=== Check tela_os.py import ===
+stdout: tela_os OK
+stderr: 
+rc: 0

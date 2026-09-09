@@ -1,0 +1,9 @@
+Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+PyInstaller: 6.11.0
+Traceback (most recent call last):
+  File "F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\_build_611.py", line 18, in <module>
+    boot_dir = os.path.join(os.path.dirname(bootloader.__file__))
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen ntpath>", line 249, in dirname
+  File "<frozen ntpath>", line 211, in split
+TypeError: expected str, bytes or os.PathLike object, not NoneType

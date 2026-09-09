@@ -1,0 +1,9 @@
+Python: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Scripts\python.exe
+Testing isolated subprocess with .venv...
+  Isolated Python started OK
+  2+2 = 4
+  Child PID = 22412
+  firebase_admin version = 7.4.0
+  customtkinter version = 5.2.2
+
+Done

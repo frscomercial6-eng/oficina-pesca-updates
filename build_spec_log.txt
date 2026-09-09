@@ -1,0 +1,30 @@
+254 INFO: PyInstaller: 6.22.2, contrib hooks: 2026.7
+254 INFO: Python: 3.11.0
+269 INFO: Platform: Windows-10-10.0.19045-SP0
+269 INFO: Python environment: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv
+836 WARNING: Failed to collect submodules for 'google._async_resumable_media.requests' because importing 'google._async_resumable_media.requests' raised: ModuleNotFoundError: No module named 'aiohttp'
+9220 WARNING: collect_data_files - skipping data collection for module 'google_auth' as it is not a package.
+9221 WARNING: collect_dynamic_libs - skipping library collection for module 'google_auth' as it is not a package.
+9469 WARNING: collect_data_files - skipping data collection for module 'google_api_python_client' as it is not a package.
+9470 WARNING: collect_dynamic_libs - skipping library collection for module 'google_api_python_client' as it is not a package.
+10898 INFO: Module search paths (PYTHONPATH):
+['F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\DLLs',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\Lib',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL\\.venv',
+ 'F:\\PROGRAMA\\OFICINA DE '
+ 'PESCA\\OFICINA_PESCA_ORIGINAL\\.venv\\Lib\\site-packages',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL']
+11577 INFO: Appending 'datas' from .spec
+11842 INFO: checking Analysis
+11843 INFO: Building Analysis because Analysis-00.toc is non existent
+11843 INFO: Looking for Python shared library...
+11843 INFO: Using Python shared library: C:\Users\User\AppData\Local\Programs\Python\Python311\python311.dll
+11843 INFO: Running Analysis Analysis-00.toc
+11843 INFO: Target bytecode optimization level: 0
+11843 INFO: Initializing module dependency graph...
+11846 INFO: Initializing module graph hook caches...
+
+EXIT:3221225786

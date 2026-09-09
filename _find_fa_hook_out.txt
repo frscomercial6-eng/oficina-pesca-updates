@@ -1,0 +1,5 @@
+Searching for firebase_admin hooks...
+  NOT FOUND: F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\hooks\contrib
+
+
+Searching for ALL hooks that mention 'firebase':

@@ -1,4 +1,5 @@
 import os
+import hmac
 import re
 import threading
 import time
@@ -65,9 +66,39 @@ def _iniciar_keep_alive_render() -> None:
     ).start()
     print(f"[keep-alive] ping automático ativo ({KEEP_ALIVE_INTERVAL_SEG}s) -> {alvo}")
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "").strip()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+
+
+def _exigir_secret_key() -> str:
+    if not SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Configuracao do servidor incompleta: JWT nao configurado.",
+        )
+    return SECRET_KEY
+
+
+SEED_ADMIN_TOKEN = os.getenv("OFP_SEED_ADMIN_TOKEN", "").strip()
+
+
+def _autorizar_seed_admin(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> bool:
+    """Protege o bootstrap administrativo com token forte via ambiente.
+
+    - Endpoint desativado (403) quando OFP_SEED_ADMIN_TOKEN nao esta configurado;
+    - exige Authorization: Bearer <token>; nunca aceita segredo em query string;
+    - nunca registra credenciais em logs.
+    """
+    if not SEED_ADMIN_TOKEN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Endpoint de bootstrap indisponivel.")
+    if credentials is None or not getattr(credentials, "credentials", ""):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token de bootstrap ausente.")
+    if not hmac.compare_digest(str(credentials.credentials), SEED_ADMIN_TOKEN):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Token de bootstrap invalido.")
+    return True
 
 
 class LoginPayload(BaseModel):
@@ -122,14 +153,14 @@ class TokenResponse(BaseModel):
 def create_access_token(subject: str, expires_delta: timedelta | None = None) -> str:
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode = {"sub": subject, "exp": expire.timestamp()}
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(to_encode, _exigir_secret_key(), algorithm=ALGORITHM)
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials | None) -> dict[str, Any]:
     if credentials is None or not credentials.credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token ausente")
     try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(credentials.credentials, _exigir_secret_key(), algorithms=[ALGORITHM])
     except JWTError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido") from exc
     return payload
@@ -153,6 +184,56 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return plain_password == hashed_password
 
 
+def _interpretar_validade(valor: Any) -> tuple[str, bool, bool]:
+    """Interpreta o campo data_expiracao de um registro de licenca.
+
+    Retorna (validade_normalizada, eh_permanente, eh_datada_valida):
+      - PERMANENTE é sempre considerada válida;
+      - datas interpretáveis são válidas quando >= hoje;
+      - vazias ou ilegíveis nunca são válidas.
+    """
+    validade = str(valor or "").strip()
+    if not validade:
+        return "", False, False
+    if validade.upper() == "PERMANENTE":
+        return "PERMANENTE", True, True
+    try:
+        data_expiracao = date.fromisoformat(validade[:10])
+    except (TypeError, ValueError):
+        return validade, False, False
+    return validade, False, data_expiracao >= date.today()
+
+
+def _selecionar_licenca_vigente(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Seleciona a licença vigente no histórico do e-mail.
+
+    Regras (rows chegam ordenadas por id desc — mais recente primeiro):
+      P1: PERMANENTE válida mais recente por ID;
+      P2: entre as datadas válidas, a de maior data_expiracao
+          (empate: permanece a de maior ID, por comparação estrita);
+      P3: nenhuma válida -> retorna None (o chamador aplica o fallback atual).
+    """
+    for row in rows:
+        _validade, eh_permanente, _valida = _interpretar_validade((row or {}).get("data_expiracao"))
+        if eh_permanente:
+            return row
+
+    vigente: dict[str, Any] | None = None
+    melhor_data: date | None = None
+    for row in rows:
+        validade, _eh_permanente, valida = _interpretar_validade((row or {}).get("data_expiracao"))
+        if not valida:
+            continue
+        try:
+            data_expiracao = date.fromisoformat(validade[:10])
+        except (TypeError, ValueError):
+            continue
+        if melhor_data is None or data_expiracao > melhor_data:
+            melhor_data = data_expiracao
+            vigente = row
+    return vigente
+
+
 def _status_licenca_por_email(email: str) -> dict[str, Any]:
     email_norm = str(email or "").strip().lower()
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_norm):
@@ -162,10 +243,10 @@ def _status_licenca_por_email(email: str) -> dict[str, Any]:
         client = get_supabase_client_cached()
         response = (
             client.table("licencas_geradas")
-            .select("data_expiracao, cliente, tipo, plano, data_geracao")
+            .select("id, data_expiracao, cliente, tipo, plano, data_geracao")
             .eq("email", email_norm)
             .order("id", desc=True)
-            .limit(1)
+            .limit(50)
             .execute()
         )
     except Exception as exc:
@@ -175,19 +256,24 @@ def _status_licenca_por_email(email: str) -> dict[str, Any]:
             "mensagem": f"Falha ao consultar licenca por e-mail: {exc}",
         }
 
-    rows = getattr(response, "data", None) or []
+    rows = [row for row in (getattr(response, "data", None) or []) if isinstance(row, dict)]
     if not rows:
         return {"ok": True, "ativa": False, "mensagem": "Nenhuma licenca encontrada para este e-mail."}
 
-    row = rows[0] or {}
-    validade = str(row.get("data_expiracao") or "").strip()
-    if validade.upper() == "PERMANENTE":
-        ativa = True
-    else:
-        try:
-            ativa = date.fromisoformat(validade[:10]) >= date.today()
-        except ValueError:
-            ativa = False
+    # Histórico recente do e-mail: elege a licença vigente (P1/P2) em vez de
+    # considerar apenas o registro mais recente por ID. Sem licença válida,
+    # mantém o fallback atual (linha mais recente por ID).
+    row = _selecionar_licenca_vigente(rows) or rows[0]
+
+    validade, eh_permanente, valida_dated = _interpretar_validade(row.get("data_expiracao"))
+    ativa = True if eh_permanente else valida_dated
+
+    # Defesa: nenhum registro TRIAL libera acesso (o TRIAL é local ao desktop e
+    # nunca é publicado; licenças comerciais normais não contêm esse rótulo).
+    tipo_upper = str(row.get("tipo") or "").strip().upper()
+    plano_upper = str(row.get("plano") or "").strip().upper()
+    if "TRIAL" in tipo_upper or "TRIAL" in plano_upper:
+        ativa = False
 
     mensagem = "Licenca ativa." if ativa else f"Licenca expirada em {validade}." if validade else "Licenca inativa."
     return {
@@ -294,7 +380,7 @@ def delete_ordem(ordem_id: str, user: dict[str, Any] = Depends(get_current_user)
 
 
 @app.post("/seed/admin")
-def seed_admin(payload: SeedUserPayload) -> dict[str, Any]:
+def seed_admin(payload: SeedUserPayload, _bootstrap: bool = Depends(_autorizar_seed_admin)) -> dict[str, Any]:
     client = get_supabase_client_cached()
     existing = client.table("usuarios").select("id").eq("email", payload.email).limit(1).execute()
     if getattr(existing, "data", None):

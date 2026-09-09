@@ -1,0 +1,61 @@
+200 INFO: PyInstaller: 6.10.0, contrib hooks: 2026.7
+200 INFO: Python: 3.11.0
+210 INFO: Platform: Windows-10-10.0.19045-SP0
+210 INFO: Python environment: F:\PROGRAMA\.venv_oficina_pesca_build
+215 INFO: Module search paths (PYTHONPATH):
+['F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\python311.zip',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\DLLs',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\Lib',
+ 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311',
+ 'F:\\PROGRAMA\\.venv_oficina_pesca_build',
+ 'F:\\PROGRAMA\\.venv_oficina_pesca_build\\Lib\\site-packages',
+ 'F:\\PROGRAMA\\OFICINA DE PESCA\\OFICINA_PESCA_ORIGINAL']
+568 INFO: checking Analysis
+568 INFO: Building Analysis because Analysis-00.toc is non existent
+568 INFO: Running Analysis Analysis-00.toc
+569 INFO: Target bytecode optimization level: 0
+569 INFO: Initializing module dependency graph...
+570 INFO: Caching module graph hooks...
+630 WARNING: Runtime hooks for cryptography have already been defined. Skipping the runtime hooks for cryptography that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+631 WARNING: Runtime hooks for enchant have already been defined. Skipping the runtime hooks for enchant that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+631 WARNING: Runtime hooks for findlibs have already been defined. Skipping the runtime hooks for findlibs that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+631 WARNING: Runtime hooks for ffpyplayer have already been defined. Skipping the runtime hooks for ffpyplayer that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+631 WARNING: Runtime hooks for osgeo have already been defined. Skipping the runtime hooks for osgeo that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+631 WARNING: Runtime hooks for traitlets have already been defined. Skipping the runtime hooks for traitlets that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+632 WARNING: Runtime hooks for usb have already been defined. Skipping the runtime hooks for usb that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+632 WARNING: Runtime hooks for nltk have already been defined. Skipping the runtime hooks for nltk that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+632 WARNING: Runtime hooks for pyproj have already been defined. Skipping the runtime hooks for pyproj that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+632 WARNING: Runtime hooks for pygraphviz have already been defined. Skipping the runtime hooks for pygraphviz that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+632 WARNING: Runtime hooks for pythoncom have already been defined. Skipping the runtime hooks for pythoncom that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+632 WARNING: Runtime hooks for pyqtgraph have already been defined. Skipping the runtime hooks for pyqtgraph that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+632 WARNING: Runtime hooks for pywintypes have already been defined. Skipping the runtime hooks for pywintypes that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+632 WARNING: Runtime hooks for tensorflow have already been defined. Skipping the runtime hooks for tensorflow that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+633 WARNING: Runtime hooks for cryptography have already been defined. Skipping the runtime hooks for cryptography that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+633 WARNING: Runtime hooks for enchant have already been defined. Skipping the runtime hooks for enchant that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+633 WARNING: Runtime hooks for findlibs have already been defined. Skipping the runtime hooks for findlibs that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+633 WARNING: Runtime hooks for ffpyplayer have already been defined. Skipping the runtime hooks for ffpyplayer that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+633 WARNING: Runtime hooks for osgeo have already been defined. Skipping the runtime hooks for osgeo that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+633 WARNING: Runtime hooks for traitlets have already been defined. Skipping the runtime hooks for traitlets that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+633 WARNING: Runtime hooks for usb have already been defined. Skipping the runtime hooks for usb that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+633 WARNING: Runtime hooks for nltk have already been defined. Skipping the runtime hooks for nltk that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+633 WARNING: Runtime hooks for pyproj have already been defined. Skipping the runtime hooks for pyproj that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+634 WARNING: Runtime hooks for pygraphviz have already been defined. Skipping the runtime hooks for pygraphviz that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+634 WARNING: Runtime hooks for pythoncom have already been defined. Skipping the runtime hooks for pythoncom that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+634 WARNING: Runtime hooks for pyqtgraph have already been defined. Skipping the runtime hooks for pyqtgraph that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+634 WARNING: Runtime hooks for pywintypes have already been defined. Skipping the runtime hooks for pywintypes that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+634 WARNING: Runtime hooks for tensorflow have already been defined. Skipping the runtime hooks for tensorflow that are defined in F:\PROGRAMA\.venv_oficina_pesca_build\Lib\site-packages\_pyinstaller_hooks_contrib\rthooks.
+637 INFO: Analyzing base_library.zip ...
+3346 INFO: Processing standard module hook 'hook-heapq.py' from 'F:\\PROGRAMA\\.venv_oficina_pesca_build\\Lib\\site-packages\\PyInstaller\\hooks'
+3602 INFO: Processing standard module hook 'hook-encodings.py' from 'F:\\PROGRAMA\\.venv_oficina_pesca_build\\Lib\\site-packages\\PyInstaller\\hooks'
+7349 INFO: Processing standard module hook 'hook-pickle.py' from 'F:\\PROGRAMA\\.venv_oficina_pesca_build\\Lib\\site-packages\\PyInstaller\\hooks'
+10219 INFO: Caching module dependency graph...
+10454 INFO: Looking for Python shared library...
+10577 INFO: Using Python shared library: C:\Users\User\AppData\Local\Programs\Python\Python311\python311.dll
+10577 INFO: Analyzing F:\PROGRAMA\OFICINA DE PESCA\OFICINA_PESCA_ORIGINAL\test_min_tkinter.py
+10744 INFO: Processing standard module hook 'hook-_tkinter.py' from 'F:\\PROGRAMA\\.venv_oficina_pesca_build\\Lib\\site-packages\\PyInstaller\\hooks'
+10759 INFO: Processing module hooks (post-graph stage)...
+10765 INFO: Processing standard module hook 'hook-_tkinter.py' from 'F:\\PROGRAMA\\.venv_oficina_pesca_build\\Lib\\site-packages\\PyInstaller\\hooks'
+10766 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+11094 INFO: Performing binary vs. data reclassification (924 entries)
+^C

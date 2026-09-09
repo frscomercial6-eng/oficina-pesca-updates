@@ -1,48 +1,37 @@
-# -*- coding: utf-8 -*-
-import re
-APK_DOWNLOAD_URL = "https://github.com/frs-oficinadepesca/oficinadepesca/releases/latest/download/OficinaPesca.apk"
-
-# O botão deve ser criado dentro de um método de classe, por exemplo, no __init__ de um Frame/Janela:
-# Exemplo:
-# class FrmMenu(ctk.CTkFrame):
-#     def __init__(self, ...):
-#         ...
-#         ctk.CTkButton(self, text="📱 Baixar App Celular (APK)", fg_color="#27ae60", font=("Arial", 13, "bold"), command=lambda: webbrowser.open(APK_DOWNLOAD_URL)).pack(pady=(0, 10))
+import requests
+# Função para checar status do Firebase
+def checar_status_firebase():
+    try:
+        resp = requests.get("https://oficinapescasystem-default-rtdb.firebaseio.com/.json", timeout=3)
+        return resp.status_code == 200
+    except Exception:
+        return False
 import tela_os
 import firebase_admin
 from firebase_admin import credentials
 import customtkinter as ctk
 import sqlite3
 import os
-import sys
 import shutil
 import zipfile
 import webbrowser
 import socket
+import sys
 import json
-import threading
+import csv
 import configparser
 import traceback
-
+import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
 from datetime import datetime, timedelta
 from urllib.parse import quote_plus, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from util_recibo import gerar_recibo_entrega
-from version_info import VERSION
 from config import (
     CAMINHO_BANCO,
     APP_VERSION,
-    obter_firebase_web_config,
 )
-
-# Importação do PIL para garantir que Image e ImageTk estejam definidos
-try:
-    from PIL import Image, ImageTk
-except ImportError:
-    Image = None
-    ImageTk = None
 
 # --- Funções auxiliares para resolver caminhos de recursos em ambiente PyInstaller ---
 def _base_runtime_dir() -> str:
@@ -53,26 +42,6 @@ def _resource_base_dir() -> str:
 
 def _resolver_recurso(*partes: str) -> str:
     return os.path.join(_resource_base_dir(), *partes)
-
-
-def _resolver_recurso_existente(*partes: str) -> str:
-    if len(partes) == 1 and os.path.isabs(str(partes[0])):
-        return str(partes[0])
-
-    candidatos = [
-        os.path.join(_base_runtime_dir(), *partes),
-        os.path.join(_resource_base_dir(), *partes),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), *partes),
-        os.path.join(DIRETORIO_RECURSOS, *partes),
-        os.path.join(os.getcwd(), *partes),
-    ]
-    for caminho in candidatos:
-        try:
-            if os.path.exists(caminho):
-                return caminho
-        except Exception:
-            continue
-    return candidatos[0]
 # --- Fim das funções auxiliares ---
 
 from config import (
@@ -90,74 +59,19 @@ from config import (
     dados_oficina_sao_padrao,
     obter_status_licenca,
     obter_status_trial,
-    obter_status_acesso_centralizado,
     obter_tipo_licenca,
-    obter_chave_instalacao,
-    ativar_licenca,
-    diagnosticar_chave_licenca,
-    publicar_licenca_drive,
+    eh_versao_mais_nova,
     obter_modo_operacao,
     URL_APP_CELULAR_PUBLICA,
     WHATSAPP_ADMIN_DESTINO,
     obter_info_nova_versao,
     sincronizar_dados_da_nuvem,
     conectar_google_drive_usuario,
-    google_drive_usuario_conectado,
     garantir_banco_no_drive_usuario,
-    enviar_backup_banco_para_drive_usuario,
-    listar_backups_banco_drive_usuario,
-    restaurar_backup_banco_drive_usuario,
     iniciar_sincronizacao_hibrida_nuvem,
-    renovar_token_acesso_drive_se_necessario,
-    eh_versao_mais_nova,
-    executar_atualizacao,
-    bloqueio_loop_update_ativo,
-    listar_os_rejeitados_abandono_dashboard,
-    obter_firebase_web_config,
 )
-from reforma_tributaria import garantir_estrutura_reforma_tributaria
-from core.modulos import obter_modulos_habilitados
-from core.licenca import obter_info_licenca_visual
-from core.sincronizacao import checar_status_firebase
-from core.i18n import set_default_locale, t  # noqa: E402
-from shutdown_utils import fechar_sistema
-from status_os import STATUS_AGUARDANDO_ORCAMENTO, STATUS_ORCAMENTO
-from configuracao_fiscal import ConfiguracaoFiscal, carregar_configuracao_fiscal, salvar_configuracao_fiscal, inicializar_motor_fiscal, verificar_status_motor_fiscal
 
 logger = get_logger(__name__)
-STATUS_ORCAMENTO_SQL = f"('{STATUS_ORCAMENTO}')"
-STATUS_AGUARDANDO_ORCAMENTO_SQL = f"('{STATUS_AGUARDANDO_ORCAMENTO}')"
-
-
-def _patch_ctklabel_destroy_safely():
-    """Workaround global para bug de _font ausente no destroy de CTkLabel."""
-    try:
-        if getattr(ctk.CTkLabel, "_ofp_safe_destroy_patched", False):
-            return
-        original_destroy = ctk.CTkLabel.destroy
-
-        def safe_destroy(widget):
-            try:
-                if not hasattr(widget, "_font"):
-                    widget._font = None
-            except Exception:
-                pass
-            try:
-                original_destroy(widget)
-            except Exception:
-                # Evita cascata de erro durante fechamento de janela parcialmente inicializada.
-                try:
-                    tk.Label.destroy(widget)
-                except Exception:
-                    pass
-
-        ctk.CTkLabel.destroy = safe_destroy
-        ctk.CTkLabel._ofp_safe_destroy_patched = True
-    except Exception:
-        pass
-
-
-_patch_ctklabel_destroy_safely()
 
 try:
     from PIL import Image, ImageTk
@@ -177,14 +91,16 @@ def verificar_e_criar_tabelas():
                     preco_custo REAL DEFAULT 0,
                     preco_venda REAL DEFAULT 0,
                     estoque INTEGER DEFAULT 0,
-                    ncm VARCHAR(8),
                     compatibilidade TEXT,
                     quantidade_minima INTEGER DEFAULT 3
                 )
             """)
-            garantir_estrutura_reforma_tributaria(cursor)
-            # Não altera schema existente do cliente em runtime.
-            # Apenas garante criação inicial quando não há tabela.
+            cursor.execute("PRAGMA table_info(produtos)")
+            colunas = {str(row[1] or "") for row in cursor.fetchall()}
+            if "compatibilidade" not in colunas:
+                cursor.execute("ALTER TABLE produtos ADD COLUMN compatibilidade TEXT")
+            if "quantidade_minima" not in colunas:
+                cursor.execute("ALTER TABLE produtos ADD COLUMN quantidade_minima INTEGER DEFAULT 3")
             conn.commit()
         logger.info("Tabelas verificadas e prontas.")
     except Exception as e:
@@ -192,11 +108,6 @@ def verificar_e_criar_tabelas():
 
 # 3º: CHAMA A FUNÇÃO
 verificar_e_criar_tabelas()
-
-
-def _obter_info_licenca_visual(role: str = "") -> tuple[str, str]:
-    """Retorna texto e cor padronizados para exibição de licença na UI."""
-    return obter_info_licenca_visual(role=role)
 
 # 4º: SEGUE O RESTO DO CÓDIGO (CLASSES, ETC)
 # class FrmProdutos(ctk.CTkToplevel):
@@ -209,26 +120,29 @@ class FrmProdutos(ctk.CTkToplevel):
         self._aplicar_maximizacao()
         self.after(120, self._aplicar_maximizacao)
         
-        self.update()
-        self.attributes('-topmost', True)
-        self.focus_force()
-        self.after(300, lambda: self.attributes('-topmost', False))
-        self.grab_set()
+        self.update_idletasks()
+        x = (self.winfo_screenwidth() // 2) - (1100 // 2)
+        y = (self.winfo_screenheight() // 2) - (700 // 2)
+        self.geometry(f"+{x}+{y}")
 
-        ctk.CTkLabel(self, text=t("ui_gest_o_de_estoque_e_margem"), font=("Arial", 22, "bold")).pack(pady=15)
+        self.lift()
+        self.focus_force()
+        self.grab_set() 
+
+        ctk.CTkLabel(self, text="🛠️ GESTÃO DE ESTOQUE E MARGEM", font=("Arial", 22, "bold")).pack(pady=15)
 
         f_busca = ctk.CTkFrame(self)
         f_busca.pack(pady=(0, 8), padx=20, fill="x")
         self.ent_busca_estoque = ctk.CTkEntry(
             f_busca,
-            placeholder_text=t("ui_buscar_por_nome_ncm_ou_compatibilidade"),
+            placeholder_text="Buscar por Nome ou Compatibilidade",
             width=420,
         )
         self.ent_busca_estoque.pack(side="left", padx=(8, 8), pady=8, fill="x", expand=True)
         self.ent_busca_estoque.bind("<Return>", lambda _e: self.carregar_dados())
         ctk.CTkButton(
             f_busca,
-            text=t("ui_buscar"),
+            text="Buscar",
             fg_color="#2980b9",
             width=120,
             command=self.carregar_dados,
@@ -238,110 +152,72 @@ class FrmProdutos(ctk.CTkToplevel):
         f_inputs = ctk.CTkFrame(self)
         f_inputs.pack(pady=10, padx=20, fill="x")
 
-        self.ent_nome = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_nome_do_produto"), width=250)
+        self.ent_nome = ctk.CTkEntry(f_inputs, placeholder_text="Nome do Produto", width=250)
         self.ent_nome.grid(row=0, column=0, padx=5, pady=5)
 
-        self.ent_compat = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_compatibilidade_1"), width=170)
+        self.ent_compat = ctk.CTkEntry(f_inputs, placeholder_text="Compatibilidade", width=170)
         self.ent_compat.grid(row=0, column=1, padx=5, pady=5)
 
-        self.ent_ncm = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_ncm_8_d_gitos"), width=130)
-        self.ent_ncm.grid(row=0, column=2, padx=5, pady=5)
-
-        self.ent_custo = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_r_custo_1"), width=90)
-        self.ent_custo.grid(row=0, column=3, padx=5, pady=5)
+        self.ent_custo = ctk.CTkEntry(f_inputs, placeholder_text="R$ Custo", width=90)
+        self.ent_custo.grid(row=0, column=2, padx=5, pady=5)
 
         # NOVO CAMPO: % Margem
-        self.ent_margem = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_margem"), width=90)
-        self.ent_margem.grid(row=0, column=4, padx=5, pady=5)
+        self.ent_margem = ctk.CTkEntry(f_inputs, placeholder_text="% Margem", width=90)
+        self.ent_margem.grid(row=0, column=3, padx=5, pady=5)
         # Ao digitar na margem, ele pode calcular a venda automaticamente
         self.ent_margem.bind("<KeyRelease>", self.calcular_venda_por_margem)
 
-        self.ent_venda = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_r_venda_1"), width=90)
-        self.ent_venda.grid(row=0, column=5, padx=5, pady=5)
+        self.ent_venda = ctk.CTkEntry(f_inputs, placeholder_text="R$ Venda", width=90)
+        self.ent_venda.grid(row=0, column=4, padx=5, pady=5)
 
-        self.ent_qtd = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_qtd_1"), width=60)
-        self.ent_qtd.grid(row=0, column=6, padx=5, pady=5)
+        self.ent_qtd = ctk.CTkEntry(f_inputs, placeholder_text="Qtd", width=60)
+        self.ent_qtd.grid(row=0, column=5, padx=5, pady=5)
 
-        self.ent_qtd_min = ctk.CTkEntry(f_inputs, placeholder_text=t("ui_qtd_min_3"), width=90)
-        self.ent_qtd_min.grid(row=0, column=7, padx=5, pady=5)
+        self.ent_qtd_min = ctk.CTkEntry(f_inputs, placeholder_text="Qtd Min (3)", width=90)
+        self.ent_qtd_min.grid(row=0, column=6, padx=5, pady=5)
         self.ent_qtd_min.insert(0, "3")
 
-        self.btn_reforma = ctk.CTkButton(
-            f_inputs,
-            text=t("ui_ibs_cbs"),
-            fg_color="#566573",
-            width=100,
-            command=self._alternar_painel_reforma_tributaria,
-        )
-        self.btn_reforma.grid(row=0, column=8, padx=5)
-
         # BOTÕES
-        ctk.CTkButton(f_inputs, text=t("btn_salvar"), fg_color="green", width=100, command=self.salvar_produto).grid(row=0, column=9, padx=5)
-        ctk.CTkButton(f_inputs, text=t("btn_excluir"), fg_color="red", width=100, command=self.excluir_produto).grid(row=0, column=10, padx=5)
+        ctk.CTkButton(f_inputs, text="Salvar", fg_color="green", width=100, command=self.salvar_produto).grid(row=0, column=7, padx=5)
+        ctk.CTkButton(f_inputs, text="Excluir", fg_color="red", width=100, command=self.excluir_produto).grid(row=0, column=8, padx=5)
 
-        self.frame_reforma = ctk.CTkFrame(self, fg_color="#1f2a38", corner_radius=16)
-        self.frame_reforma.pack(fill="x", padx=20, pady=(0, 8))
-        self._reforma_visivel = False
-        self.frame_reforma.pack_forget()
+        f_acoes = ctk.CTkFrame(self)
+        f_acoes.pack(pady=(0, 6), padx=20, fill="x")
+        ctk.CTkButton(f_acoes, text="📥 Importar Produtos", fg_color="#2980b9",
+            hover_color="#1f618d", width=180,
+            command=self.importar_produtos).pack(side="left", padx=(8, 6), pady=6)
+        ctk.CTkButton(f_acoes, text="📤 Exportar Produtos", fg_color="#16a085",
+            hover_color="#117864", width=180,
+            command=self.exportar_produtos).pack(side="left", padx=6, pady=6)
+        ctk.CTkLabel(f_acoes, text="Formatos: JSON e CSV.",
+            text_color="#7f8c8d", font=("Arial", 10)
+        ).pack(side="left", padx=(12, 8), pady=6)
 
-        ctk.CTkLabel(
-            self.frame_reforma,
-            text=t("ui_reforma_tribut_ria_latente_campos_opcionais_para_ibs_cbs"),
-            font=("Arial", 12, "bold"),
-            text_color="#f1c40f",
-        ).grid(row=0, column=0, columnspan=6, sticky="w", padx=12, pady=(12, 4))
-
-        self.ent_aliquota_ibs = ctk.CTkEntry(self.frame_reforma, placeholder_text=t("ui_aliquota_ibs"), width=130)
-        self.ent_aliquota_ibs.grid(row=1, column=0, padx=8, pady=8)
-        self.ent_aliquota_cbs = ctk.CTkEntry(self.frame_reforma, placeholder_text=t("ui_aliquota_cbs"), width=130)
-        self.ent_aliquota_cbs.grid(row=1, column=1, padx=8, pady=8)
-        self.ent_valor_ibs = ctk.CTkEntry(self.frame_reforma, placeholder_text=t("ui_valor_ibs"), width=130)
-        self.ent_valor_ibs.grid(row=1, column=2, padx=8, pady=8)
-        self.ent_valor_cbs = ctk.CTkEntry(self.frame_reforma, placeholder_text=t("ui_valor_cbs"), width=130)
-        self.ent_valor_cbs.grid(row=1, column=3, padx=8, pady=8)
-        self.ent_reforma_json = ctk.CTkEntry(self.frame_reforma, placeholder_text=t("ui_json_futuro_opcional"), width=360)
-        self.ent_reforma_json.grid(row=1, column=4, padx=8, pady=8, columnspan=2, sticky="ew")
 
         # --- TABELA ---
         self.tabela = ttk.Treeview(
             self,
-            columns=("id", "nome", "custo", "venda", "margem", "qtd", "ncm", "compat", "qtd_min"),
+            columns=("id", "nome", "custo", "venda", "margem", "qtd", "compat", "qtd_min"),
             show="headings",
         )
-        self.tabela.heading("id", text=t("col_id"))
-        self.tabela.heading("nome", text=t("ui_produto_1"))
-        self.tabela.heading("custo", text=t("ui_r_custo"))
-        self.tabela.heading("venda", text=t("ui_r_venda"))
-        self.tabela.heading("margem", text=t("ui_lucro"))
-        self.tabela.heading("qtd", text=t("ui_qtd"))
-        self.tabela.heading("ncm", text=t("ui_ncm"))
-        self.tabela.heading("compat", text=t("ui_compatibilidade"))
-        self.tabela.heading("qtd_min", text=t("ui_qtd_min"))
+        self.tabela.heading("id", text="ID")
+        self.tabela.heading("nome", text="PRODUTO")
+        self.tabela.heading("custo", text="R$ CUSTO")
+        self.tabela.heading("venda", text="R$ VENDA")
+        self.tabela.heading("margem", text="LUCRO %")
+        self.tabela.heading("qtd", text="QTD")
+        self.tabela.heading("compat", text="COMPATIBILIDADE")
+        self.tabela.heading("qtd_min", text="QTD MIN")
         
         self.tabela.column("id", width=40)
         self.tabela.column("nome", width=250)
         self.tabela.column("margem", width=100, anchor="center")
-        self.tabela.column("ncm", width=110, anchor="center")
         self.tabela.column("compat", width=220)
         self.tabela.column("qtd_min", width=90, anchor="center")
         self.tabela.pack(pady=20, padx=20, fill="both", expand=True)
 
         self.tabela.bind("<Double-1>", self.selecionar_produto)
         self.carregar_dados()
-
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-
-    def destroy(self):
-        try:
-            try:
-                for after_id in self.tk.call("after", "info"):
-                    self.after_cancel(after_id)
-            except Exception:
-                pass
-            self.withdraw()
-            super().destroy()
-        except Exception:
-            pass
 
     def _aplicar_maximizacao(self):
         try:
@@ -374,17 +250,6 @@ class FrmProdutos(ctk.CTkToplevel):
             # Durante digitação parcial, apenas ignora valores inválidos temporários.
             return
 
-    def _colunas_produtos(self, cursor):
-        cursor.execute("PRAGMA table_info(produtos)")
-        return {str(row[1] or "").lower() for row in cursor.fetchall()}
-
-    def _alternar_painel_reforma_tributaria(self):
-        self._reforma_visivel = not getattr(self, "_reforma_visivel", False)
-        if self._reforma_visivel:
-            self.frame_reforma.pack(fill="x", padx=20, pady=(0, 8))
-        else:
-            self.frame_reforma.pack_forget()
-
     def salvar_produto(self):
         # 1. Pega o nome e remove espaços extras
         nome = self.ent_nome.get().upper().strip()
@@ -399,14 +264,8 @@ class FrmProdutos(ctk.CTkToplevel):
             margem_txt = self.ent_margem.get().replace(",", ".").strip()
             venda_txt = self.ent_venda.get().replace(",", ".").strip()
             qtd_txt = self.ent_qtd.get().strip()
-            ncm = "".join(ch for ch in self.ent_ncm.get().strip() if ch.isdigit())[:8]
             compat = self.ent_compat.get().strip().upper()
             qtd_min_txt = self.ent_qtd_min.get().strip()
-            aliquota_ibs_txt = self.ent_aliquota_ibs.get().strip().replace(",", ".") if hasattr(self, "ent_aliquota_ibs") else ""
-            aliquota_cbs_txt = self.ent_aliquota_cbs.get().strip().replace(",", ".") if hasattr(self, "ent_aliquota_cbs") else ""
-            valor_ibs_txt = self.ent_valor_ibs.get().strip().replace(",", ".") if hasattr(self, "ent_valor_ibs") else ""
-            valor_cbs_txt = self.ent_valor_cbs.get().strip().replace(",", ".") if hasattr(self, "ent_valor_cbs") else ""
-            reforma_json = self.ent_reforma_json.get().strip() if hasattr(self, "ent_reforma_json") else ""
 
             # 3. Se o campo estiver vazio, vira 0.0 (evita o erro de valor inválido)
             c = float(custo_txt) if custo_txt else 0.0
@@ -414,10 +273,6 @@ class FrmProdutos(ctk.CTkToplevel):
             v = float(venda_txt) if venda_txt else 0.0
             q = int(qtd_txt) if qtd_txt else 0
             q_min = int(qtd_min_txt) if qtd_min_txt else 3
-            aliq_ibs = float(aliquota_ibs_txt) if aliquota_ibs_txt else 0.0
-            aliq_cbs = float(aliquota_cbs_txt) if aliquota_cbs_txt else 0.0
-            val_ibs = float(valor_ibs_txt) if valor_ibs_txt else 0.0
-            val_cbs = float(valor_cbs_txt) if valor_cbs_txt else 0.0
 
             # 4. Lógica: Se você digitou a Margem mas não a Venda, ele calcula agora
             if v == 0 and m > 0 and c > 0:
@@ -426,50 +281,23 @@ class FrmProdutos(ctk.CTkToplevel):
             # 5. Salva no Banco de Dados
             with get_db_connection() as conn:
                 cursor = conn.cursor()
-                garantir_estrutura_reforma_tributaria(cursor)
-                colunas = self._colunas_produtos(cursor)
-                campos = ["nome", "preco_custo", "preco_venda", "estoque"]
-                valores = [nome, c, v, q]
-
-                if "ncm" in colunas:
-                    campos.append("ncm")
-                    valores.append(ncm)
-                if "compatibilidade" in colunas:
-                    campos.append("compatibilidade")
-                    valores.append(compat)
-                if "quantidade_minima" in colunas:
-                    campos.append("quantidade_minima")
-                    valores.append(q_min)
-                if "aliquota_ibs" in colunas:
-                    campos.append("aliquota_ibs")
-                    valores.append(aliq_ibs)
-                if "aliquota_cbs" in colunas:
-                    campos.append("aliquota_cbs")
-                    valores.append(aliq_cbs)
-                if "valor_ibs" in colunas:
-                    campos.append("valor_ibs")
-                    valores.append(val_ibs)
-                if "valor_cbs" in colunas:
-                    campos.append("valor_cbs")
-                    valores.append(val_cbs)
-                if "reforma_tributaria_json" in colunas:
-                    campos.append("reforma_tributaria_json")
-                    valores.append(reforma_json or "{}")
-
-                placeholders = ", ".join(["?"] * len(campos))
+                # Nota: O banco só guarda Nome, Custo, Venda e Qtd.
+                # A margem a gente calcula apenas para mostrar na tela.
                 cursor.execute(
-                    f"INSERT INTO produtos ({', '.join(campos)}) VALUES ({placeholders})",
-                    valores,
+                    """
+                    INSERT INTO produtos
+                        (nome, preco_custo, preco_venda, estoque, compatibilidade, quantidade_minima)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (nome, c, v, q, compat, q_min),
                 )
                 conn.commit()
             
             # 6. Atualiza a lista e limpa os campos
             self.carregar_dados()
-            for e in [self.ent_nome, self.ent_compat, self.ent_ncm, self.ent_custo, self.ent_margem, self.ent_venda, self.ent_qtd, self.ent_qtd_min, self.ent_aliquota_ibs, self.ent_aliquota_cbs, self.ent_valor_ibs, self.ent_valor_cbs, self.ent_reforma_json]:
+            for e in [self.ent_nome, self.ent_compat, self.ent_custo, self.ent_margem, self.ent_venda, self.ent_qtd, self.ent_qtd_min]:
                 e.delete(0, 'end')
             self.ent_qtd_min.insert(0, "3")
-            if getattr(self, "_reforma_visivel", False):
-                self._alternar_painel_reforma_tributaria()
             
             messagebox.showinfo("Sucesso", "Produto guardado com sucesso!")
 
@@ -483,57 +311,38 @@ class FrmProdutos(ctk.CTkToplevel):
         try:
             with get_db_connection() as conn:
                 cursor = conn.cursor()
-                colunas = self._colunas_produtos(cursor)
-                tem_ncm = "ncm" in colunas
-                tem_compat = "compatibilidade" in colunas
-                tem_qmin = "quantidade_minima" in colunas
-
-                select_ncm = "COALESCE(ncm,'')" if tem_ncm else "''"
-                select_compat = "COALESCE(compatibilidade,'')" if tem_compat else "''"
-                select_qmin = "COALESCE(quantidade_minima, 3)" if tem_qmin else "3"
-
                 termo = ""
                 if hasattr(self, "ent_busca_estoque"):
                     termo = str(self.ent_busca_estoque.get() or "").strip().upper()
                 if termo:
                     like = f"%{termo}%"
-                    filtros = ["UPPER(COALESCE(nome, '')) LIKE ?"]
-                    params = [like]
-                    if tem_ncm:
-                        filtros.append("UPPER(COALESCE(ncm, '')) LIKE ?")
-                        params.append(like)
-                    if tem_compat:
-                        filtros.append("UPPER(COALESCE(compatibilidade, '')) LIKE ?")
-                        params.append(like)
-
                     cursor.execute(
-                        f"""
+                        """
                         SELECT id, nome, preco_custo, preco_venda, estoque,
-                               {select_ncm},
-                               {select_compat}, {select_qmin}
+                               COALESCE(compatibilidade,''), COALESCE(quantidade_minima, 3)
                         FROM produtos
-                        WHERE {' OR '.join(filtros)}
+                        WHERE UPPER(COALESCE(nome, '')) LIKE ?
+                           OR UPPER(COALESCE(compatibilidade, '')) LIKE ?
                         ORDER BY nome
                         """,
-                        tuple(params),
+                        (like, like),
                     )
                 else:
                     cursor.execute(
-                        f"""
+                        """
                         SELECT id, nome, preco_custo, preco_venda, estoque,
-                               {select_ncm},
-                               {select_compat}, {select_qmin}
+                               COALESCE(compatibilidade,''), COALESCE(quantidade_minima, 3)
                         FROM produtos
                         ORDER BY nome
                         """
                     )
                 for linha in cursor.fetchall():
-                    id_p, nome, custo, venda, qtd, ncm, compat, qtd_min = linha
+                    id_p, nome, custo, venda, qtd, compat, qtd_min = linha
                     margem = ((venda - custo) / custo * 100) if custo > 0 else 0
                     self.tabela.insert(
                         "",
                         "end",
-                        values=(id_p, nome, f"{custo:.2f}", f"{venda:.2f}", f"{margem:.1f}%", qtd, ncm, compat, qtd_min),
+                        values=(id_p, nome, f"{custo:.2f}", f"{venda:.2f}", f"{margem:.1f}%", qtd, compat, qtd_min),
                     )
         except Exception as e:
             logger.exception("Erro ao carregar produtos: %s", e)
@@ -554,13 +363,295 @@ class FrmProdutos(ctk.CTkToplevel):
         if not selecao: return
         item = self.tabela.item(selecao[0], "values")
         if hasattr(self.master, "adicionar_item_ao_orcamento"):
-            # Fechamento seguro antes de interagir com a master
-            self.update_idletasks()
-            self.after(200, lambda: self.destroy())
+            self.destroy()
             # item[1] é o nome, item[3] é o preço de venda
             self.master.adicionar_item_ao_orcamento(item[1], float(item[3]))
 
 
+
+    # ======================================================================
+    # IMPORTAÇÃO / EXPORTAÇÃO EM MASSA DE PRODUTOS
+    # ======================================================================
+    _PRODUTOS_COLUNAS_NUMERICAS = {
+        "preco_custo": float, "preco_venda": float, "estoque": int,
+        "quantidade_minima": int, "aliquota_ibs": float, "aliquota_cbs": float,
+        "valor_ibs": float, "valor_cbs": float,
+    }
+
+    def _produtos_obter_colunas(self, cursor) -> list:
+        cursor.execute("PRAGMA table_info(produtos)")
+        return [str(row[1]) for row in cursor.fetchall() if row and row[1]]
+
+    def _produtos_obter_colunas_editaveis(self, cursor) -> list:
+        return [c for c in self._produtos_obter_colunas(cursor)
+                if str(c).lower() != "id"]
+
+    def _produtos_coagir_valor(self, coluna, valor):
+        if valor is None:
+            return None, None
+        col_lower = str(coluna).lower()
+        if col_lower in self._PRODUTOS_COLUNAS_NUMERICAS:
+            conversor = self._PRODUTOS_COLUNAS_NUMERICAS[col_lower]
+            if isinstance(valor, bool):
+                return None, "Booleano invalido para campo numerico em '" + coluna + "'."
+            if isinstance(valor, (int, float)):
+                return conversor(valor), None
+            s = str(valor).strip()
+            if s == "":
+                return conversor(0), None
+            s_norm = s.replace(".", "").replace(",", ".") if "," in s else s
+            try:
+                return conversor(s_norm), None
+            except (TypeError, ValueError):
+                return None, "Valor invalido em '" + coluna + "': '" + str(valor) + "'."
+        if isinstance(valor, (dict, list)):
+            return json.dumps(valor, ensure_ascii=False), None
+        return str(valor).strip(), None
+
+    def _produtos_backup_pre_importacao(self) -> str:
+        try:
+            caminho = CAMINHO_BANCO
+            if not caminho or not os.path.exists(caminho):
+                logger.warning("Backup ignorado: banco nao encontrado.")
+                return ""
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = caminho + ".bak.preimport_" + ts
+            shutil.copy2(caminho, backup_path)
+            logger.info("Backup criado: %s", backup_path)
+            return backup_path
+        except Exception as exc:
+            logger.exception("Falha backup: %s", exc)
+            return ""
+
+
+    def exportar_produtos(self):
+        try:
+            destino = filedialog.asksaveasfilename(
+                parent=self, title="Exportar Produtos",
+                defaultextension=".json",
+                filetypes=[("JSON", "*.json"), ("CSV", "*.csv")],
+                initialfile="produtos_export_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".json",
+            )
+            if not destino:
+                return
+            dl = str(destino).lower()
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                colunas = self._produtos_obter_colunas(cursor)
+                if not colunas:
+                    messagebox.showwarning("Exportar Produtos",
+                        "Nao foi possivel ler a estrutura da tabela.", parent=self)
+                    return
+                col_select = ", ".join(["\"" + c + "\"" for c in colunas])
+                cursor.execute("SELECT " + col_select + " FROM produtos ORDER BY nome")
+                raw = cursor.fetchall()
+            regs = []
+            for row in raw:
+                item = {}
+                for i2, col in enumerate(colunas):
+                    v = row[i2]
+                    if isinstance(v, (bytes, bytearray)):
+                        v = v.decode("utf-8", errors="ignore")
+                    item[col] = v
+                regs.append(item)
+            if dl.endswith(".csv"):
+                with open(destino, "w", encoding="utf-8", newline="") as f:
+                    w = csv.DictWriter(f, fieldnames=colunas, extrasaction="ignore")
+                    w.writeheader()
+                    for item in regs:
+                        linha = {}
+                        for c in colunas:
+                            v = item.get(c)
+                            if isinstance(v, (dict, list)):
+                                linha[c] = json.dumps(v, ensure_ascii=False)
+                            else:
+                                linha[c] = "" if v is None else v
+                        w.writerow(linha)
+                msg = "Exportacao CSV concluida.\n" + str(len(regs)) + " produto(s) salvos em:\n" + destino
+            else:
+                payload = {
+                    "formato": "oficina_pesca.produtos",
+                    "versao_app": APP_VERSION,
+                    "exportado_em": datetime.now().isoformat(timespec="seconds"),
+                    "colunas": colunas,
+                    "produtos": regs,
+                }
+                with open(destino, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
+                msg = "Exportacao JSON concluida.\n" + str(len(regs)) + " produto(s) salvos em:\n" + destino
+            logger.info("Exportacao OK: %s -> %s", len(regs), destino)
+            messagebox.showinfo("Exportar Produtos", msg, parent=self)
+        except Exception as exc:
+            logger.exception("Falha exportacao: %s", exc)
+            messagebox.showerror("Exportar Produtos", "Erro:\n" + str(exc), parent=self)
+
+
+    def importar_produtos(self):
+        backup_path = ""
+        try:
+            origem = filedialog.askopenfilename(
+                parent=self, title="Importar Produtos",
+                filetypes=[("JSON", "*.json"), ("CSV", "*.csv"), ("Todos", "*.*")],
+            )
+            if not origem:
+                return
+            dl = str(origem).lower()
+            with open(origem, "r", encoding="utf-8-sig", newline="") as f:
+                if dl.endswith(".csv"):
+                    leitor = csv.DictReader(f)
+                    linhas = [dict(row) for row in leitor]
+                else:
+                    dados = json.load(f)
+                    if isinstance(dados, list):
+                        linhas = dados
+                    elif isinstance(dados, dict):
+                        linhas = dados.get("produtos", [dados])
+                    else:
+                        raise ValueError("Estrutura JSON invalida.")
+            if not linhas:
+                messagebox.showwarning("Importar Produtos",
+                    "O arquivo nao contem registros.", parent=self)
+                return
+            backup_path = self._produtos_backup_pre_importacao()
+            if not backup_path:
+                if not messagebox.askyesno("Importar Produtos",
+                        "Backup nao disponivel. Continuar?", parent=self):
+                    return
+            imp, at, rej = self._produtos_importar_transacao(linhas)
+            rel = [
+                "Importacao concluida.",
+                "  Importados (novos): " + str(imp),
+                "  Atualizados (por ID existente): " + str(at),
+                "  Rejeitados: " + str(len(rej)),
+            ]
+            if backup_path:
+                rel.append("  Backup: " + backup_path)
+            if rej:
+                rel.append("")
+                rel.append("Motivos das rejeicoes:")
+                for i_r, mot, _ in rej[:25]:
+                    rel.append("  - linha " + str(i_r) + ": " + mot)
+                if len(rej) > 25:
+                    rel.append("  ... e mais " + str(len(rej) - 25) + " rejeicao(oes).")
+            messagebox.showinfo("Importar Produtos", "\n".join(rel), parent=self)
+            logger.info("Importacao: imp=%s at=%s rej=%s", imp, at, len(rej))
+            self.carregar_dados()
+        except _ProdutosImportacaoErro as rb:
+            logger.exception("Rollback importacao: %s", rb)
+            messagebox.showerror("Importar Produtos",
+                "Erro estrutural. A operacao foi DESFEITA.\n\n" +
+                "Motivo: " + str(rb) + "\n\nBackup: " + (backup_path or "nao gerado"),
+                parent=self)
+        except Exception as exc:
+            logger.exception("Falha importacao: %s", exc)
+            messagebox.showerror("Importar Produtos", "Erro:\n" + str(exc), parent=self)
+
+
+    def _produtos_importar_transacao(self, linhas):
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            colunas_db = self._produtos_obter_colunas(cursor)
+            colunas_set = {c.lower(): c for c in colunas_db}
+            editaveis_set = {c.lower() for c in self._produtos_obter_colunas_editaveis(cursor)}
+            primeira = linhas[0] or {}
+            if not isinstance(primeira, dict):
+                raise ValueError("Primeiro registro nao e um objeto.")
+            campos_arquivo = list(primeira.keys())
+            colunas_alvo = []
+            for c_orig in campos_arquivo:
+                chave = str(c_orig).strip()
+                if not chave:
+                    colunas_alvo.append(None)
+                elif chave.lower() in colunas_set:
+                    colunas_alvo.append(colunas_set[chave.lower()])
+                else:
+                    colunas_alvo.append(None)
+            if not any(c is not None for c in colunas_alvo):
+                raise ValueError("Nenhum campo corresponde a tabela.")
+            imp = at = 0
+            rej = []
+            try:
+                conn.execute("BEGIN")
+                for idx_reg, registro in enumerate(linhas, start=1):
+                    if not isinstance(registro, dict):
+                        rej.append((idx_reg, "(registro nao e objeto)", "-"))
+                        continue
+                    id_forn = None
+                    cols_usadas = []
+                    vals = []
+                    erro = None
+                    for idx_campo, (col_alvo, nome_campo) in enumerate(
+                            zip(colunas_alvo, list(registro.keys()))):
+                        if col_alvo is None:
+                            continue
+                        v_bruto = registro.get(nome_campo)
+                        v_ok, erro = self._produtos_coagir_valor(col_alvo, v_bruto)
+                        if erro is not None:
+                            rej.append((idx_reg, erro, nome_campo))
+                            break
+                        if col_alvo.lower() == "id":
+                            try:
+                                raw_id = v_ok
+                                id_forn = int(float(raw_id)) if raw_id is not None else None
+                            except (TypeError, ValueError):
+                                rej.append((idx_reg, "ID invalido: " + str(v_bruto), nome_campo))
+                                break
+                            if id_forn is not None and id_forn <= 0:
+                                id_forn = None
+                        if v_ok is not None and v_bruto not in (None, ""):
+                            vals.append(v_ok)
+                            cols_usadas.append(col_alvo)
+                    if erro is not None:
+                        continue
+                    if "nome" in editaveis_set and "nome" in cols_usadas:
+                        if not vals[cols_usadas.index("nome")]:
+                            rej.append((idx_reg, "Nome vazio.", "nome"))
+                            continue
+                    if id_forn is not None and id_forn > 0:
+                        cursor.execute("SELECT 1 FROM produtos WHERE id = ?", (id_forn,))
+                        if cursor.fetchone():
+                            sets_str = ", ".join(["\"" + c + "\" = ?"
+                                for c in cols_usadas])
+                            params = list(vals) + [id_forn]
+                            cursor.execute("UPDATE produtos SET " + sets_str +
+                                " WHERE id = ?", params)
+                            if cursor.rowcount > 0:
+                                at += 1
+                            else:
+                                rej.append((idx_reg, "UPDATE nao afetou linhas.", "id"))
+                        else:
+                            ph = ", ".join(["?"] * len(cols_usadas))
+                            cs = ", ".join(["\"" + c + "\"" for c in cols_usadas])
+                            cursor.execute("INSERT INTO produtos (" + cs +
+                                ") VALUES (" + ph + ")", vals)
+                            imp += 1
+                    else:
+                        if not cols_usadas:
+                            rej.append((idx_reg, "Sem colunas validas.", "-"))
+                            continue
+                        ph = ", ".join(["?"] * len(cols_usadas))
+                        cs = ", ".join(["\"" + c + "\"" for c in cols_usadas])
+                        cursor.execute("INSERT INTO produtos (" + cs +
+                            ") VALUES (" + ph + ")", vals)
+                        imp += 1
+                conn.execute("COMMIT")
+            except _ProdutosImportacaoErro:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                raise
+            except Exception as exc_est:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                raise _ProdutosImportacaoErro(str(exc_est)) from exc_est
+        return imp, at, rej
+
+
+class _ProdutosImportacaoErro(Exception):
+    """Erro estrutural durante importacao de produtos."""
 class FrmCadastroUsuarios(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
@@ -577,58 +668,47 @@ class FrmCadastroUsuarios(ctk.CTkToplevel):
         self.focus_force()
         self.grab_set()
 
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        ctk.CTkLabel(self, text="👤 NOVO USUÁRIO", font=("Arial", 22, "bold")).pack(pady=(20, 15))
+
         form = ctk.CTkFrame(self)
         form.pack(fill="both", expand=True, padx=20, pady=10)
 
-        self.ent_usuario = ctk.CTkEntry(form, placeholder_text=t("ui_usu_rio"), width=320, height=40)
+        self.ent_usuario = ctk.CTkEntry(form, placeholder_text="Usuário", width=320, height=40)
         self.ent_usuario.pack(pady=(20, 10))
 
-        self.ent_senha = ctk.CTkEntry(form, placeholder_text=t("ui_senha"), show="*", width=320, height=40)
+        self.ent_senha = ctk.CTkEntry(form, placeholder_text="Senha", show="*", width=320, height=40)
         self.ent_senha.pack(pady=10)
 
-        self.ent_confirma = ctk.CTkEntry(form, placeholder_text=t("ui_confirmar_senha"), show="*", width=320, height=40)
+        self.ent_confirma = ctk.CTkEntry(form, placeholder_text="Confirmar senha", show="*", width=320, height=40)
         self.ent_confirma.pack(pady=10)
 
-        self.role_var = ctk.StringVar(value="VENDEDOR")
-        self.opt_role = ctk.CTkOptionMenu(form, values=["VENDEDOR", "OFICINA", "ADMIN"], variable=self.role_var, width=320)
+        self.role_var = ctk.StringVar(value="OPERADOR")
+        self.opt_role = ctk.CTkOptionMenu(form, values=["OPERADOR", "ADMIN"], variable=self.role_var, width=320)
         self.opt_role.pack(pady=10)
 
         ctk.CTkLabel(
             form,
-            text=t("ui_somente_usu_rios_admin_podem_acessar_esta_tela"),
+            text="Somente usuários ADMIN podem acessar esta tela.",
             text_color="#95a5a6"
         ).pack(pady=(0, 10))
 
         self.lbl_status = ctk.CTkLabel(form, text="", text_color="red")
         self.lbl_status.pack(pady=(0, 10))
 
-        ctk.CTkButton(form, text=t("ui_salvar_usu_rio"), fg_color="#27ae60", command=self.salvar_usuario, width=320, height=42).pack(pady=(5, 20))
-
-    def destroy(self):
-        try:
-            try:
-                for after_id in self.tk.call("after", "info"):
-                    self.after_cancel(after_id)
-            except Exception:
-                pass
-            self.withdraw()
-            super().destroy()
-        except Exception:
-            pass
+        ctk.CTkButton(form, text="SALVAR USUÁRIO", fg_color="#27ae60", command=self.salvar_usuario, width=320, height=42).pack(pady=(5, 20))
 
     def salvar_usuario(self):
         usuario = self.ent_usuario.get().strip()
         senha = self.ent_senha.get().strip()
         confirma = self.ent_confirma.get().strip()
-        role = self.role_var.get().strip().upper() or "VENDEDOR"
+        role = self.role_var.get().strip().upper() or "OPERADOR"
 
         if not usuario or not senha or not confirma:
-            self.lbl_status.configure(text=t("ui_preencha_todos_os_campos"), text_color="red")
+            self.lbl_status.configure(text="Preencha todos os campos.", text_color="red")
             return
 
         if senha != confirma:
-            self.lbl_status.configure(text=t("ui_as_senhas_n_o_coincidem"), text_color="red")
+            self.lbl_status.configure(text="As senhas não coincidem.", text_color="red")
             return
 
         senha_ok, msg = validate_password(senha)
@@ -646,11 +726,9 @@ class FrmCadastroUsuarios(ctk.CTkToplevel):
                 conn.commit()
 
             messagebox.showinfo("Sucesso", f"Usuário '{usuario}' criado com perfil {role}.", parent=self)
-            
-            # Fechamento seguro para evitar erro 'can't delete Tcl command'
             self.destroy()
         except sqlite3.IntegrityError:
-            self.lbl_status.configure(text=t("ui_usu_rio_j_existe"), text_color="red")
+            self.lbl_status.configure(text="Usuário já existe.", text_color="red")
         except Exception as e:
             self.lbl_status.configure(text=f"Erro ao salvar: {e}", text_color="red")
 
@@ -664,13 +742,8 @@ class FrmRelatorioDesempenho(ctk.CTkToplevel):
         self.geometry("560x720")
         self.resizable(False, True)
         self.configure(fg_color="#0d1117")
-        
-        self.update()
-        self.attributes('-topmost', True)
-        self.focus_force()
-        self.after(300, lambda: self.attributes('-topmost', False))
-        self.update()
         self.grab_set()
+        self.focus_force()
         self._aplicar_maximizacao()
         self.after(120, self._aplicar_maximizacao)
 
@@ -681,13 +754,13 @@ class FrmRelatorioDesempenho(ctk.CTkToplevel):
         header = ctk.CTkFrame(self, fg_color="#1f2a38", corner_radius=15)
         header.pack(fill="x", padx=20, pady=(20, 5))
         ctk.CTkLabel(
-            header, text=t("ui_relat_rio_de_desempenho"),
+            header, text="📊 RELATÓRIO DE DESEMPENHO",
             font=("Arial", 20, "bold"), text_color="orange"
         ).pack(pady=(15, 8))
 
         f_periodo = ctk.CTkFrame(header, fg_color="#1f2a38")
         f_periodo.pack(pady=(0, 14))
-        ctk.CTkLabel(f_periodo, text=t("label_de"), font=("Arial", 12), text_color="#bdc3c7").pack(side="left", padx=(10, 4))
+        ctk.CTkLabel(f_periodo, text="De:", font=("Arial", 12), text_color="#bdc3c7").pack(side="left", padx=(10, 4))
         self.ent_inicio = ctk.CTkEntry(f_periodo, width=105, placeholder_text="01/04/2026")
         self.ent_inicio.insert(0, inicio_mes.strftime("%d/%m/%Y"))
         self.ent_inicio.pack(side="left", padx=4)
@@ -696,7 +769,7 @@ class FrmRelatorioDesempenho(ctk.CTkToplevel):
         self.ent_fim.insert(0, hoje.strftime("%d/%m/%Y"))
         self.ent_fim.pack(side="left", padx=4)
         ctk.CTkButton(
-            f_periodo, text=t("ui_atualizar_1"), fg_color="#2980b9", hover_color="#3498db",
+            f_periodo, text="🔄 ATUALIZAR", fg_color="#2980b9", hover_color="#3498db",
             width=120, command=self.carregar_dados
         ).pack(side="left", padx=(10, 5))
 
@@ -705,20 +778,6 @@ class FrmRelatorioDesempenho(ctk.CTkToplevel):
         self.scroll.pack(fill="both", expand=True, padx=12, pady=8)
 
         self.carregar_dados()
-
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-
-    def destroy(self):
-        try:
-            try:
-                for after_id in self.tk.call("after", "info"):
-                    self.after_cancel(after_id)
-            except Exception:
-                pass
-            self.withdraw()
-            super().destroy()
-        except Exception:
-            pass
 
     def _aplicar_maximizacao(self):
         try:
@@ -775,7 +834,7 @@ class FrmRelatorioDesempenho(ctk.CTkToplevel):
 
         if not dt_inicio or not dt_fim:
             ctk.CTkLabel(
-                self.scroll, text=t("ui_datas_inv_lidas_use_dd_mm_aaaa"),
+                self.scroll, text="⚠  Datas inválidas. Use dd/mm/aaaa.",
                 text_color="#ff6b6b", font=("Arial", 12)
             ).pack(pady=20)
             return
@@ -805,7 +864,7 @@ class FrmRelatorioDesempenho(ctk.CTkToplevel):
                 bancada = cur.fetchone()[0]
 
                 cur.execute(
-                    f"SELECT COUNT(*) FROM orcamentos_aguardo WHERE UPPER(COALESCE(status,'')) IN {STATUS_ORCAMENTO_SQL}"
+                    "SELECT COUNT(*) FROM orcamentos_aguardo WHERE UPPER(status) = 'AGUARDANDO'"
                 )
                 aguardando = cur.fetchone()[0]
 
@@ -910,14 +969,6 @@ class FrmRelatorioDesempenho(ctk.CTkToplevel):
 
 
 class FrmDadosOficina(ctk.CTkToplevel):
-    def _revert_withdraw_after_windows_set_titlebar_color(self):
-        """Workaround para callback interno do CustomTkinter em alguns ambientes Windows/Python 3.14."""
-        try:
-            if self.winfo_exists():
-                self.deiconify()
-        except Exception:
-            pass
-
     def inicializar_firebase(self):
         """
         Inicializa o Firebase Admin SDK com as credenciais e URL do Realtime Database.
@@ -925,13 +976,10 @@ class FrmDadosOficina(ctk.CTkToplevel):
         import os
         try:
             cred_path = _resolver_recurso('google-services.json') # Padronizado para google-services.json
-            db_url = str((obter_firebase_web_config() or {}).get('databaseURL') or '').strip()
-            if not db_url:
-                return
             if not firebase_admin._apps:
                 cred = credentials.Certificate(cred_path)
                 firebase_admin.initialize_app(cred, {
-                    'databaseURL': db_url
+                    'databaseURL': 'https://oficinapescasystem-default-rtdb.firebaseio.com/'
                 })
         except Exception as e:
             print(f"Erro ao inicializar Firebase: {e}")
@@ -939,440 +987,149 @@ class FrmDadosOficina(ctk.CTkToplevel):
 
     def __init__(self, master):
         super().__init__(master)
-        self._encerrando_aplicacao = False
-        self._status_motor_fiscal_ativo = None
         self.title("Dados da Oficina")
-        self.geometry("980x760")
-        self.resizable(True, True)
+        self.geometry("980x680")
+        self.resizable(False, True)
         self.grab_set()
-        self.update()
-        self.attributes('-topmost', True) #
         self.focus_force()
-        self.after(300, lambda: self.attributes('-topmost', False))
-        self.janela_dados_oficina_aberta = True # Flag para controle de duplicidade
-        ctk.CTkLabel(self, text=t("ui_dados_da_oficina"), font=("Arial", 22, "bold"), text_color="orange").pack(pady=(16, 6))
 
-        container = ctk.CTkScrollableFrame(self, fg_color="#1f2a38", corner_radius=12)
-        self.update_idletasks()
-        container.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+        ctk.CTkLabel(self, text="🏪 DADOS DA OFICINA", font=("Arial", 22, "bold"), text_color="orange").pack(pady=(16, 6))
 
-        form = container
-        form.grid_columnconfigure(0, weight=1)
-        form.grid_columnconfigure(1, weight=1)
+        # scroll para caber em telas menores
+        scroll = ctk.CTkScrollableFrame(self, fg_color="#1f2a38", corner_radius=12)
+        scroll.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+        form = scroll
 
-        linha = 0
+        ctk.CTkLabel(form, text="Nome da oficina", anchor="w", text_color="orange", font=("Arial", 12, "bold")).pack(fill="x", padx=15, pady=(15, 2))
+        self.ent_nome = ctk.CTkEntry(form, placeholder_text="Nome da oficina")
+        self.ent_nome.pack(fill="x", padx=15, pady=(0, 8))
 
-        def _lbl(txt):
-            nonlocal linha
-            ctk.CTkLabel(form, text=txt, anchor="w", text_color="orange", font=("Arial", 12, "bold")).grid(
-                row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(6, 2)
-            )
-            linha += 1
+        ctk.CTkLabel(form, text="Endereço da oficina", anchor="w", text_color="orange", font=("Arial", 12, "bold")).pack(fill="x", padx=15, pady=(2, 2))
+        self.ent_endereco = ctk.CTkEntry(form, placeholder_text="Endereço da oficina")
+        self.ent_endereco.pack(fill="x", padx=15, pady=(0, 8))
 
-        def _entry(attr, placeholder):
-            nonlocal linha
-            ent = ctk.CTkEntry(
-                form,
-                placeholder_text=placeholder,
-                height=34,
-                fg_color="#f8fafc",
-                border_width=2,
-                border_color="#1d4ed8",
-                text_color="#0f1720",
-                placeholder_text_color="#64748b",
-            )
-            ent.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
-            setattr(self, attr, ent)
-            linha += 1
+        ctk.CTkLabel(form, text="Telefone", anchor="w", text_color="orange", font=("Arial", 12, "bold")).pack(fill="x", padx=15, pady=(2, 2))
+        self.ent_telefone = ctk.CTkEntry(form, placeholder_text="Telefone")
+        self.ent_telefone.pack(fill="x", padx=15, pady=(0, 8))
 
-        _lbl("Nome da oficina")
-        _entry("ent_nome", "Nome da oficina")
-        _lbl("CNPJ da oficina")
-        _entry("ent_cnpj", "00.000.000/0000-00")
-        _lbl("Endereço da oficina")
-        _entry("ent_endereco", "Endereço da oficina")
-        _lbl("Telefone")
-        _entry("ent_telefone", "Telefone")
-        _lbl("Chave PIX")
-        _entry("ent_pix", "Chave PIX")
+        ctk.CTkLabel(form, text="Chave PIX", anchor="w", text_color="orange", font=("Arial", 12, "bold")).pack(fill="x", padx=15, pady=(2, 2))
+        self.ent_pix = ctk.CTkEntry(form, placeholder_text="Chave PIX")
+        self.ent_pix.pack(fill="x", padx=15, pady=(0, 8))
 
-        _lbl("Logo da oficina (usado no PDF)")
-        f_logo = ctk.CTkFrame(form, fg_color="transparent")
-        f_logo.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
-        f_logo.grid_columnconfigure(0, weight=1)
-        self.ent_logo = ctk.CTkEntry(
-            f_logo,
-            placeholder_text=t("ui_caminho_do_logo_da_oficina"),
-            height=34,
-            fg_color="#f8fafc",
-            border_width=2,
-            border_color="#1d4ed8",
-            text_color="#0f1720",
-            placeholder_text_color="#64748b",
-        )
-        self.ent_logo.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(f_logo, text=t("ui_escolher"), width=90, fg_color="#2980b9", command=self.escolher_logo).grid(row=0, column=1, padx=(8, 0))
-        linha += 1
+        ctk.CTkLabel(form, text="Logo da oficina (usado no PDF)", anchor="w", text_color="orange", font=("Arial", 12, "bold")).pack(fill="x", padx=15, pady=(2, 2))
+        f_logo = ctk.CTkFrame(form, fg_color="#1f2a38")
+        f_logo.pack(fill="x", padx=15, pady=(0, 8))
+        self.ent_logo = ctk.CTkEntry(f_logo, placeholder_text="Caminho do logo da oficina")
+        self.ent_logo.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(f_logo, text="Escolher", width=90, fg_color="#2980b9", command=self.escolher_logo).pack(side="left", padx=(8, 0))
 
-        _lbl("Imagem do patrocinador (direita)")
-        f_logo_dir = ctk.CTkFrame(form, fg_color="transparent")
-        f_logo_dir.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
-        f_logo_dir.grid_columnconfigure(0, weight=1)
-        self.ent_logo_dir = ctk.CTkEntry(
-            f_logo_dir,
-            placeholder_text=t("ui_caminho_da_imagem_do_patrocinador_direita"),
-            height=34,
-            fg_color="#f8fafc",
-            border_width=2,
-            border_color="#1d4ed8",
-            text_color="#0f1720",
-            placeholder_text_color="#64748b",
-        )
-        self.ent_logo_dir.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(f_logo_dir, text=t("ui_escolher"), width=90, fg_color="#8e44ad", command=self.escolher_logo_direita).grid(row=0, column=1, padx=(8, 0))
-        linha += 1
+        ctk.CTkLabel(form, text="Imagem do patrocinador (direita)", anchor="w", text_color="orange", font=("Arial", 12, "bold")).pack(fill="x", padx=15, pady=(2, 2))
+        f_logo_dir = ctk.CTkFrame(form, fg_color="#1f2a38")
+        f_logo_dir.pack(fill="x", padx=15, pady=(0, 8))
+        self.ent_logo_dir = ctk.CTkEntry(f_logo_dir, placeholder_text="Caminho da imagem do patrocinador (direita)")
+        self.ent_logo_dir.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(f_logo_dir, text="Escolher", width=90, fg_color="#8e44ad", command=self.escolher_logo_direita).pack(side="left", padx=(8, 0))
 
-        ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 6))
-        linha += 1
-        ctk.CTkLabel(form, text=t("ui_backup_na_nuvem"), anchor="w", text_color="#3498db", font=("Arial", 13, "bold")).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        ctk.CTkLabel(form, text=t("ui_e_mail_para_backup_na_nuvem"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        self.ent_email = ctk.CTkEntry(
-            form,
-            placeholder_text=t("ui_exemplo_gmail_com"),
-            height=34,
-            fg_color="#f8fafc",
-            border_width=2,
-            border_color="#1d4ed8",
-            text_color="#0f1720",
-            placeholder_text_color="#64748b",
-        )
-        self.ent_email.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
-        linha += 1
+        # ── Separador ──
+        ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").pack(fill="x", padx=15, pady=(12, 4))
+        ctk.CTkLabel(form, text="☁️  BACKUP NA NUVEM", anchor="w", text_color="#3498db", font=("Arial", 13, "bold")).pack(fill="x", padx=15, pady=(4, 2))
 
+        ctk.CTkLabel(form, text="E-mail para backup na nuvem", anchor="w", text_color="#aab4be", font=("Arial", 11)).pack(fill="x", padx=15, pady=(2, 2))
+        self.ent_email = ctk.CTkEntry(form, placeholder_text="exemplo@gmail.com")
+        self.ent_email.pack(fill="x", padx=15, pady=(0, 8))
+
+        f_cloud_login = ctk.CTkFrame(form, fg_color="#1f2a38")
+        f_cloud_login.pack(fill="x", padx=15, pady=(0, 10))
         self.btn_google = ctk.CTkButton(
-            form,
-            text=t("ui_entrar_no_google_drive"),
-            width=200,
+            f_cloud_login,
+            text="Entrar no Google Drive",
+            width=170,
             fg_color="#1a73e8",
             hover_color="#1558b0",
             command=self.conectar_google_drive_oficial,
         )
-        self.btn_google.grid(row=linha, column=0, sticky="w", padx=10, pady=(0, 8))
-        linha += 1
+        self.btn_google.pack(side="left")
 
-        f_drive_actions = ctk.CTkFrame(form, fg_color="transparent")
-        f_drive_actions.grid(row=linha, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
-        ctk.CTkButton(
-            f_drive_actions,
-            text=t("ui_backup_para_o_drive"),
-            width=200,
-            fg_color="#27ae60",
-            hover_color="#1f8d4d",
-            command=self.backup_para_drive_manual,
-        ).grid(row=0, column=0, padx=(0, 8))
-        ctk.CTkButton(
-            f_drive_actions,
-            text=t("ui_restaurar_do_drive"),
-            width=200,
-            fg_color="#d68910",
-            hover_color="#b9770e",
-            command=self.restaurar_do_drive_manual,
-        ).grid(row=0, column=1)
-        linha += 1
-
-        ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(8, 6))
-        linha += 1
-        ctk.CTkLabel(form, text=t("ui_configura_o_fiscal_acbr"), anchor="w", text_color="#64b5f6", font=("Arial", 13, "bold")).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-
-        ctk.CTkButton(
-            form,
-            text=t("ui_configurar_acbr"),
-            width=220,
-            fg_color="#1f6aa5",
-            hover_color="#1a5a8b",
-            font=("Arial", 12, "bold"),
-            command=self.abrir_configuracao_instalacao_acbr,
-        ).grid(row=linha, column=0, sticky="w", padx=10, pady=(0, 8))
-        linha += 1
-
-        ctk.CTkLabel(form, text=t("ui_modalidade_fiscal"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        self.var_modalidade_fiscal = ctk.StringVar(value="NF-e (Venda)")
-        self.opt_modalidade_fiscal = ctk.CTkOptionMenu(
-            form,
-            values=["NF-e (Venda)", "NFS-e (Serviço)"],
-            variable=self.var_modalidade_fiscal,
-            height=34,
-            fg_color="#1f6aa5",
-            button_color="#1a5a8b",
-            button_hover_color="#174a71",
-            dropdown_fg_color="#1f2a38",
-        )
-        self.opt_modalidade_fiscal.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
-        linha += 1
-
-        ctk.CTkLabel(form, text=t("ui_cnpj_emitente_nf_e"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        self.ent_fiscal_cnpj = ctk.CTkEntry(
-            form,
-            placeholder_text="00.000.000/0000-00",
-            height=34,
-            fg_color="#f8fafc",
-            border_width=2,
-            border_color="#1d4ed8",
-            text_color="#0f1720",
-            placeholder_text_color="#64748b",
-        )
-        self.ent_fiscal_cnpj.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
-        linha += 1
-
-        ctk.CTkLabel(form, text=t("ui_ie_inscri_o_estadual"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        self.ent_fiscal_ie = ctk.CTkEntry(
-            form,
-            placeholder_text=t("ui_inscri_o_estadual"),
-            height=34,
-            fg_color="#f8fafc",
-            border_width=2,
-            border_color="#1d4ed8",
-            text_color="#0f1720",
-            placeholder_text_color="#64748b",
-        )
-        self.ent_fiscal_ie.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
-        linha += 1
-
-        ctk.CTkLabel(form, text=t("ui_token_fiscal"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        self.ent_fiscal_token = ctk.CTkEntry(
-            form,
-            placeholder_text=t("ui_token_csc_do_emissor"),
-            height=34,
-            fg_color="#f8fafc",
-            border_width=2,
-            border_color="#1d4ed8",
-            text_color="#0f1720",
-            placeholder_text_color="#64748b",
-        )
-        self.ent_fiscal_token.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
-        linha += 1
-
-        ctk.CTkLabel(form, text=t("ui_caminho_do_certificado_a1"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        f_cert_a1 = ctk.CTkFrame(form, fg_color="transparent")
-        f_cert_a1.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
-        f_cert_a1.grid_columnconfigure(0, weight=1)
-        self.ent_fiscal_cert_a1 = ctk.CTkEntry(
-            f_cert_a1,
-            placeholder_text=t("ui_caminho_do_certificado_a1_pfx_p12"),
-            height=34,
-            fg_color="#f8fafc",
-            border_width=2,
-            border_color="#1d4ed8",
-            text_color="#0f1720",
-            placeholder_text_color="#64748b",
-        )
-        self.ent_fiscal_cert_a1.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(
-            f_cert_a1,
-            text=t("ui_escolher"),
-            width=90,
-            fg_color="#2980b9",
-            command=self.escolher_certificado_a1,
-        ).grid(row=0, column=1, padx=(8, 0))
-        linha += 1
-
-        ctk.CTkLabel(form, text=t("ui_configura_o_de_rede_da_oficina"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        f_rede = ctk.CTkFrame(form, fg_color="transparent")
-        f_rede.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 10))
-        f_rede.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(form, text="Configuração de rede da oficina", anchor="w", text_color="#aab4be", font=("Arial", 11)).pack(fill="x", padx=15, pady=(2, 2))
+        f_rede = ctk.CTkFrame(form, fg_color="#1f2a38")
+        f_rede.pack(fill="x", padx=15, pady=(0, 10))
         self.btn_localizar_rede = ctk.CTkButton(
             f_rede,
-            text=t("ui_localizar_oficina_na_rede"),
+            text="LOCALIZAR OFICINA NA REDE",
             width=280,
             height=34,
             fg_color="#1f6aa5",
             hover_color="#1a5a8b",
             command=self.localizar_oficina_rede_cfg,
         )
-        self.btn_localizar_rede.grid(row=0, column=0, padx=(0, 8), pady=0)
+        self.btn_localizar_rede.pack(side="left", padx=(10, 8), pady=10)
         self.lbl_rede = ctk.CTkLabel(f_rede, text="", anchor="w", text_color="#94a3b8", font=("Arial", 10))
-        self.lbl_rede.grid(row=0, column=1, sticky="ew")
-        linha += 1
+        self.lbl_rede.pack(side="left", fill="x", expand=True, padx=(0, 10), pady=10)
 
-        ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(4, 6))
-        linha += 1
-        ctk.CTkLabel(form, text=t("ui_informa_es_do_sistema"), anchor="w", text_color="#95a5a6", font=("Arial", 13, "bold")).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        self.lbl_versao = ctk.CTkLabel(form, text=t("ui_vers_o_carregando"), anchor="w", text_color="#7f8c8d", font=("Arial", 11))
-        self.lbl_versao.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2))
-        linha += 1
+        # ── Separador ──
+        ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").pack(fill="x", padx=15, pady=(8, 4))
+        ctk.CTkLabel(form, text="ℹ️  INFORMAÇÕES DO SISTEMA", anchor="w", text_color="#95a5a6", font=("Arial", 13, "bold")).pack(fill="x", padx=15, pady=(4, 2))
 
-        self.ent_tipo_licenca_info = ctk.CTkEntry(
+        # Versão e licença — read-only, carregados em carregar()
+        fi = ctk.CTkFrame(form, fg_color="#1f2a38")
+        fi.pack(fill="x", padx=15, pady=(2, 10))
+        self.lbl_versao = ctk.CTkLabel(fi, text="Versão: carregando...", anchor="w", text_color="#7f8c8d", font=("Arial", 11))
+        self.lbl_versao.pack(fill="x")
+        self.lbl_licenca = ctk.CTkLabel(fi, text="Licença: carregando...", anchor="w", text_color="#7f8c8d", font=("Arial", 11))
+        self.lbl_licenca.pack(fill="x")
+
+        ctk.CTkButton(form, text="  SALVAR DADOS", fg_color="#27ae60", width=220, font=("Arial", 13, "bold"), command=self.salvar).pack(pady=(4, 10))
+
+        ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").pack(fill="x", padx=15, pady=(6, 4))
+        ctk.CTkLabel(form, text="RECUPERACAO DE BACKUP", anchor="w", text_color="#f1c40f", font=("Arial", 13, "bold")).pack(fill="x", padx=15, pady=(4, 2))
+        ctk.CTkLabel(
             form,
-            height=34,
-            fg_color="#d1d5db",
-            border_width=1,
-            border_color="#9ca3af",
-            text_color="#374151",
-        )
-        self.ent_tipo_licenca_info.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
-        self.ent_tipo_licenca_info.insert(0, "Tipo de licença: carregando...")
-        self.ent_tipo_licenca_info.configure(state="readonly")
-        linha += 1
-
+            text="Use esta opcao apos reinstalacao para restaurar um arquivo .db antigo.",
+            anchor="w",
+            text_color="#aab4be",
+            font=("Arial", 11),
+        ).pack(fill="x", padx=15, pady=(0, 8))
         ctk.CTkButton(
             form,
-            text=t("ui_ativar_licen_a"),
-            fg_color="#34495e",
-            hover_color="#3c5a71",
-            width=220,
+            text="RESTAURAR BACKUP AGORA",
+            fg_color="#d68910",
+            hover_color="#b9770e",
+            width=260,
             font=("Arial", 12, "bold"),
-            command=self.abrir_tela_ativacao_licenca,
-        ).grid(row=linha, column=0, sticky="w", padx=10, pady=(0, 8))
-        linha += 1
+            command=self.restaurar_backup_manual,
+        ).pack(pady=(0, 10))
 
-        ctk.CTkButton(form, text=t("ui_salvar_dados"), fg_color="#27ae60", width=220, font=("Arial", 13, "bold"), command=self.salvar).grid(
-            row=linha, column=0, sticky="w", padx=10, pady=(0, 10)
-        )
-        linha += 1
-
-        ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(2, 6))
-        linha += 1
-        ctk.CTkLabel(form, text=t("ui_recuperacao_de_backup"), anchor="w", text_color="#f1c40f", font=("Arial", 13, "bold")).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        ctk.CTkLabel(form, text=t("ui_use_esta_opcao_apos_reinstalacao_para_restaurar_um_arquivo_d"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6)
-        )
-        linha += 1
-        ctk.CTkButton(form, text=t("ui_restaurar_backup_agora"), fg_color="#d68910", hover_color="#b9770e", width=260, font=("Arial", 12, "bold"), command=self.restaurar_backup_manual).grid(
-            row=linha, column=0, sticky="w", padx=10, pady=(0, 10)
-        )
-        linha += 1
-
-        ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(2, 6))
-        linha += 1
-        ctk.CTkLabel(form, text=t("ui_servidor_para_cliente"), anchor="w", text_color="#64b5f6", font=("Arial", 13, "bold")).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 2)
-        )
-        linha += 1
-        ctk.CTkLabel(form, text=t("ui_gera_um_pacote_para_o_cliente_clicar_e_instalar_o_servidor_l"), anchor="w", text_color="#aab4be", font=("Arial", 11)).grid(
-            row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6)
-        )
-        linha += 1
-
-        f_servidor = ctk.CTkFrame(form, fg_color="transparent")
-        f_servidor.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
-        f_servidor.grid_columnconfigure(1, weight=1)
+        ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").pack(fill="x", padx=15, pady=(6, 4))
+        ctk.CTkLabel(form, text="SERVIDOR PARA CLIENTE", anchor="w", text_color="#64b5f6", font=("Arial", 13, "bold")).pack(fill="x", padx=15, pady=(4, 2))
+        ctk.CTkLabel(
+            form,
+            text="Gera um pacote para o cliente clicar e instalar o servidor local.",
+            anchor="w",
+            text_color="#aab4be",
+            font=("Arial", 11),
+        ).pack(fill="x", padx=15, pady=(0, 8))
+        f_servidor = ctk.CTkFrame(form, fg_color="#1f2a38")
+        f_servidor.pack(fill="x", padx=15, pady=(0, 18))
         ctk.CTkButton(
             f_servidor,
-            text=t("ui_gerar_instalador_do_servidor"),
+            text="GERAR INSTALADOR DO SERVIDOR",
             fg_color="#2980b9",
             hover_color="#3498db",
             width=320,
             height=36,
             font=("Arial", 12, "bold"),
             command=self.gerar_instalador_servidor,
-        ).grid(row=0, column=0, padx=(0, 8), pady=0)
+        ).pack(side="left", padx=10, pady=10)
         ctk.CTkLabel(
             f_servidor,
-            text=t("ui_gera_um_pacote_para_o_cliente_instalar_o_servidor_local_com_"),
+            text="Gera um pacote para o cliente instalar o servidor local com poucos cliques.",
             anchor="w",
             justify="left",
             text_color="#aab4be",
             font=("Arial", 10),
-        ).grid(row=0, column=1, sticky="ew")
+        ).pack(side="left", fill="x", expand=True, padx=(4, 10), pady=10)
 
-        self._inicializar_status_fiscal_em_background()
-
-        # Adia a carga de dados para garantir estabilidade da renderização
-        self.after(250, self.carregar)
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-
-    def _inicializar_status_fiscal_em_background(self):
-        def _worker_fiscal():
-            ativo = False
-            try:
-                inicializar_motor_fiscal(carregar_configuracao_fiscal())
-                status_motor = verificar_status_motor_fiscal()
-                ativo = bool(status_motor.get("ok"))
-            except Exception as exc:
-                logger.info("ACBrMonitor indisponível na tela Dados da Oficina: %s", exc)
-                ativo = False
-
-            def _aplicar_status():
-                if not self.winfo_exists():
-                    return
-                self._status_motor_fiscal_ativo = ativo
-
-            try:
-                self.after(0, _aplicar_status)
-            except Exception:
-                pass
-
-        threading.Thread(target=_worker_fiscal, daemon=True, name="ofp-dados-oficina-fiscal").start()
-
-    def destroy(self):
-        self._encerrando_aplicacao = True
-        try:
-            for after_id in self.tk.call("after", "info"):
-                try:
-                    self.after_cancel(after_id)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        try:
-            self.grab_release()
-        except Exception:
-            pass
-
-        try:
-            # Workaround: normaliza _font ausente em labels do CustomTkinter antes do destroy.
-            def _patch_font_attr(widget):
-                try:
-                    if widget.__class__.__name__ == "CTkLabel" and not hasattr(widget, "_font"):
-                        setattr(widget, "_font", None)
-                except Exception:
-                    pass
-                try:
-                    for ch in widget.winfo_children():
-                        _patch_font_attr(ch)
-                except Exception:
-                    pass
-
-            _patch_font_attr(self)
-
-            if self.winfo_exists():
-                super().destroy()
-        except Exception as exc:
-            logger.warning("Falha ao fechar Dados da Oficina: %s", exc)
+        self.carregar()
 
     def _aplicar_maximizacao(self):
         try:
@@ -1393,167 +1150,57 @@ class FrmDadosOficina(ctk.CTkToplevel):
             pass
 
     def carregar(self):
-        """Carrega os dados da oficina com tratamento de erros robusto e logs de terminal."""
-        def _thread_db():
-            try:
-                with get_db_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT nome_oficina, endereco_oficina, telefone_oficina, chave_pix, logo_path, logo_patrocinador_path, cnpj_oficina FROM dados_oficina WHERE id = 1"
-                    )
-                    row = cursor.fetchone()
-                
-                email_atual = obter_email_backup_nuvem()
-                cfg_fiscal = carregar_configuracao_fiscal()
-                
-                # Retorna para a Main Thread para atualizar a UI
-                self.after(0, lambda: self.winfo_exists() and _atualizar_ui(row, email_atual, cfg_fiscal))
-            except Exception as e:
-                logger.exception("Erro na busca de dados em background: %s", e)
-
-        def _atualizar_ui(row, email_atual, cfg_fiscal):
-            if getattr(self, "_encerrando_aplicacao", False) or not self.winfo_exists():
-                return
-            try:
-                if not hasattr(self, 'ent_nome') or self.ent_nome is None:
-                    return
-
-                if row:
-                    self.ent_nome.delete(0, 'end'); self.ent_nome.insert(0, str(row[0] or ""))
-                    self.ent_endereco.delete(0, 'end'); self.ent_endereco.insert(0, str(row[1] or ""))
-                    self.ent_telefone.delete(0, 'end'); self.ent_telefone.insert(0, str(row[2] or ""))
-                    self.ent_pix.delete(0, 'end'); self.ent_pix.insert(0, str(row[3] or ""))
-                    self.ent_logo.delete(0, 'end'); self.ent_logo.insert(0, str(row[4] or ""))
-                    self.ent_logo_dir.delete(0, 'end'); self.ent_logo_dir.insert(0, str(row[5] or ""))
-                    if len(row) > 6:
-                        self.ent_cnpj.delete(0, 'end'); self.ent_cnpj.insert(0, str(row[6] or ""))
-
-                params_fiscal = cfg_fiscal.parametros_gerais if isinstance(cfg_fiscal.parametros_gerais, dict) else {}
-                modalidade_fiscal = str(params_fiscal.get("modalidade_fiscal") or "nfe").strip().lower()
-                cnpj_fiscal = str(params_fiscal.get("emitente_cnpj") or (row[6] if row and len(row) > 6 else "")).strip()
-                ie_fiscal = str(params_fiscal.get("emitente_ie") or "").strip()
-                token_fiscal = str(params_fiscal.get("acbr_token") or "").strip()
-                cert_a1 = str(params_fiscal.get("acbr_certificado_a1_path") or params_fiscal.get("certificado_a1_path") or "").strip()
-                self.var_modalidade_fiscal.set("NFS-e (Serviço)" if modalidade_fiscal == "nfse" else "NF-e (Venda)")
-                self.ent_fiscal_cnpj.delete(0, 'end'); self.ent_fiscal_cnpj.insert(0, cnpj_fiscal)
-                self.ent_fiscal_ie.delete(0, 'end'); self.ent_fiscal_ie.insert(0, ie_fiscal)
-                self.ent_fiscal_token.delete(0, 'end'); self.ent_fiscal_token.insert(0, token_fiscal)
-                self.ent_fiscal_cert_a1.delete(0, 'end'); self.ent_fiscal_cert_a1.insert(0, cert_a1)
-
-                if email_atual:
-                    self.ent_email.delete(0, 'end'); self.ent_email.insert(0, str(email_atual))
-                
-                if self.winfo_exists():
-                    self._configurar_labels_info()
-            except Exception as e:
-                logger.exception("Erro ao popular UI da tela Dados da Oficina: %s", e)
-
-        threading.Thread(target=_thread_db, daemon=True).start()
-
-    def _configurar_labels_info(self):
-        """Configura labels de versão e licença de forma segura."""
         try:
-            if not hasattr(self, 'lbl_versao'):
-                return
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT nome_oficina, endereco_oficina, telefone_oficina, chave_pix, logo_path, logo_patrocinador_path
+                    FROM dados_oficina
+                    WHERE id = 1
+                    """
+                )
+                row = cursor.fetchone()
+            if row:
+                self.ent_nome.insert(0, row[0] or "")
+                self.ent_endereco.insert(0, row[1] or "")
+                self.ent_telefone.insert(0, row[2] or "")
+                self.ent_pix.insert(0, row[3] or "")
+                self.ent_logo.insert(0, row[4] or "")
+                self.ent_logo_dir.insert(0, row[5] or "")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Não foi possível carregar dados da oficina: {e}", parent=self)
+
+        # email backup
+        try:
+            email_atual = obter_email_backup_nuvem()
+            if email_atual:
+                self.ent_email.insert(0, email_atual)
+        except Exception:
+            pass
+
+        # versão e licença
+        try:
             self.lbl_versao.configure(text=f"Versão do sistema: {APP_VERSION}")
-
-            if hasattr(self, 'ent_tipo_licenca_info'):
-                tipo = str(obter_tipo_licenca() or "INATIVA").strip().upper()
-                if tipo == "PERMANENTE":
-                    tipo_txt = "Permanente"
-                elif tipo == "TRIAL":
-                    tipo_txt = "Trial"
-                elif tipo in {"MENSAL", "ATIVA", "TOKEN"}:
-                    tipo_txt = "Mensal"
+        except Exception:
+            pass
+        try:
+            lic_ativa, _msg, _cli, validade = obter_status_licenca()
+            if lic_ativa:
+                tipo = obter_tipo_licenca()
+                val_txt = str(validade or "").strip().upper()
+                if val_txt == "PERMANENTE":
+                    self.lbl_licenca.configure(text=f"Licença: {tipo} — PERMANENTE", text_color="#2ecc71")
                 else:
-                    tipo_txt = "Inativa"
-
-                self.ent_tipo_licenca_info.configure(state="normal")
-                self.ent_tipo_licenca_info.delete(0, "end")
-                self.ent_tipo_licenca_info.insert(0, f"Tipo de licença: {tipo_txt}")
-                self.ent_tipo_licenca_info.configure(state="readonly")
-        except Exception as lic_err:
-            logger.warning("Erro ao configurar labels de licença: %s", lic_err)
-
-    def abrir_tela_ativacao_licenca(self):
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Ativar Licença")
-        dialog.geometry("500x285")
-        dialog.resizable(False, False)
-        dialog.grab_set()
-        dialog.focus_force()
-
-        chave_inst = str(obter_chave_instalacao() or "").strip()
-        ctk.CTkLabel(dialog, text=t("ui_chave_de_instala_o_deste_pc"), text_color="#bdc3c7").pack(pady=(16, 4))
-
-        frame_chave = ctk.CTkFrame(dialog, fg_color="#1f2a38")
-        frame_chave.pack(pady=(0, 12), padx=12, fill="x")
-        ctk.CTkLabel(frame_chave, text=chave_inst, text_color="#f1c40f", font=("Courier", 13, "bold")).pack(side="left", padx=(10, 8), pady=8)
-
-        def _copiar_chave():
-            dialog.clipboard_clear()
-            dialog.clipboard_append(chave_inst)
-            btn_copiar.configure(text=t("ui_copiado"))
-            dialog.after(1500, lambda: btn_copiar.configure(text=t("ui_copiar_chave")))
-
-        btn_copiar = ctk.CTkButton(
-            frame_chave,
-            text=t("ui_copiar_chave"),
-            command=_copiar_chave,
-            width=130,
-            height=30,
-            fg_color="#2980b9",
-            hover_color="#3498db",
-        )
-        btn_copiar.pack(side="right", padx=(0, 8), pady=8)
-
-        ctk.CTkLabel(dialog, text=t("ui_contra_senha_de_ativa_o"), text_color="#bdc3c7").pack(pady=(2, 4))
-        entry_chave = ctk.CTkEntry(dialog, width=420, height=40, placeholder_text=t("ui_cole_aqui_a_chave_enviada_pelo_suporte"))
-        entry_chave.pack(pady=(0, 10))
-
-        def _confirmar():
-            chave = entry_chave.get().strip()
-            if not chave:
-                messagebox.showwarning("Ativação", "Informe a contra-senha de ativação.", parent=dialog)
-                return
-
-            btn_confirmar.configure(state="disabled", text=t("ui_ativando"))
-            ok, msg = ativar_licenca(chave)
-            if ok:
-                def _publicar_drive_bg():
-                    try:
-                        publicar_licenca_drive(chave)
-                    except Exception as exc:
-                        logger.warning("Falha silenciosa ao publicar licença no Drive: %s", exc)
-
-                threading.Thread(target=_publicar_drive_bg, daemon=True, name="ofp-licenca-drive-menu").start()
-                self._configurar_labels_info()
-                messagebox.showinfo("Ativação", "Licença ativada com sucesso.", parent=dialog)
-                dialog.destroy()
-                return
-
-            try:
-                diag = diagnosticar_chave_licenca(chave)
-                detalhe = str(diag.get("motivo") or "").strip()
-                if detalhe:
-                    msg = f"{msg}\n\nDiagnóstico: {detalhe}"
-            except Exception:
-                pass
-
-            btn_confirmar.configure(state="normal", text=t("ui_ativar_agora"))
-            messagebox.showerror("Ativação", msg, parent=dialog)
-
-        btn_confirmar = ctk.CTkButton(
-            dialog,
-            text=t("ui_ativar_agora"),
-            command=_confirmar,
-            width=320,
-            height=36,
-            fg_color="#27ae60",
-            hover_color="#2ecc71",
-        )
-        btn_confirmar.pack(pady=(4, 8))
-        entry_chave.bind("<Return>", lambda _e: _confirmar())
+                    self.lbl_licenca.configure(text=f"Licença: {tipo} — válida até {validade}", text_color="#2ecc71")
+            else:
+                trial_ativo, dias, data_lim = obter_status_trial()
+                if trial_ativo:
+                    self.lbl_licenca.configure(text=f"Trial ativo: {dias} dia(s) restante(s) (até {data_lim})", text_color="#f1c40f")
+                else:
+                    self.lbl_licenca.configure(text=f"Trial expirado (em {data_lim})", text_color="#e74c3c")
+        except Exception:
+            pass
 
     def escolher_logo(self):
         caminho = filedialog.askopenfilename(
@@ -1574,54 +1221,6 @@ class FrmDadosOficina(ctk.CTkToplevel):
         if caminho:
             self.ent_logo_dir.delete(0, "end")
             self.ent_logo_dir.insert(0, caminho)
-
-    def escolher_certificado_a1(self):
-        caminho = filedialog.askopenfilename(
-            parent=self,
-            title="Selecionar certificado A1",
-            filetypes=[("Certificado A1", "*.pfx;*.p12"), ("Todos os arquivos", "*.*")],
-        )
-        if caminho:
-            self.ent_fiscal_cert_a1.delete(0, "end")
-            self.ent_fiscal_cert_a1.insert(0, caminho)
-
-    def abrir_configuracao_instalacao_acbr(self):
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        candidatos_setup = [
-            os.path.join(base_dir, "instala", "ACBrMonitorPLUS-DEMO-1.4.0.467-x86-I.exe"),
-            os.path.join(base_dir, "config_fiscal", "acbr_monitor", "ACBrMonitorPLUS-DEMO-1.4.0.467-x86-I.exe"),
-        ]
-
-        for instalador in candidatos_setup:
-            if not os.path.exists(instalador):
-                continue
-            try:
-                if hasattr(os, "startfile"):
-                    os.startfile(instalador)  # type: ignore[attr-defined]
-                else:
-                    webbrowser.open(instalador)
-                return
-            except Exception as exc:
-                messagebox.showerror("ACBr", f"Não foi possível abrir o instalador do ACBr: {exc}", parent=self)
-                return
-
-        pasta_config = os.path.join(base_dir, "config_fiscal")
-        if os.path.isdir(pasta_config):
-            try:
-                if hasattr(os, "startfile"):
-                    os.startfile(pasta_config)  # type: ignore[attr-defined]
-                else:
-                    webbrowser.open(pasta_config)
-                return
-            except Exception as exc:
-                messagebox.showerror("ACBr", f"Não foi possível abrir a pasta de configuração fiscal: {exc}", parent=self)
-                return
-
-        messagebox.showwarning(
-            "ACBr",
-            "Não foi localizado instalador ou pasta de configuração do ACBr nesta instalação.",
-            parent=self,
-        )
 
     def _descobrir_oficina_udp_cfg(self, timeout_total=5.0):
         payload = json.dumps({
@@ -1679,8 +1278,8 @@ class FrmDadosOficina(ctk.CTkToplevel):
         return caminho_cfg
 
     def localizar_oficina_rede_cfg(self):
-        self.btn_localizar_rede.configure(state="disabled", text=t("ui_localizando"))
-        self.lbl_rede.configure(text=t("ui_buscando_servidor_na_rede_local"), text_color="#f1c40f")
+        self.btn_localizar_rede.configure(state="disabled", text="LOCALIZANDO...")
+        self.lbl_rede.configure(text="Buscando servidor na rede local...", text_color="#f1c40f")
 
         def worker():
             url = ""
@@ -1691,9 +1290,9 @@ class FrmDadosOficina(ctk.CTkToplevel):
                 erro = str(exc)
 
             def finalizar():
-                self.btn_localizar_rede.configure(state="normal", text=t("ui_localizar_oficina_na_rede"))
+                self.btn_localizar_rede.configure(state="normal", text="LOCALIZAR OFICINA NA REDE")
                 if not url:
-                    self.lbl_rede.configure(text=t("ui_oficina_n_o_localizada_na_rede"), text_color="#e74c3c")
+                    self.lbl_rede.configure(text="Oficina não localizada na rede.", text_color="#e74c3c")
                     msg = "Não foi possível localizar a oficina automaticamente na rede."
                     if erro:
                         msg += f"\n\nDetalhe: {erro}"
@@ -1704,7 +1303,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
                     self.lbl_rede.configure(text=f"Oficina localizada: {url}", text_color="#2ecc71")
                     messagebox.showinfo("Rede Local", f"Oficina localizada com sucesso!\n\nServidor: {url}\nConfig salvo em: {caminho}", parent=self)
                 except Exception as exc:
-                    self.lbl_rede.configure(text=t("ui_servidor_encontrado_mas_falha_ao_salvar"), text_color="#f39c12")
+                    self.lbl_rede.configure(text="Servidor encontrado, mas falha ao salvar.", text_color="#f39c12")
                     messagebox.showwarning("Rede Local", f"Servidor encontrado: {url}\nFalha ao salvar config: {exc}", parent=self)
 
             self.after(0, finalizar)
@@ -1829,147 +1428,6 @@ class FrmDadosOficina(ctk.CTkToplevel):
             parent=self,
         )
 
-    def _garantir_drive_autenticado(self) -> bool:
-        if google_drive_usuario_conectado():
-            return True
-
-        autenticar = messagebox.askyesno(
-            "Google Drive",
-            "Você ainda não está autenticado no Google Drive.\n\nDeseja autenticar agora?",
-            parent=self,
-        )
-        if not autenticar:
-            return False
-
-        self.conectar_google_drive_oficial()
-        return google_drive_usuario_conectado()
-
-    def backup_para_drive_manual(self):
-        if not self._garantir_drive_autenticado():
-            return
-
-        ok, msg = enviar_backup_banco_para_drive_usuario()
-        if ok:
-            messagebox.showinfo(
-                "Backup no Drive",
-                f"Backup concluído com sucesso.\n\n{msg}",
-                parent=self,
-            )
-            return
-
-        messagebox.showwarning("Backup no Drive", msg or "Falha ao enviar backup para o Drive.", parent=self)
-
-    def _selecionar_backup_drive(self, backups: list[dict]) -> dict | None:
-        if not backups:
-            return None
-
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Selecionar backup do Drive")
-        dialog.geometry("760x420")
-        dialog.resizable(True, True)
-        dialog.grab_set()
-
-        ctk.CTkLabel(
-            dialog,
-            text=t("ui_selecione_um_arquivo_db_da_nuvem"),
-            font=("Arial", 14, "bold"),
-            text_color="orange",
-        ).pack(anchor="w", padx=16, pady=(12, 8))
-
-        opcoes: list[str] = []
-        mapa: dict[str, dict] = {}
-        for item in backups:
-            nome = str(item.get("name") or "backup.db")
-            mod = str(item.get("modified") or "-")
-            tam = str(item.get("size") or "0")
-            rotulo = f"{nome}  |  {mod}  |  {tam} bytes"
-            opcoes.append(rotulo)
-            mapa[rotulo] = item
-
-        selecionado = {"item": backups[0]}
-        var = tk.StringVar(value=opcoes[0])
-
-        lbl_info = ctk.CTkLabel(dialog, text="", anchor="w", justify="left", text_color="#aab4be", font=("Arial", 11))
-        lbl_info.pack(fill="x", padx=16, pady=(0, 8))
-
-        def _atualizar_info(chave: str):
-            item = mapa.get(chave, backups[0])
-            selecionado["item"] = item
-            lbl_info.configure(
-                text=(
-                    f"Arquivo: {item.get('name', '-') }\n"
-                    f"Alterado: {item.get('modified', '-') }\n"
-                    f"Tamanho: {item.get('size', '0')} bytes"
-                )
-            )
-
-        combo = ctk.CTkOptionMenu(dialog, values=opcoes, variable=var, command=_atualizar_info)
-        combo.pack(fill="x", padx=16, pady=(0, 10))
-        _atualizar_info(opcoes[0])
-
-        retorno = {"value": None}
-
-        def _confirmar():
-            retorno["value"] = selecionado.get("item")
-            dialog.destroy()
-
-        def _cancelar():
-            retorno["value"] = None
-            dialog.destroy()
-
-        botoes = ctk.CTkFrame(dialog, fg_color="transparent")
-        botoes.pack(anchor="e", padx=16, pady=(8, 12))
-        ctk.CTkButton(botoes, text=t("btn_cancelar"), fg_color="#7f8c8d", width=120, command=_cancelar).grid(row=0, column=0, padx=(0, 8))
-        ctk.CTkButton(botoes, text=t("ui_restaurar"), fg_color="#d68910", hover_color="#b9770e", width=120, command=_confirmar).grid(row=0, column=1)
-
-        self.wait_window(dialog)
-        return retorno["value"]
-
-    def restaurar_do_drive_manual(self):
-        if not self._garantir_drive_autenticado():
-            return
-
-        ok_list, backups, msg_list = listar_backups_banco_drive_usuario(limit=80)
-        if not ok_list:
-            messagebox.showwarning("Restaurar do Drive", msg_list or "Falha ao listar backups no Drive.", parent=self)
-            return
-
-        if not backups:
-            messagebox.showinfo("Restaurar do Drive", "Nenhum arquivo .db encontrado na pasta Oficina_Backup.", parent=self)
-            return
-
-        escolhido = self._selecionar_backup_drive(backups)
-        if not escolhido:
-            return
-
-        confirmar = messagebox.askyesno(
-            "Confirmar restauracao",
-            "Isso vai substituir o banco atual pelos dados do backup selecionado no Drive.\n\nDeseja continuar?",
-            parent=self,
-        )
-        if not confirmar:
-            return
-
-        ok_restore, msg_restore = restaurar_backup_banco_drive_usuario(
-            str(escolhido.get("id") or ""),
-            str(escolhido.get("name") or ""),
-        )
-        if not ok_restore:
-            messagebox.showerror("Restaurar do Drive", msg_restore or "Falha ao restaurar backup do Drive.", parent=self)
-            return
-
-        reiniciar = messagebox.askyesno(
-            "Backup restaurado",
-            f"{msg_restore}\n\nDeseja fechar o sistema agora para reabrir com os dados restaurados?",
-            parent=self,
-        )
-        if reiniciar:
-            encerrar = getattr(self.master, "_encerrar_aplicacao", None)
-            if callable(encerrar):
-                encerrar()
-                return
-            messagebox.showwarning("Encerramento", "Não foi possível acionar o encerramento centralizado.", parent=self)
-
     def salvar(self):
         nome = self.ent_nome.get().strip()
         endereco = self.ent_endereco.get().strip()
@@ -1977,13 +1435,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
         pix = self.ent_pix.get().strip()
         logo = self.ent_logo.get().strip()
         logo_dir = self.ent_logo_dir.get().strip()
-        cnpj = self.ent_cnpj.get().strip()
         email_nuvem = self.ent_email.get().strip().lower()
-        cnpj_fiscal = self.ent_fiscal_cnpj.get().strip() or cnpj
-        ie_fiscal = self.ent_fiscal_ie.get().strip()
-        token_fiscal = self.ent_fiscal_token.get().strip()
-        cert_a1_fiscal = self.ent_fiscal_cert_a1.get().strip()
-        modalidade_fiscal = "nfse" if "NFS-e" in str(self.var_modalidade_fiscal.get()) else "nfe"
 
         if not nome:
             messagebox.showwarning("Atenção", "Informe o nome da oficina.", parent=self)
@@ -1995,47 +1447,16 @@ class FrmDadosOficina(ctk.CTkToplevel):
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO dados_oficina
-                        (id, nome_oficina, endereco_oficina, telefone_oficina, chave_pix, logo_path, logo_patrocinador_path, cnpj_oficina)
+                        (id, nome_oficina, endereco_oficina, telefone_oficina, chave_pix, logo_path, logo_patrocinador_path)
                     VALUES
-                        (1, ?, ?, ?, ?, ?, ?, ?)
+                        (1, ?, ?, ?, ?, ?, ?)
                     """,
-                    (nome, endereco, telefone, pix, logo, logo_dir, cnpj)
+                    (nome, endereco, telefone, pix, logo, logo_dir)
                 )
                 conn.commit()
         except Exception as e:
             messagebox.showerror("Erro", f"Não foi possível salvar dados da oficina: {e}", parent=self)
             return
-
-        try:
-            cfg_atual = carregar_configuracao_fiscal()
-            parametros = dict(cfg_atual.parametros_gerais or {}) if isinstance(cfg_atual.parametros_gerais, dict) else {}
-            parametros.update(
-                {
-                    "provedor": "acbr",
-                    "acbr_modo": str(parametros.get("acbr_modo") or "monitor").strip().lower() or "monitor",
-                    "emitente_cnpj": cnpj_fiscal,
-                    "emitente_ie": ie_fiscal,
-                    "acbr_token": token_fiscal,
-                    "modalidade_fiscal": modalidade_fiscal,
-                    "acbr_certificado_a1_path": cert_a1_fiscal,
-                    "certificado_a1_path": cert_a1_fiscal,
-                }
-            )
-            salvar_configuracao_fiscal(
-                ConfiguracaoFiscal(
-                    api_key_plugnotas=str(cfg_atual.api_key_plugnotas or "").strip(),
-                    api_key_focusnfe=str(cfg_atual.api_key_focusnfe or "").strip(),
-                    ambiente=str(cfg_atual.ambiente or "homologacao").strip().lower() or "homologacao",
-                    parametros_gerais=parametros,
-                )
-            )
-        except Exception as e:
-            messagebox.showwarning(
-                "Configuração Fiscal",
-                f"Dados da oficina salvos, mas houve falha ao salvar configuração fiscal: {e}",
-                parent=self,
-            )
-
         # Inicializa o Firebase após salvar localmente
         self.inicializar_firebase()
 
@@ -2046,9 +1467,8 @@ class FrmDadosOficina(ctk.CTkToplevel):
                 messagebox.showwarning("E-mail Nuvem", f"Dados salvos, mas não foi possível salvar e-mail: {msg}", parent=self)
 
         messagebox.showinfo("Sucesso", "Dados da oficina atualizados com sucesso.", parent=self)
-        
-        # Fechamento seguro para evitar erro 'can't delete Tcl command'
         self.destroy()
+
     def restaurar_backup_manual(self):
         caminho_backup = filedialog.askopenfilename(
             parent=self,
@@ -2103,11 +1523,8 @@ class FrmDadosOficina(ctk.CTkToplevel):
                 parent=self,
             )
             if reiniciar:
-                encerrar = getattr(self.master, "_encerrar_aplicacao", None)
-                if callable(encerrar):
-                    encerrar()
-                    return
-                messagebox.showwarning("Encerramento", "Não foi possível acionar o encerramento centralizado.", parent=self)
+                self.master.destroy()
+                os._exit(0)
         except Exception as e:
             messagebox.showerror("Backup", f"Nao foi possivel restaurar o backup: {e}", parent=self)
 
@@ -2221,9 +1638,9 @@ class FrmDadosOficina(ctk.CTkToplevel):
         win.focus_force()
         win.configure(fg_color="#0d1117")
 
-        ctk.CTkLabel(win, text=t("ui_pacote_do_servidor_gerado"),
+        ctk.CTkLabel(win, text="✅  PACOTE DO SERVIDOR GERADO!",
                      font=("Arial", 17, "bold"), text_color="#2ecc71").pack(pady=(20, 4))
-        ctk.CTkLabel(win, text=t("ui_escolha_a_op_o_de_entrega_mais_adequada_para_o_cliente"),
+        ctk.CTkLabel(win, text="Escolha a opção de entrega mais adequada para o cliente:",
                      font=("Arial", 12), text_color="#bdc3c7").pack(pady=(0, 12))
 
         # ── Opção 1: Instalador (recomendado) ───────────────────────────
@@ -2231,9 +1648,9 @@ class FrmDadosOficina(ctk.CTkToplevel):
         card1.pack(fill="x", padx=20, pady=(0, 10))
         f1h = ctk.CTkFrame(card1, fg_color="#1a2a1a")
         f1h.pack(fill="x", padx=14, pady=(12, 0))
-        ctk.CTkLabel(f1h, text=t("ui_op_o_1_zip_recomendado"),
+        ctk.CTkLabel(f1h, text="📦  OPÇÃO 1 — ZIP (RECOMENDADO)",
                      font=("Arial", 13, "bold"), text_color="#2ecc71").pack(side="left")
-        ctk.CTkLabel(f1h, text=t("ui_mais_f_cil_para_o_cliente"),
+        ctk.CTkLabel(f1h, text="  ✔ mais fácil para o cliente",
                      font=("Arial", 11), text_color="#7fba00").pack(side="left", padx=6)
         ctk.CTkLabel(card1,
                      text=(
@@ -2245,7 +1662,7 @@ class FrmDadosOficina(ctk.CTkToplevel):
                      ),
                      font=("Arial", 11), text_color="#b2d9b2", justify="left", wraplength=560).pack(
             padx=14, pady=(4, 12), anchor="w")
-        ctk.CTkButton(card1, text=t("ui_copiar_caminho_do_zip"),
+        ctk.CTkButton(card1, text="📋  Copiar caminho do ZIP",
                       fg_color="#1a6b30", hover_color="#27ae60", width=230,
                       command=lambda: (win.clipboard_clear(), win.clipboard_append(zip_saida),
                                        messagebox.showinfo("Copiado", "Caminho do ZIP copiado!", parent=win))
@@ -2256,9 +1673,9 @@ class FrmDadosOficina(ctk.CTkToplevel):
         card2.pack(fill="x", padx=20, pady=(0, 10))
         f2h = ctk.CTkFrame(card2, fg_color="#1a1a2a")
         f2h.pack(fill="x", padx=14, pady=(12, 0))
-        ctk.CTkLabel(f2h, text=t("ui_op_o_2_terminal_para_t_cnicos"),
+        ctk.CTkLabel(f2h, text="💻  OPÇÃO 2 — TERMINAL (para técnicos)",
                      font=("Arial", 13, "bold"), text_color="#3498db").pack(side="left")
-        ctk.CTkLabel(f2h, text=t("ui_requer_python"),
+        ctk.CTkLabel(f2h, text="  ⚠ requer Python",
                      font=("Arial", 11), text_color="#f39c12").pack(side="left", padx=6)
         ctk.CTkLabel(card2,
                      text=(
@@ -2273,14 +1690,14 @@ class FrmDadosOficina(ctk.CTkToplevel):
                      ),
                      font=("Consolas", 10), text_color="#a0c4ff", justify="left", wraplength=560).pack(
             padx=14, pady=(4, 8), anchor="w")
-        ctk.CTkButton(card2, text=t("ui_copiar_comando_pip_install"),
+        ctk.CTkButton(card2, text="📋  Copiar comando pip install",
                       fg_color="#1a3a6b", hover_color="#2980b9", width=260,
                       command=lambda: (win.clipboard_clear(),
                                        win.clipboard_append("pip install fastapi uvicorn jinja2 python-multipart"),
                                        messagebox.showinfo("Copiado", "Comando copiado!", parent=win))
                       ).pack(pady=(0, 12))
 
-        ctk.CTkButton(win, text=t("ui_fechar_1"), fg_color="#7f8c8d", hover_color="#95a5a6",
+        ctk.CTkButton(win, text="Fechar", fg_color="#7f8c8d", hover_color="#95a5a6",
                       width=140, command=win.destroy).pack(pady=(6, 16))
 
 
@@ -2291,11 +1708,8 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
         self.geometry("1100x680")
         self.minsize(920, 560)
         self.configure(fg_color="#161b22")
-        self.update()
-        self.attributes('-topmost', True)
-        self.focus_force()
-        self.after(300, lambda: self.attributes('-topmost', False))
         self.grab_set()
+        self.focus_force()
         self._dados_por_item = {}
         self._aplicar_maximizacao()
         self.after(120, self._aplicar_maximizacao)
@@ -2304,13 +1718,13 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
         header.pack(fill="x", padx=18, pady=(18, 10))
         ctk.CTkLabel(
             header,
-            text=t("ui_baixa_de_o_s_finalizadas"),
+            text="🧾 BAIXA DE O.S. FINALIZADAS",
             font=("Arial", 22, "bold"),
             text_color="orange",
         ).pack(side="left", padx=18, pady=18)
         ctk.CTkButton(
             header,
-            text=t("ui_dar_baixa_gerar_recibo"),
+            text="DAR BAIXA / GERAR RECIBO",
             fg_color="#8e6b3b",
             hover_color="#a87c45",
             width=220,
@@ -2318,14 +1732,14 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
         ).pack(side="right", padx=(0, 10), pady=18)
         ctk.CTkButton(
             header,
-            text=t("ui_fechar_1"),
+            text="Fechar",
             fg_color="#7f8c8d",
             width=120,
             command=self.destroy,
         ).pack(side="right", padx=(0, 10), pady=18)
         ctk.CTkButton(
             header,
-            text=t("btn_atualizar"),
+            text="Atualizar",
             fg_color="#2980b9",
             width=130,
             command=self.carregar_os_finalizadas,
@@ -2335,7 +1749,7 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
         info.pack(fill="x", padx=18, pady=(0, 10))
         ctk.CTkLabel(
             info,
-            text=t("ui_selecione_uma_o_s_finalizada_para_dar_baixa_gerar_o_recibo_e"),
+            text="Selecione uma O.S. FINALIZADA para dar baixa, gerar o recibo e marcar como ENTREGUE.",
             font=("Arial", 12),
             text_color="#d5d8dc",
         ).pack(anchor="w", padx=16, pady=(12, 8))
@@ -2355,13 +1769,13 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
             show="headings",
             height=14,
         )
-        self.tab_recibos.heading("id", text=t("ui_n_o_s"))
-        self.tab_recibos.heading("cliente", text=t("ui_cliente_1"))
-        self.tab_recibos.heading("equipamento", text=t("ui_equipamento_1"))
-        self.tab_recibos.heading("data", text=t("ui_data_1"))
-        self.tab_recibos.heading("valor_total", text=t("ui_valor_total"))
-        self.tab_recibos.heading("saldo", text=t("ui_saldo_1"))
-        self.tab_recibos.heading("status", text=t("ui_status_1"))
+        self.tab_recibos.heading("id", text="Nº O.S.")
+        self.tab_recibos.heading("cliente", text="CLIENTE")
+        self.tab_recibos.heading("equipamento", text="EQUIPAMENTO")
+        self.tab_recibos.heading("data", text="DATA")
+        self.tab_recibos.heading("valor_total", text="VALOR TOTAL")
+        self.tab_recibos.heading("saldo", text="SALDO")
+        self.tab_recibos.heading("status", text="STATUS")
         self.tab_recibos.column("id", width=80, anchor="center")
         self.tab_recibos.column("cliente", width=240)
         self.tab_recibos.column("equipamento", width=210)
@@ -2373,20 +1787,7 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
         self.tab_recibos.bind("<<TreeviewSelect>>", self._selecionar_os)
         self.tab_recibos.bind("<Double-1>", self.gerar_recibo_selecionado)
 
-        self.carregar_os_finalizadas() #
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-
-    def destroy(self):
-        try:
-            try:
-                for after_id in self.tk.call("after", "info"):
-                    self.after_cancel(after_id)
-            except Exception:
-                pass
-            self.withdraw()
-            super().destroy()
-        except Exception:
-            pass
+        self.carregar_os_finalizadas()
 
     def _aplicar_maximizacao(self):
         try:
@@ -2445,7 +1846,7 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
             if rows:
                 self.lbl_info_recibo.configure(text=f"{len(rows)} O.S. finalizada(s) pronta(s) para baixa.")
             else:
-                self.lbl_info_recibo.configure(text=t("ui_nenhuma_o_s_finalizada_pendente_de_baixa"))
+                self.lbl_info_recibo.configure(text="Nenhuma O.S. finalizada pendente de baixa.")
         except Exception as exc:
             self.lbl_info_recibo.configure(text=f"Erro ao carregar O.S. finalizadas: {exc}")
 
@@ -2492,319 +1893,223 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
 # MENU PRINCIPAL
 # =================================================================
 class FrmMenu(ctk.CTk):
-    def __init__(self, usuario="", role="VENDEDOR", senha_login=""):
+    def __init__(self, usuario="", role="OPERADOR", senha_login=""):
         super().__init__()
-        try:
-            tk._default_root = self
-        except Exception:
-            pass
-        print(f"Log: Menu Principal carregado para usuário: {usuario}")
         self.withdraw()
         self.usuario = usuario or "USUÁRIO"
-        self.role = (role or "VENDEDOR").upper()
+        self.role = (role or "OPERADOR").upper()
         self._senha_login = senha_login or ""
         self._backup_nuvem_executado = False
-        self._primeira_instalacao_checada = False
         self._janela_gestao_os = None
         self._janela_os_atual = None
         self._ultima_os_contexto = None
         self._encerrando_aplicacao = False
-        self._aviso_motor_fiscal_inicio_exibido = False
-        self.locale = set_default_locale()  # idioma 100% automático (sistema operacional)
-        self.title(f"{t('titulo_sistema')} v{VERSION}")
-        self.geometry("1100x750") #
+        self.title("Sistema Oficina de Pesca v1.0.5")
+        self.geometry("1100x750")
         self.configure(fg_color="#0f1720")
-        self._encerrando_aplicacao = False
 
         self.update_idletasks()
-        self.geometry(f"+{(self.winfo_screenwidth() // 2) - (1100 // 2)}+{(self.winfo_screenheight() // 2) - (750 // 2)}")
+        x = (self.winfo_screenwidth() // 2) - (1100 // 2)
+        y = (self.winfo_screenheight() // 2) - (750 // 2)
+        self.geometry(f"+{x}+{y}")
+
+        self._aplicar_maximizacao()
+        self.after(150, self._aplicar_maximizacao)
+        self.after(900, self._aplicar_maximizacao)
 
         self.protocol("WM_DELETE_WINDOW", self.confirmar_saida)
-        
-        self._dash_mode = "COMPLETO"
-        self._dashboard_auto_after_id = None
-        self._dados_pendencias_dashboard = ([], [], [], [], []) #
+
+        # ── Fundo (imagem de fundo, opcional) ──────────────────────────
+        self._bg_image = None
+        self._bg_photo = None
+        self._bg_ctk_image = None
         self._bg_pil_original = None
-        self._bg_tk_image = None
-        self._bg_canvas = None
         self._bg_cache_size = None
-        self._dashboard_bg_after_id = None
-        self._dashboard_bg_bound = False
-        self.dashboard_content = None
-        self._debug_fundo_dashboard_emitido = False
-        self._menu_pronto_exibido = False
-        self._status_fiscal_dashboard = {
-            "texto": "Status Fiscal: verificando...",
-            "cor": "#f1c40f",
-            "ativo": None,
-        }
-        self._abandono_alerta_after_id = None
+        self._bg_label = ctk.CTkLabel(self, text="", fg_color="#0f1720")
+        self._bg_label.place(x=0, y=0, relwidth=1, relheight=1)
+        imagem_carregada = False
+        pasta_banco = os.path.dirname(CAMINHO_BANCO)
+        pasta_exec = os.path.dirname(os.path.abspath(__file__))
+        pastas_base = [
+            DIRETORIO_RECURSOS,
+            pasta_banco,
+            os.path.join(pasta_banco, "_internal"),
+            pasta_exec,
+            os.getcwd(),
+        ]
 
-        # Adia a criação da UI para garantir root estável
-        self.after(250, self.setup_ui)
+        candidatos = []
+        for pasta_base in pastas_base:
+            candidatos.extend([
+                os.path.join(pasta_base, "fundomenu.jpg"),
+                os.path.join(pasta_base, "fundomenu.jpeg"),
+                os.path.join(pasta_base, "fundomenu.png"),
+                os.path.join(pasta_base, "fundomenu.bmp"),
+                os.path.join(pasta_base, "fundo_menu.jpg"),
+                os.path.join(pasta_base, "fundo_menu.jpeg"),
+                os.path.join(pasta_base, "fundo_menu.png"),
+                os.path.join(pasta_base, "fundo_menu.bmp"),
+            ])
 
-        # Agendamentos de serviços em background (Isolados e seguros)
-        self.after(2000, self._executar_check_versao_seguro) # Atrasado para estabilizar
+        vistos = set()
+        candidatos_unicos = []
+        for caminho in candidatos:
+            chave = os.path.abspath(caminho)
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            candidatos_unicos.append(caminho)
 
-    def _executar_check_versao_seguro(self):
-        """Busca atualizações no GitHub de forma isolada após a carga inicial."""
-        if self._encerrando_aplicacao: return
-        if self.winfo_exists(): #
-            def worker():
-                try:
-                    # Usa a nova função de verificação de atualização
-                    info = self.verificar_atualizacao()
-                    if info and self._eh_versao_mais_nova(info.get("versao", ""), APP_VERSION):
-                        logger.info("Nova versao detectada via check automatico.")
-                except Exception as e:
-                    logger.warning(f"Falha silenciosa na checagem de versao: {e}")
-            threading.Thread(target=worker, daemon=True).start()
-
-    def destroy(self):
-        try:
+        for caminho_fundo in candidatos_unicos:
+            if not os.path.exists(caminho_fundo):
+                continue
             try:
-                for after_id in self.tk.call("after", "info"):
-                    self.after_cancel(after_id)
+                if Image is not None and ImageTk is not None:
+                    self._bg_pil_original = Image.open(caminho_fundo).convert("RGB")
+                    self.bind("<Configure>", self._atualizar_fundo)
+                    self.after(120, self._atualizar_fundo)
+                else:
+                    if caminho_fundo.lower().endswith(".png"):
+                        self._bg_image = tk.PhotoImage(file=caminho_fundo)
+                        self._bg_label.configure(image=self._bg_image, text="")
+                    else:
+                        continue
+                imagem_carregada = True
+                break
             except Exception:
-                pass
+                self._bg_image = None
+                self._bg_pil_original = None
+                continue
+        if not imagem_carregada:
+            self.configure(fg_color="#0f1720")
 
-            self.withdraw()
-            super().destroy()
-            print("Encerrando threads e saindo...")
-            sys.exit(0)
-        except SystemExit:
-            raise
-        except Exception:
-            fechar_sistema(self)
-
-    def setup_ui(self):
-        """Inicializa componentes que dependem da janela root estar totalmente pronta (fontes, botões)."""
-        if self._encerrando_aplicacao: return
-        
-        # 1. Estrutura de Layout (Sidebar e Área de Conteúdo)
-        self.frame_layout = ctk.CTkFrame(self, fg_color="#0f1720")
+        # ── Layout: sidebar esquerda + área de conteúdo ─────────────────
+        self.frame_layout = ctk.CTkFrame(self, fg_color="transparent")
         self.frame_layout.pack(fill="both", expand=True)
 
+        # Sidebar vertical
         self.sidebar = ctk.CTkFrame(self.frame_layout, width=210, fg_color="#0d1b2a", corner_radius=0)
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
 
-        # Elementos de Identidade Visual
-        ctk.CTkLabel(self.sidebar, text="🎣", font=("Arial", 34), text_color="orange", fg_color="#0d1b2a").pack(pady=(10, 2))
-        self.lbl_titulo_oficina = ctk.CTkLabel(self.sidebar, text=t("titulo_oficina"), font=("Arial", 12, "bold"), text_color="orange", fg_color="#0d1b2a", wraplength=190, justify="center")
-        self.lbl_titulo_oficina.pack(padx=8, pady=(0, 2))
-        self.lbl_usuario_menu = ctk.CTkLabel(self.sidebar, text=f"👤 {self.usuario.upper()}", font=("Arial", 10), text_color="#7f8c8d", fg_color="#0d1b2a")
-        self.lbl_usuario_menu.pack(padx=8, pady=(0, 2))
-        self.lbl_role_menu = ctk.CTkLabel(self.sidebar, text=f"({self.role})", font=("Arial", 9), text_color="#555f6a", fg_color="#0d1b2a")
-        self.lbl_role_menu.pack(padx=8, pady=(0, 5))
+        # Logo / Título na sidebar
+        ctk.CTkLabel(
+            self.sidebar,
+            text="🎣",
+            font=("Arial", 34),
+            text_color="orange",
+            fg_color="#0d1b2a",
+        ).pack(pady=(10, 2))
+        ctk.CTkLabel(
+            self.sidebar,
+            text="OFICINA DE PESCA",
+            font=("Arial", 12, "bold"),
+            text_color="orange",
+            fg_color="#0d1b2a",
+            wraplength=190,
+            justify="center",
+        ).pack(padx=8, pady=(0, 2))
+        ctk.CTkLabel(
+            self.sidebar,
+            text=f"👤 {self.usuario.upper()}",
+            font=("Arial", 10),
+            text_color="#7f8c8d",
+            fg_color="#0d1b2a",
+        ).pack(padx=8, pady=(0, 2))
+        ctk.CTkLabel(
+            self.sidebar,
+            text=f"({self.role})",
+            font=("Arial", 9),
+            text_color="#555f6a",
+            fg_color="#0d1b2a",
+        ).pack(padx=8, pady=(0, 5))
 
         self.lbl_contador_licenca = ctk.CTkLabel(
             self.sidebar,
-            text=t("licenca_carregando", default="Licença: carregando..."),
+            text="",
             font=("Arial", 9, "bold"),
-            text_color="#607d8b",
+            text_color="#f1c40f",
             fg_color="#0d1b2a",
             wraplength=190,
             justify="center",
         )
         self.lbl_contador_licenca.pack(padx=8, pady=(0, 5))
         self._atualizar_contador_licenca()
-
         self._adicionar_status_nuvem()
 
-        # Seleção manual de idioma removida: o idioma agora é detectado
-        # automaticamente a partir do sistema operacional (Windows).
-
+        # Separador
         ctk.CTkFrame(self.sidebar, height=1, fg_color="#1e3a5f").pack(fill="x", padx=12, pady=(0, 5))
 
+        # Botões do menu
         self.sidebar_buttons = ctk.CTkFrame(self.sidebar, fg_color="#0d1b2a")
         self.sidebar_buttons.pack(fill="x", padx=6, pady=(0, 0), anchor="n")
 
-        self.area_conteudo = ctk.CTkFrame(self.frame_layout, fg_color="#0f1720")
-        self.area_conteudo.pack(side="left", fill="both", expand=True)
-
-        self.dashboard_frame = ctk.CTkFrame(self.area_conteudo, fg_color="#0f1720")
-        self.dashboard_frame.pack(fill="both", expand=True, padx=18, pady=(10, 14))
-        self.dashboard_content = ctk.CTkFrame(self.dashboard_frame, fg_color="transparent")
-        self.dashboard_content.place(relx=0, rely=0, relwidth=1, relheight=1)
-        self.dashboard_content.lift()
-        self._configurar_fundo_dashboard()
-        if not self._dashboard_bg_bound:
-            self.dashboard_frame.bind("<Configure>", self._atualizar_fundo)
-            self._dashboard_bg_bound = True
-
-        # 2. Configurações Visuais
-        self._aplicar_maximizacao()
-        self.after(150, self._aplicar_maximizacao)
-        self.after(900, self._aplicar_maximizacao)
-        
-        # Carrega dados após UI estar montada
-        if self.winfo_exists():
-            if self.role == "ADMIN":
-                self.after(400, self._verificar_primeira_instalacao)
-            self.after(1500, self.verificacao_ia_mensal_automatica)
-
-        # HIERARQUIA DE BOTÕES POR PERFIL
-        botoes_menu = []
-        if self.role in ("ADMIN", "OFICINA"):
-            botoes_menu.append((f"🧑‍🤝‍🧑  {t('menu_clientes')}", self.abrir_clientes, "#34495e"))
-            botoes_menu.append((f"📋  {t('menu_nova_os')}", self.abrir_os, "#27ae60"))
-            botoes_menu.append((f"🔍  {t('menu_consulta')}", self.abrir_gestao_os, "#d35400"))
-            botoes_menu.append((f"🧾  {t('menu_relatorio')}", self.gerar_recibo_menu_lateral, "#8e6b3b"))
-        
-        if self.role in ("ADMIN", "VENDEDOR"):
-            botoes_menu.append((f"🧾  {t('menu_pdv')}", self.abrir_pdv, "#1abc9c"))
-            botoes_menu.append((f"📦  {t('menu_estoque')}", self.abrir_produtos, "#e67e22"))
-        
-        if self.role == "ADMIN":
-            botoes_menu.append((f"💰  {t('menu_financeiro')}", self.abrir_caixa, "#16a085"))
-
-        botoes_menu.append((f"📱  {t('menu_app_celular', default='APPs')}", self.abrir_app_celular_sidebar, "#25D366"))
-
+        botoes_menu = [
+            ("🧑‍🤝‍🧑  PESCADORES", self.abrir_clientes, "#34495e"),
+            ("📋  NOVA O.S.", self.abrir_os, "#27ae60"),
+            ("🔍  CONSULTA", self.abrir_gestao_os, "#d35400"),
+            ("📦  ESTOQUE", self.abrir_produtos, "#e67e22"),
+            ("💰  FINANCEIRO", self.abrir_caixa, "#16a085"),
+            ("🧾  GERAR RECIBO", self.gerar_recibo_menu_lateral, "#8e6b3b"),
+            ("📱  APP CELULAR", self.abrir_app_celular_sidebar, "#25D366"),
+        ]
         if self.role == "ADMIN":
             botoes_menu.extend([
-                (f"👤  {t('menu_novo_usuario')}", self.abrir_cadastro_usuario, "#2980b9"),
-                (f"📊  {t('menu_relatorio')}", self.abrir_relatorio, "#6c3483"),
-                (f"🏪  {t('menu_dados_oficina')}", self.abrir_dados_oficina, "#7f8c8d"),
-                (f"⬇️  {t('menu_buscar_atualizacoes')}", self.buscar_atualizacoes, "#2c3e50"),
+                ("👤  NOVO USUÁRIO", self.abrir_cadastro_usuario, "#2980b9"),
+                ("📊  RELATÓRIO", self.abrir_relatorio, "#6c3483"),
+                ("🏪  DADOS OFICINA", self.abrir_dados_oficina, "#7f8c8d"),
+                ("🔄  SINCRONIZAR NUVEM", self.executar_sincronizacao_nuvem, "#2980b9"),
+                ("🤖  ANALISE IA", self.verificacao_ia_melhorias, "#2c3e50"),
             ])
 
         for texto, comando, cor in botoes_menu:
             self.add_btn(self.sidebar_buttons, texto, comando, cor)
 
         # Botão Sair fixo no rodapé
-        self.add_btn(self.sidebar, f"🚪  {t('menu_sair')}", self.confirmar_saida, "#c0392b", side="bottom")
+        self.add_btn(self.sidebar, "🚪  SAIR", self.confirmar_saida, "#c0392b", side="bottom")
 
-        # Inicializa Dashboard Modular
-        self.modulos_usuario = self._obter_modulos_usuario()
-        try:
-            self._criar_dashboard_modular()
-        except Exception as exc_dashboard:
-            logger.exception("Falha ao montar o dashboard inicial: %s", exc_dashboard)
-            try:
-                if self.dashboard_content is not None and self.dashboard_content.winfo_exists():
-                    for _w in self.dashboard_content.winfo_children():
-                        _w.destroy()
-                    ctk.CTkLabel(
-                        self.dashboard_content,
-                        text=t("ui_dashboard"),
-                        font=("Arial", 28, "bold"),
-                        text_color="orange",
-                    ).pack(anchor="w", pady=(0, 10))
-                    ctk.CTkLabel(
-                        self.dashboard_content,
-                        text=t("ui_sem_pend_ncias", default="Sem pendências no momento."),
-                        font=("Arial", 12),
-                        text_color="#9ca3af",
-                    ).pack(anchor="w")
-            except Exception:
-                pass
-        self._iniciar_auto_refresh_dashboard()
-        self.after_idle(self._mostrar_menu_pronto)
+        # Área de conteúdo (direita – fica com o fundo)
+        area = ctk.CTkFrame(self.frame_layout, fg_color="#0f1720")
+        area.pack(side="left", fill="both", expand=True)
 
-    # Seleção manual de idioma removida (métodos antigos de troca/salvamento):
-    # o idioma agora é detectado automaticamente a partir do sistema operacional.
+        # Fundo também na área direita para garantir visual em diferentes temas/versões do CTk.
+        self._bg_area_label = ctk.CTkLabel(area, text="", fg_color="#0f1720")
+        self._bg_area_label.place(x=0, y=0, relwidth=1, relheight=1)
+        self._bg_area_label.lift()
 
-    def _reconstruir_botoes_menu(self):
-        if not hasattr(self, "sidebar_buttons") or not self.sidebar_buttons.winfo_exists():
-            return
-        for child in self.sidebar_buttons.winfo_children():
-            child.destroy()
-
-        botoes_menu = []
-        if self.role in ("ADMIN", "OFICINA"):
-            botoes_menu.append((f"🧑‍🤝‍🧑  {t('menu_clientes')}", self.abrir_clientes, "#34495e"))
-            botoes_menu.append((f"📋  {t('menu_nova_os')}", self.abrir_os, "#27ae60"))
-            botoes_menu.append((f"🔍  {t('menu_consulta')}", self.abrir_gestao_os, "#d35400"))
-            botoes_menu.append((f"🧾  {t('menu_relatorio')}", self.gerar_recibo_menu_lateral, "#8e6b3b"))
-
-        if self.role in ("ADMIN", "VENDEDOR"):
-            botoes_menu.append((f"🧾  {t('menu_pdv')}", self.abrir_pdv, "#1abc9c"))
-            botoes_menu.append((f"📦  {t('menu_estoque')}", self.abrir_produtos, "#e67e22"))
+        # ── Pós-inicialização ──────────────────────────────────────────
+        self._bg_label.lower() # Garante que o background fique por baixo de tudo
 
         if self.role == "ADMIN":
-            botoes_menu.append((f"💰  {t('menu_financeiro')}", self.abrir_caixa, "#16a085"))
+            self.after(600, self._verificar_primeira_instalacao)
+            self.after(1800, self.verificacao_ia_mensal_automatica)
 
-        botoes_menu.append((f"📱  {t('menu_app_celular', default='APPs')}", self.abrir_app_celular_sidebar, "#25D366"))
+        # Google Drive sync é disparado manualmente pelo botão em Dados da Oficina
 
-        if self.role == "ADMIN":
-            botoes_menu.extend([
-                (f"👤  {t('menu_novo_usuario')}", self.abrir_cadastro_usuario, "#2980b9"),
-                (f"📊  {t('menu_relatorio')}", self.abrir_relatorio, "#6c3483"),
-                (f"🏪  {t('menu_dados_oficina')}", self.abrir_dados_oficina, "#7f8c8d"),
-                (f"⬇️  {t('menu_buscar_atualizacoes')}", self.buscar_atualizacoes, "#2c3e50"),
-            ])
-
-        for texto, comando, cor in botoes_menu:
-            self.add_btn(self.sidebar_buttons, texto, comando, cor)
-
-    def _iniciar_auto_refresh_dashboard(self):
-        try:
-            if self._dashboard_auto_after_id is not None:
-                self.after_cancel(self._dashboard_auto_after_id)
-        except Exception:
-            pass
-        # O dashboard já é atualizado pelos callbacks de O.S./PDV. Recriá-lo
-        # periodicamente destruía todos os widgets e causava pisca-pisca.
-        self._dashboard_auto_after_id = None
-
-    def _auto_refresh_dashboard_tick(self):
-        self._dashboard_auto_after_id = None
-
+        self.after(80, self._mostrar_menu_pronto)
+        self.after(550, self._verificar_e_exibir_painel_pendencias)
     def _adicionar_status_nuvem(self):
-        if hasattr(self, "lbl_status_nuvem") and self.lbl_status_nuvem.winfo_exists():
-            self._atualizar_status_nuvem()
-            return
-
-        self.lbl_status_nuvem = ctk.CTkLabel(
-            self.sidebar,
-            text=t("status_drive_verificando", default="APK: Verificando..."),
-            text_color="#f1c40f",
-            font=("Arial", 9, "bold"),
-            fg_color="#0d1b2a",
-        )
-        self.lbl_status_nuvem.pack(padx=8, pady=(0, 2))
+        self.lbl_status_nuvem = ctk.CTkLabel(self.sidebar, text="Verificando nuvem...", text_color="#f1c40f", font=("Arial", 10, "bold"), fg_color="#0d1b2a")
+        self.lbl_status_nuvem.pack(padx=8, pady=(0, 5))
         self._atualizar_status_nuvem()
 
     def _atualizar_status_nuvem(self):
-        def _worker_nuvem():
-            try:
-                online = checar_status_firebase()
-                status = "APK: Online" if online else "APK: Offline"
-                cor = "#2ecc71" if online else "#e74c3c"
-                try:
-                    ok_token, msg_token = renovar_token_acesso_drive_se_necessario(force=False)
-                    if ok_token:
-                        logger.info("Token de acesso validado/renovado: %s", msg_token)
-                    else:
-                        logger.warning("Token de acesso não renovado: %s", msg_token)
-                except Exception as exc_token:
-                    logger.warning("Falha ao atualizar token de acesso: %s", exc_token)
-            except Exception:
-                status = "APK: Offline"
-                cor = "#e74c3c"
-
-            def _aplicar():
-                if self.winfo_exists() and hasattr(self, "lbl_status_nuvem"):
-                    self.lbl_status_nuvem.configure(text=status, text_color=cor)
-
-            try:
-                self.after(0, _aplicar)
-            except Exception:
-                pass
-
-        threading.Thread(target=_worker_nuvem, daemon=True, name="ofp-status-nuvem").start()
-        # Polling automático de rede removido.
+        try:
+            online = checar_status_firebase()
+            status = "Drive: online" if online else "Drive: offline"
+            cor = "#2ecc71" if online else "#e74c3c"
+            self.lbl_status_nuvem.configure(text=status, text_color=cor)
+        except Exception:
+            self.lbl_status_nuvem.configure(text="Drive: offline", text_color="#e74c3c")
+        self.after(60000, self._atualizar_status_nuvem)
     def _verificar_e_exibir_painel_pendencias(self):
         try:
-            orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada = self._consultar_pendencias_login()
+            orcamentos, bancada, status_finalizados = self._consultar_pendencias_login()
         except Exception as exc:
             logger.info("Falha ao consultar pendencias do login: %s", exc)
             return
-        # Painel integrado ao dashboard principal (sem popup).
-        self._dados_pendencias_dashboard = (orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada)
-        if hasattr(self, "dashboard_frame") and self.dashboard_frame.winfo_exists():
-            self._criar_dashboard_modular()
+        if orcamentos or bancada or status_finalizados:
+            self._exibir_popup_pendencias_login(orcamentos, bancada, status_finalizados)
 
 
     def _obter_logo_oficina(self):
@@ -2822,717 +2127,14 @@ class FrmMenu(ctk.CTk):
         return ""
 
     def _mostrar_menu_pronto(self):
-        if self._menu_pronto_exibido or not self.winfo_exists() or self._encerrando_aplicacao:
-            return
-        self._menu_pronto_exibido = True
         try:
-            # Exibe a janela apenas após concluir montagem e dados iniciais do dashboard.
-            self.update_idletasks()
-            self._atualizar_fundo()
             self.deiconify()
             self.lift()
             self.focus_force()
             self.update_idletasks()
+            self.after(150, self._atualizar_fundo)
         except Exception:
             pass
-        self.after(450, self._checar_motor_fiscal_na_abertura)
-        self._agendar_verificacao_abandono_90d()
-
-    def _agendar_verificacao_abandono_90d(self):
-        try:
-            if self._abandono_alerta_after_id is not None:
-                self.after_cancel(self._abandono_alerta_after_id)
-        except Exception:
-            pass
-        # Executa após estabilizar a UI para não conflitar com popup de primeira instalação.
-        self._abandono_alerta_after_id = self.after(1800, self._verificar_abandono_90_dias_na_inicializacao)
-
-    def _parse_data_br_flex(self, valor_data: str) -> datetime | None:
-        txt = str(valor_data or "").strip()
-        if not txt or txt.upper() == "VAZIO":
-            return None
-        formatos = [
-            "%d/%m/%Y",
-            "%d/%m/%Y %H:%M",
-            "%d/%m/%Y %H:%M:%S",
-            "%Y-%m-%d",
-            "%Y-%m-%d %H:%M:%S",
-        ]
-        for fmt in formatos:
-            try:
-                return datetime.strptime(txt, fmt)
-            except Exception:
-                continue
-        return None
-
-    def _consultar_os_alertas_abandono(self):
-        try:
-            dados = listar_os_rejeitados_abandono_dashboard(
-                dias_abandono_min=20,
-                dias_aviso1=15,
-                dias_aviso2=85,
-                limite_card=20,
-            )
-            return dados if isinstance(dados, dict) else {}
-        except Exception as exc:
-            logger.info("Falha ao consultar alertas de abandono: %s", exc)
-            return {}
-
-    def _normalizar_telefone_whatsapp_alerta(self, telefone: str) -> str:
-        digitos = re.sub(r"\D", "", str(telefone or ""))
-        if not digitos:
-            return ""
-        if digitos.startswith("55") and len(digitos) >= 12:
-            return digitos
-        if len(digitos) in (10, 11):
-            return f"55{digitos}"
-        return digitos
-
-    def _abrir_whatsapp_alerta_abandono(self, item: dict):
-        cliente = str(item.get("cliente") or "Cliente").strip() or "Cliente"
-        os_id = int(item.get("os_id") or 0)
-        status_tipo = str(item.get("status_tipo") or "reprovado").strip().lower()
-        telefone = self._normalizar_telefone_whatsapp_alerta(str(item.get("telefone") or ""))
-
-        mensagem = (
-            f"Olá {cliente}, seu equipamento referente à O.S. {os_id} está {status_tipo} sem retirada há mais de 85 dias. "
-            "Conforme termo assinado, após este prazo o item está sujeito à desmontagem/venda para sucata. "
-            "Favor retirar com urgência."
-        )
-        texto = quote_plus(mensagem)
-        link = f"https://wa.me/{telefone}?text={texto}" if telefone else f"https://wa.me/?text={texto}"
-        webbrowser.open(link)
-
-    def _verificar_abandono_90_dias_na_inicializacao(self):
-        self._abandono_alerta_after_id = None
-        if self._encerrando_aplicacao or not self.winfo_exists():
-            return
-
-        dados = self._consultar_os_alertas_abandono()
-        itens_criticos = list(dados.get("itens_aviso2") or [])
-        itens_aviso = list(dados.get("itens_aviso1") or [])
-
-        if not itens_criticos and not itens_aviso:
-            return
-
-        if itens_criticos:
-            item = itens_criticos[0]
-            os_id = int(item.get("os_id") or 0)
-            valor = self._formatar_moeda(item.get("valor") or 0)
-            dias = int(item.get("dias") or 0)
-
-            mensagem = (
-                f"Alerta Crítico: O.S. {os_id}, Valor {valor}, está há {dias} dias sem retirada. "
-                "Deseja enviar mensagem de notificação via WhatsApp?"
-            )
-            confirmar = messagebox.askyesno("Alerta Crítico de Abandono", mensagem, parent=self)
-            if confirmar:
-                self._abrir_whatsapp_alerta_abandono(item)
-            return
-
-        item = itens_aviso[0]
-        os_id = int(item.get("os_id") or 0)
-        dias = int(item.get("dias") or 0)
-        messagebox.showinfo(
-            "Aviso Preventivo de Retirada",
-            f"A O.S. {os_id} está há {dias} dias sem retirada. Acompanhe para evitar abandono.",
-            parent=self,
-        )
-
-    def _checar_motor_fiscal_na_abertura(self):
-        if self._encerrando_aplicacao or not self.winfo_exists():
-            return
-        self._atualizar_status_fiscal_dashboard(forcar_dashboard=True)
-
-    def _acbr_configurado_para_uso(self) -> tuple[bool, str]:
-        """Valida campos mínimos do ACBr no banco antes de considerar status ativo."""
-        try:
-            cfg = carregar_configuracao_fiscal()
-            params = cfg.parametros_gerais if isinstance(cfg.parametros_gerais, dict) else {}
-
-            provedor = str(params.get("provedor") or "acbr").strip().lower()
-            if provedor != "acbr":
-                return False, "Provedor fiscal diferente de ACBr"
-
-            monitor_path = str(params.get("acbr_monitor_path") or "").strip()
-            if not monitor_path or not os.path.isdir(monitor_path):
-                return False, "ACBrMonitor não configurado"
-
-            cert_path = str(params.get("acbr_certificado_a1_path") or params.get("certificado_a1_path") or "").strip()
-            if not cert_path or not os.path.exists(cert_path):
-                return False, "Certificado A1 não configurado"
-
-            cnpj_emitente = str(params.get("emitente_cnpj") or "").strip()
-            if not cnpj_emitente:
-                return False, "CNPJ fiscal não configurado"
-
-            modalidade = str(params.get("modalidade_fiscal") or "").strip().lower()
-            if modalidade not in {"nfe", "nfse"}:
-                return False, "Modalidade fiscal inválida"
-
-            return True, "ACBr configurado"
-        except Exception:
-            return False, "Falha ao validar configuração fiscal"
-
-    def _obter_status_fiscal_dashboard(self) -> dict:
-        try:
-            acbr_ok, motivo_cfg = self._acbr_configurado_para_uso()
-            if not acbr_ok:
-                return {"texto": "Status Fiscal: Inativo", "cor": "#e74c3c", "ativo": False}
-
-            status_motor = verificar_status_motor_fiscal()
-            ativo = bool(status_motor.get("ok"))
-            if ativo:
-                return {"texto": "Status Fiscal: Ativo", "cor": "#2ecc71", "ativo": True}
-            return {"texto": "Status Fiscal: Inativo", "cor": "#e74c3c", "ativo": False}
-        except Exception:
-            return {"texto": "Status Fiscal: Inativo", "cor": "#e74c3c", "ativo": False}
-
-    def _abrir_configuracao_acbr_dashboard(self):
-        if self.role != "ADMIN":
-            messagebox.showwarning(
-                "Acesso restrito",
-                "Somente ADMIN pode configurar o ACBr em Dados da Oficina.",
-                parent=self,
-            )
-            return
-        self.abrir_dados_oficina()
-
-    def _atualizar_status_fiscal_dashboard(self, forcar_dashboard: bool = False):
-        def _worker_fiscal_dashboard():
-            status = self._obter_status_fiscal_dashboard()
-
-            def _aplicar():
-                if self._encerrando_aplicacao or not self.winfo_exists():
-                    return
-                anterior = bool(self._status_fiscal_dashboard.get("ativo")) if isinstance(self._status_fiscal_dashboard, dict) else None
-                self._status_fiscal_dashboard = status
-
-                if not status.get("ativo") and not self._aviso_motor_fiscal_inicio_exibido:
-                    self._aviso_motor_fiscal_inicio_exibido = True
-                    logger.info("Motor fiscal inativo na abertura. Isso não bloqueia o uso básico do sistema.")
-
-                mudou = anterior is None or anterior != bool(status.get("ativo"))
-                if (forcar_dashboard or mudou) and hasattr(self, "dashboard_frame") and self.dashboard_frame.winfo_exists():
-                    self._criar_dashboard_modular()
-
-            try:
-                self.after(0, _aplicar)
-            except Exception:
-                pass
-
-        threading.Thread(target=_worker_fiscal_dashboard, daemon=True, name="ofp-dashboard-fiscal").start()
-
-    def _obter_modulos_usuario(self):
-        try:
-            flags = obter_modulos_habilitados()
-            return {
-                "oficina": bool(flags.get("oficina", True)),
-                "pdv": bool(flags.get("pdv", False)),
-            }
-        except Exception as exc:
-            logger.info("Falha ao ler módulos habilitados, usando fallback: %s", exc)
-            return {"oficina": True, "pdv": False}
-
-    def _formatar_moeda(self, valor):
-        return f"R$ {float(valor or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-    def _obter_indicadores_oficina(self):
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT COUNT(*)
-                FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) IN ('EM ANDAMENTO', 'APROVADO')
-                """
-            )
-            total_bancada = int((cursor.fetchone() or [0])[0] or 0)
-
-            cursor.execute(
-                """
-                SELECT COALESCE(SUM(saldo), 0)
-                FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) NOT IN ('ENTREGUE', 'REPROVADO', 'CANCELADO')
-                """
-            )
-            total_receber_abertas = float((cursor.fetchone() or [0])[0] or 0)
-
-            cursor.execute(
-                """
-                SELECT COUNT(*)
-                FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) = 'AGUARDANDO ORÇAMENTO'
-                """
-            )
-            os_pendentes = int((cursor.fetchone() or [0])[0] or 0)
-
-            cursor.execute(
-                """
-                SELECT COUNT(*)
-                FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
-                  AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
-                """
-            )
-            os_finalizados = int((cursor.fetchone() or [0])[0] or 0)
-
-            cursor.execute(
-                """
-                SELECT COUNT(*)
-                FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
-                  AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
-                """
-            )
-            os_aguardando_retirada = int((cursor.fetchone() or [0])[0] or 0)
-
-        dados_card = listar_os_rejeitados_abandono_dashboard(
-            dias_abandono_min=20,
-            dias_aviso1=15,
-            dias_aviso2=85,
-            limite_card=8,
-        )
-        rejeitados_abandono_itens = list(dados_card.get("itens_card") or [])
-        rejeitados_abandono_tem_aviso1 = bool(dados_card.get("tem_aviso1"))
-        rejeitados_abandono_tem_aviso2 = bool(dados_card.get("tem_aviso2"))
-
-        return {
-            "bancada": total_bancada,
-            "receber": total_receber_abertas,
-            "pendentes": os_pendentes,
-            "finalizados": os_finalizados,
-            "aguardando_retirada": os_aguardando_retirada,
-            "rejeitados_abandono_itens": rejeitados_abandono_itens,
-            "rejeitados_abandono_tem_aviso1": rejeitados_abandono_tem_aviso1,
-            "rejeitados_abandono_tem_aviso2": rejeitados_abandono_tem_aviso2,
-        }
-
-    def _obter_indicadores_pdv(self):
-        hoje = datetime.now().strftime("%d/%m/%Y")
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                SELECT COALESCE(SUM(valor), 0)
-                FROM fluxo_caixa
-                WHERE UPPER(COALESCE(tipo,'')) = 'ENTRADA'
-                  AND UPPER(COALESCE(categoria,'')) NOT LIKE '%ORDEM DE SERV%'
-                  AND UPPER(COALESCE(descricao,'')) NOT LIKE '%O.S.%'
-                """
-            )
-            volume_vendas = float((cursor.fetchone() or [0])[0] or 0)
-
-            cursor.execute(
-                """
-                SELECT COALESCE(SUM(valor), 0)
-                FROM fluxo_caixa
-                WHERE UPPER(COALESCE(tipo,'')) = 'ENTRADA'
-                  AND data = ?
-                  AND UPPER(COALESCE(categoria,'')) NOT LIKE '%ORDEM DE SERV%'
-                  AND UPPER(COALESCE(descricao,'')) NOT LIKE '%O.S.%'
-                """,
-                (hoje,),
-            )
-            vendas_dia = float((cursor.fetchone() or [0])[0] or 0)
-
-            entradas_estoque, saidas_estoque = self._obter_movimentacao_estoque_pdv(cursor)
-
-        return {
-            "volume_vendas": volume_vendas,
-            "vendas_dia": vendas_dia,
-            "estoque_es": f"{entradas_estoque}/{saidas_estoque}",
-        }
-
-    def _obter_movimentacao_estoque_pdv(self, cursor):
-        """Lê movimentação de estoque da tabela do PDV; fallback para fluxo_caixa."""
-        candidatos = [
-            "movimentacao_estoque_pdv",
-            "pdv_movimentacao_estoque",
-            "movimentacoes_estoque_pdv",
-        ]
-
-        try:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tabelas = {str(r[0]).lower() for r in (cursor.fetchall() or [])}
-        except Exception:
-            tabelas = set()
-
-        for tabela in candidatos:
-            if tabela.lower() not in tabelas:
-                continue
-            try:
-                cursor.execute(f"PRAGMA table_info({tabela})")
-                colunas = {str(row[1]).lower() for row in (cursor.fetchall() or [])}
-
-                # Suporta variações comuns de schema do PDV.
-                if "tipo" in colunas:
-                    cursor.execute(
-                        f"SELECT COUNT(*) FROM {tabela} WHERE UPPER(COALESCE(tipo,''))='ENTRADA'"
-                    )
-                    entradas = int((cursor.fetchone() or [0])[0] or 0)
-                    cursor.execute(
-                        f"SELECT COUNT(*) FROM {tabela} WHERE UPPER(COALESCE(tipo,'')) IN ('SAIDA','SAÍDA')"
-                    )
-                    saidas = int((cursor.fetchone() or [0])[0] or 0)
-                    return entradas, saidas
-
-                if "movimento" in colunas:
-                    cursor.execute(
-                        f"SELECT COUNT(*) FROM {tabela} WHERE UPPER(COALESCE(movimento,''))='ENTRADA'"
-                    )
-                    entradas = int((cursor.fetchone() or [0])[0] or 0)
-                    cursor.execute(
-                        f"SELECT COUNT(*) FROM {tabela} WHERE UPPER(COALESCE(movimento,'')) IN ('SAIDA','SAÍDA')"
-                    )
-                    saidas = int((cursor.fetchone() or [0])[0] or 0)
-                    return entradas, saidas
-            except Exception as exc:
-                logger.info("Falha ao ler movimentação no PDV (%s): %s", tabela, exc)
-
-        # Fallback seguro: usa fluxo_caixa apenas com categorias explícitas de PDV/estoque.
-        cursor.execute(
-            """
-            SELECT COUNT(*)
-            FROM fluxo_caixa
-            WHERE UPPER(COALESCE(tipo,''))='ENTRADA'
-              AND (
-                    UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE PDV%'
-                 OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCAO%'
-                 OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCÃO%'
-              )
-            """
-        )
-        entradas = int((cursor.fetchone() or [0])[0] or 0)
-
-        cursor.execute(
-            """
-            SELECT COUNT(*)
-            FROM fluxo_caixa
-            WHERE UPPER(COALESCE(tipo,'')) IN ('SAIDA','SAÍDA')
-              AND (
-                    UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE PDV%'
-                 OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCAO%'
-                 OR UPPER(COALESCE(categoria,'')) LIKE '%ESTOQUE BALCÃO%'
-              )
-            """
-        )
-        saidas = int((cursor.fetchone() or [0])[0] or 0)
-        return entradas, saidas
-
-    def _criar_card_dashboard(self, parent, titulo, valor):
-        box = ctk.CTkFrame(parent, fg_color="#1b2635", border_width=1, border_color="#2b3646", corner_radius=10)
-        box.pack(side="left", fill="both", expand=True, padx=5, pady=3)
-        ctk.CTkLabel(box, text=str(valor), font=("Arial", 17, "bold"), text_color="#ecf0f1").pack(pady=(6, 2))
-        ctk.CTkLabel(box, text=titulo, font=("Arial", 10, "bold"), text_color="#bdc3c7", wraplength=180, justify="center").pack(pady=(0, 6), padx=6)
-        box.bind("<Button-1>", lambda _e: self.focus_force())
-
-    def _criar_card_rejeitados_abandono(self, parent, itens_card, tem_aviso1=False, tem_aviso2=False):
-        if tem_aviso2:
-            fg = "#2a1a1a"
-            bd = "#7f1d1d"
-            titulo_cor = "#fca5a5"
-            texto_cor = "#ef4444"
-            vazio_cor = "#f87171"
-        elif tem_aviso1:
-            fg = "#2e2a16"
-            bd = "#9a6b00"
-            titulo_cor = "#fde68a"
-            texto_cor = "#facc15"
-            vazio_cor = "#fcd34d"
-        else:
-            fg = "#1f2530"
-            bd = "#3b4b63"
-            titulo_cor = "#93c5fd"
-            texto_cor = "#bfdbfe"
-            vazio_cor = "#93c5fd"
-
-        box = ctk.CTkFrame(parent, fg_color=fg, border_width=1, border_color=bd, corner_radius=10)
-        box.pack(side="left", fill="both", expand=True, padx=5, pady=3)
-
-        ctk.CTkLabel(
-            box,
-            text=t("ui_rejeitados_abandono"),
-            font=("Arial", 10, "bold"),
-            text_color=titulo_cor,
-            wraplength=180,
-            justify="center",
-        ).pack(pady=(6, 2), padx=6)
-
-        linhas = []
-        for item in (itens_card or []):
-            try:
-                os_id = int(item.get("os_id") or 0)
-                dias = int(item.get("dias") or 0)
-            except Exception:
-                continue
-            if os_id <= 0:
-                continue
-            linhas.append(f"OS {os_id} - {dias} dias")
-
-        if not linhas:
-            ctk.CTkLabel(box, text=t("ui_sem_o_s"), font=("Arial", 9), text_color=vazio_cor).pack(pady=(2, 6))
-            return
-
-        ctk.CTkLabel(
-            box,
-            text=" | ".join(linhas),
-            font=("Arial", 9),
-            text_color=texto_cor,
-            wraplength=190,
-            justify="center",
-        ).pack(pady=(2, 6), padx=6)
-
-    def _criar_linha_cards(self, parent, cards):
-        linha = ctk.CTkFrame(parent, fg_color="transparent")
-        linha.pack(fill="x", pady=(0, 2))
-        for titulo, valor in cards:
-            self._criar_card_dashboard(linha, titulo, valor)
-
-    def _criar_painel_pendencias_fixo(self, parent, orcamentos, bancada, status_finalizados, aguardando_orcamento):
-        bloco = ctk.CTkFrame(parent, fg_color="#121a24", corner_radius=12)
-        bloco.pack(fill="both", expand=True, pady=(2, 2))
-
-        ctk.CTkLabel(
-            bloco,
-            text=t("ui_painel_de_pend_ncias_ltimos_15_dias"),
-            font=("Arial", 12, "bold"),
-            text_color="#f5f6fa",
-        ).pack(anchor="w", padx=10, pady=(6, 4))
-
-        corpo = ctk.CTkFrame(bloco, fg_color="#121a24")
-        corpo.pack(fill="both", expand=True, padx=8, pady=(0, 6))
-        corpo.grid_columnconfigure((0, 1, 2, 3), weight=1)
-
-        def _linha_item(item):
-            if len(item) < 3:
-                return ""
-            os_id = item[0]
-            data = item[1]
-            cliente = item[2]
-            extra = f" | {item[3]}" if len(item) > 3 and item[3] else ""
-            return f"OS {os_id} | {data} | {cliente}{extra}"
-
-        cards = [
-            ("AGUARDANDO ORÇAMENTO", "#f39c12", aguardando_orcamento),
-            ("ORÇAMENTOS", "#f1c40f", orcamentos),
-            ("NA BANCADA", "#3498db", bancada),
-            ("FINALIZADOS", "#27ae60", status_finalizados),
-        ]
-
-        for col, (titulo, cor, dados) in enumerate(cards):
-            card = ctk.CTkFrame(corpo, fg_color="#1a2230", border_width=2, border_color=cor, corner_radius=12)
-            card.grid(row=0, column=col, sticky="nsew", padx=4, pady=2)
-            ctk.CTkLabel(card, text=f"{titulo} ({len(dados)})", font=("Arial", 11, "bold"), text_color=cor).pack(anchor="w", padx=8, pady=(6, 3))
-            lista = ctk.CTkScrollableFrame(card, height=96, fg_color="#0f1720")
-            lista.pack(fill="both", expand=True, padx=6, pady=(0, 6))
-
-            if not dados:
-                ctk.CTkLabel(
-                    lista,
-                    text=t("ui_sem_pend_ncias"),
-                    text_color="#9ca3af",
-                    font=("Arial", 9),
-                    anchor="w",
-                ).pack(fill="x", padx=6, pady=6)
-                continue
-
-            for item in dados:
-                try:
-                    os_id = int(item[0])
-                except Exception:
-                    continue
-
-                texto = _linha_item(item)
-                if not texto:
-                    continue
-
-                ctk.CTkButton(
-                    lista,
-                    text=texto,
-                    anchor="w",
-                    height=24,
-                    fg_color="#1f2937",
-                    hover_color="#334155",
-                    text_color="#e5e7eb",
-                    font=("Arial", 9),
-                    command=lambda oid=os_id: self._abrir_os_por_id_dashboard(oid),
-                ).pack(fill="x", padx=4, pady=3)
-
-    def _criar_dashboard_modular(self):
-        if self.dashboard_content is None or not self.dashboard_content.winfo_exists():
-            self.dashboard_content = ctk.CTkFrame(self.dashboard_frame, fg_color="transparent")
-            self.dashboard_content.place(relx=0, rely=0, relwidth=1, relheight=1)
-
-        for w in self.dashboard_content.winfo_children():
-            w.destroy()
-
-        parent_dash = self.dashboard_content
-        parent_dash.lift()
-
-        self.modulos_usuario = self._obter_modulos_usuario()
-        tem_oficina = self.modulos_usuario.get("oficina", True)
-        tem_pdv = self.modulos_usuario.get("pdv", False)
-        
-        # Lógica de Perfil Restrito (Dashboard)
-        if self.role == "VENDEDOR":
-            tem_oficina = False
-            tem_pdv = True
-        elif self.role == "OFICINA":
-            tem_oficina = True
-            tem_pdv = False
-
-        ctk.CTkLabel(
-            parent_dash,
-            text=t("ui_dashboard"),
-            font=("Arial", 28, "bold"),
-            text_color="orange",
-        ).pack(anchor="w", pady=(0, 10))
-
-        ctk.CTkLabel(
-            parent_dash,
-            text=str(self._status_fiscal_dashboard.get("texto", "Status Fiscal: Inativo")),
-            font=("Arial", 12, "bold"),
-            text_color=str(self._status_fiscal_dashboard.get("cor", "#e74c3c")),
-        ).pack(anchor="w", pady=(0, 10))
-
-        # Sem seletor/manual: o dashboard abre pronto pelo perfil do usuário.
-        if self.role == "OFICINA":
-            mode = "OFICINA"
-        elif self.role == "VENDEDOR":
-            mode = "PDV"
-        else:
-            mode = "COMPLETO"
-
-        try:
-            oficina = self._obter_indicadores_oficina() if tem_oficina else {
-                "bancada": 0,
-                "receber": 0.0,
-                "pendentes": 0,
-                "finalizados": 0,
-                "aguardando_retirada": 0,
-                "rejeitados_abandono_itens": [],
-                "rejeitados_abandono_tem_aviso1": False,
-                "rejeitados_abandono_tem_aviso2": False,
-            }
-        except Exception as exc_indicadores:
-            logger.info("Dashboard: falha ao obter indicadores da oficina: %s", exc_indicadores)
-            oficina = {}
-        try:
-            pdv = self._obter_indicadores_pdv() if tem_pdv else {"volume_vendas": 0.0, "vendas_dia": 0.0, "estoque_es": "0/0"}
-        except Exception as exc_indicadores_pdv:
-            logger.info("Dashboard: falha ao obter indicadores do PDV: %s", exc_indicadores_pdv)
-            pdv = {}
-
-        # Fallback de segurança: se qualquer indicador falhar, o dashboard
-        # continua sendo montado (com zeros) em vez de ficar em branco.
-        if not isinstance(oficina, dict) or not oficina:
-            logger.info("Dashboard: indicadores da oficina indisponíveis; usando valores padrão.")
-            oficina = {
-                "bancada": 0,
-                "receber": 0.0,
-                "pendentes": 0,
-                "finalizados": 0,
-                "aguardando_retirada": 0,
-                "rejeitados_abandono_itens": [],
-                "rejeitados_abandono_tem_aviso1": False,
-                "rejeitados_abandono_tem_aviso2": False,
-            }
-        if not isinstance(pdv, dict) or not pdv:
-            logger.info("Dashboard: indicadores do PDV indisponíveis; usando valores padrão.")
-            pdv = {"volume_vendas": 0.0, "vendas_dia": 0.0, "estoque_es": "0/0"}
-
-        if mode == "OFICINA":
-            self._criar_linha_cards(
-                parent_dash,
-                [
-                    ("OS na Bancada", oficina["bancada"]),
-                    ("Total a Receber Oficina", self._formatar_moeda(oficina["receber"])),
-                    ("Pendentes", oficina["pendentes"]),
-                ],
-            )
-            linha_oficina_2 = ctk.CTkFrame(parent_dash, fg_color="transparent")
-            linha_oficina_2.pack(fill="x", pady=(0, 2))
-            self._criar_card_dashboard(linha_oficina_2, "Finalizados", oficina["finalizados"])
-            self._criar_card_rejeitados_abandono(
-                linha_oficina_2,
-                oficina["rejeitados_abandono_itens"],
-                oficina["rejeitados_abandono_tem_aviso1"],
-                oficina["rejeitados_abandono_tem_aviso2"],
-            )
-        elif mode == "PDV":
-            self._criar_linha_cards(
-                parent_dash,
-                [
-                    ("Volume de Vendas", self._formatar_moeda(pdv["volume_vendas"])),
-                    ("Entradas/Saídas de Estoque", pdv["estoque_es"]),
-                    ("Vendas do Dia", self._formatar_moeda(pdv["vendas_dia"])),
-                ],
-            )
-        else: # COMPLETO (ADMIN)
-            topo = ctk.CTkFrame(parent_dash, fg_color="transparent")
-            topo.pack(fill="x", pady=(0, 8))
-            self._criar_card_dashboard(
-                topo,
-                "Consolidado - Total a Receber + Vendas",
-                self._formatar_moeda(oficina["receber"] + pdv["vendas_dia"]),
-            )
-
-            split = ctk.CTkFrame(parent_dash, fg_color="transparent")
-            split.pack(fill="both", expand=True)
-
-            col_oficina = ctk.CTkFrame(split, fg_color="transparent")
-            col_oficina.pack(side="left", fill="both", expand=True, padx=(0, 6))
-            ctk.CTkLabel(col_oficina, text=t("ui_oficina"), font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
-            self._criar_linha_cards(
-                col_oficina,
-                [
-                    ("OS na Bancada", oficina["bancada"]),
-                    ("Total a Receber Oficina", self._formatar_moeda(oficina["receber"])),
-                    ("Pendentes", oficina["pendentes"]),
-                ],
-            )
-            linha_admin_oficina_2 = ctk.CTkFrame(col_oficina, fg_color="transparent")
-            linha_admin_oficina_2.pack(fill="x", pady=(0, 2))
-            self._criar_card_dashboard(linha_admin_oficina_2, "Finalizados", oficina["finalizados"])
-            self._criar_card_rejeitados_abandono(
-                linha_admin_oficina_2,
-                oficina["rejeitados_abandono_itens"],
-                oficina["rejeitados_abandono_tem_aviso1"],
-                oficina["rejeitados_abandono_tem_aviso2"],
-            )
-
-            col_pdv = ctk.CTkFrame(split, fg_color="transparent")
-            col_pdv.pack(side="left", fill="both", expand=True, padx=(6, 0))
-            ctk.CTkLabel(col_pdv, text=t("btn_pdv"), font=("Arial", 16, "bold"), text_color="#ecf0f1").pack(anchor="w", pady=(0, 6))
-            self._criar_linha_cards(
-                col_pdv,
-                [
-                    ("Volume de Vendas", self._formatar_moeda(pdv["volume_vendas"])),
-                    ("Entradas/Saídas de Estoque", pdv["estoque_es"]),
-                    ("Vendas do Dia", self._formatar_moeda(pdv["vendas_dia"])),
-                ],
-            )
-
-        if self.role in ("ADMIN", "OFICINA", "VENDEDOR"):
-            try:
-                orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada = self._consultar_pendencias_login()
-                self._dados_pendencias_dashboard = (orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada)
-            except Exception as exc:
-                logger.info("Falha ao montar painel fixo de pendencias: %s", exc)
-                orcamentos, bancada, status_finalizados, aguardando_orcamento, aguardando_retirada = ([], [], [], [], [])
-
-            self._criar_painel_pendencias_fixo(parent_dash, orcamentos, bancada, status_finalizados, aguardando_orcamento)
-
-        self._atualizar_fundo()
-
-    def _atualizar_dashboard_modular(self):
-        try:
-            if self.winfo_exists():
-                self._criar_dashboard_modular()
-        except Exception as exc:
-            logger.info("Falha ao atualizar dashboard modular: %s", exc)
 
     def _aplicar_maximizacao(self):
         try:
@@ -3562,23 +2164,6 @@ class FrmMenu(ctk.CTk):
                 return cursor.fetchone()
         except Exception:
             return None
-
-    def _abrir_os_por_id_dashboard(self, os_id):
-        try:
-            os_id_int = int(os_id)
-        except Exception:
-            messagebox.showwarning("Dashboard", f"O.S. inválida: {os_id}", parent=self)
-            return
-
-        try:
-            janela = tela_os.FrmOS(self, id_orc=os_id_int, on_save_callback=self._atualizar_dashboard_modular)
-            janela.update()
-            janela.attributes('-topmost', True)
-            janela.focus_force()
-            janela.after(250, lambda: janela.attributes('-topmost', False))
-            self._janela_os_atual = janela
-        except Exception as exc:
-            messagebox.showerror("Dashboard", f"Não foi possível abrir a O.S. {os_id_int}: {exc}", parent=self)
 
     def _obter_os_contexto_atual(self):
         janelas = []
@@ -3639,51 +2224,46 @@ class FrmMenu(ctk.CTk):
         btn.pack(fill="x", padx=10, pady=2, side=side)
 
     def _consultar_pendencias_login(self):
-        # Painel expõe orçamentos de qualquer idade (sem corte de 15 dias).
+        limite = (datetime.now() - timedelta(days=15)).strftime("%Y-%m-%d")
+        fmt_data = "date(substr(data,7,4)||'-'||substr(data,4,2)||'-'||substr(data,1,2))"
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """
-                SELECT id, COALESCE(data,''), COALESCE(cliente,''), COALESCE(equipamento,'')
+                f"""
+                SELECT id, COALESCE(data,''), COALESCE(cliente,'')
                 FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) = 'ORÇAMENTO'
+                WHERE UPPER(COALESCE(status,'')) = 'AGUARDANDO'
+                  AND {fmt_data} >= ?
                 ORDER BY id DESC
                 """,
+                (limite,),
             )
             orcamentos = cursor.fetchall()
 
             cursor.execute(
-                """
-                SELECT id, COALESCE(data,''), COALESCE(cliente,''), COALESCE(equipamento,'')
-                FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) = 'AGUARDANDO ORÇAMENTO'
-                ORDER BY id DESC
-                """,
-            )
-            aguardando_orcamento = cursor.fetchall()
-
-            cursor.execute(
-                """
+                f"""
                 SELECT id, COALESCE(data,''), COALESCE(cliente,''), COALESCE(equipamento,'')
                 FROM orcamentos_aguardo
                 WHERE UPPER(COALESCE(status,'')) IN ('EM ANDAMENTO', 'APROVADO')
+                  AND {fmt_data} >= ?
                 ORDER BY id DESC
                 """,
+                (limite,),
             )
             bancada = cursor.fetchall()
 
             cursor.execute(
-                """
+                f"""
                 SELECT id, COALESCE(data,''), COALESCE(cliente,''), COALESCE(equipamento,'')
                 FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) = 'FINALIZADO'
-                    AND UPPER(COALESCE(status_entrega,'')) <> 'ENTREGUE'
+                WHERE UPPER(COALESCE(status,'')) IN ('FINALIZADO', 'REPROVADO')
+                  AND {fmt_data} >= ?
                 ORDER BY id DESC
                 """,
+                (limite,),
             )
             status_finalizados = cursor.fetchall()
-
-            return orcamentos, bancada, status_finalizados, aguardando_orcamento, []
+        return orcamentos, bancada, status_finalizados
 
     def _exibir_popup_pendencias_login(self, orcamentos, bancada, status_finalizados):
         pop = ctk.CTkToplevel(self)
@@ -3700,7 +2280,7 @@ class FrmMenu(ctk.CTk):
 
         ctk.CTkLabel(
             pop,
-            text=t("ui_painel_de_pend_ncias_ltimos_15_dias"),
+            text="PAINEL DE PENDÊNCIAS (ÚLTIMOS 15 DIAS)",
             font=("Arial", 16, "bold"),
             text_color="#f5f6fa",
         ).pack(pady=(14, 10))
@@ -3737,168 +2317,54 @@ class FrmMenu(ctk.CTk):
             txt.insert("1.0", _texto_linhas(bloco))
             txt.configure(state="disabled")
 
-        ctk.CTkButton(pop, text=t("ui_fechar_1"), width=140, fg_color="#7f8c8d", command=pop.destroy).pack(pady=(0, 12))
+        ctk.CTkButton(pop, text="Fechar", width=140, fg_color="#7f8c8d", command=pop.destroy).pack(pady=(0, 12))
 
     def _atualizar_contador_licenca(self):
         try:
-            texto, cor = _obter_info_licenca_visual(role=self.role)
+            lic_ativa, _msg_lic, _cliente_lic, validade_lic = obter_status_licenca()
+            if lic_ativa:
+                validade_txt = str(validade_lic or "").strip().upper()
+                if validade_txt == "PERMANENTE":
+                    texto = "🔒 Licença: PERMANENTE"
+                    cor = "#2ecc71"
+                else:
+                    texto = f"🔒 Licença ativa até: {validade_lic}"
+                    cor = "#2ecc71"
+            else:
+                trial_ativo, dias_restantes, data_limite = obter_status_trial()
+                if trial_ativo:
+                    texto = f"⏳ Trial: {dias_restantes} dia(s)\nAté {data_limite}"
+                    cor = "#f1c40f"
+                else:
+                    texto = f"❌ Trial expirado\nEm {data_limite}"
+                    cor = "#e74c3c"
+
             self.lbl_contador_licenca.configure(text=texto, text_color=cor)
         except Exception as e:
             logger.exception("Erro ao atualizar contador de licença/trial: %s", e)
-            self.lbl_contador_licenca.configure(text=t("ui_licen_a_indispon_vel"), text_color="#6b7280")
-        finally: #
-            if self.winfo_exists():
-                self.after(60000, self._atualizar_contador_licenca)
+            self.lbl_contador_licenca.configure(text="", text_color="#f1c40f")
+        finally:
+            self.after(60000, self._atualizar_contador_licenca)
 
     def _verificar_primeira_instalacao(self):
         """Abre tela de dados da oficina na primeira instalação (ADMIN)."""
         try:
-            if self._primeira_instalacao_checada:
-                return
-            self._primeira_instalacao_checada = True
             if dados_oficina_sao_padrao():
                 messagebox.showinfo(
                     "Primeira Instalação",
                     "Bem-vindo! Por favor, preencha os dados da sua oficina antes de começar.",
                     parent=self,
                 )
-                self.abrir_dados_oficina()
+                FrmDadosOficina(self)
         except Exception as e:
             logger.exception("Erro ao verificar primeira instalação: %s", e)
-
-    def _configurar_fundo_dashboard(self):
-        if Image is None:
-            logger.info("Dashboard fundo: PIL indisponível, carregamento ignorado.")
-            return
-
-        runtime_base = os.path.abspath(_base_runtime_dir())
-        bundle_base = os.path.abspath(_resource_base_dir())
-        modulo_base = os.path.abspath(os.path.dirname(os.path.abspath(__file__)))
-        fundo_primario = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets", "fundo_menu.jpeg"))
-
-        caminhos = [
-            fundo_primario,
-            os.path.join(runtime_base, "assets", "fundo_menu.jpeg"),
-            os.path.join(runtime_base, "assets", "fundo_menu.jpg"),
-            os.path.join(runtime_base, "assets", "fundo_menu.png"),
-            os.path.join(runtime_base, "assets", "fundomenu.png"),
-            os.path.join(runtime_base, "fundo_menu.jpeg"),
-            os.path.join(runtime_base, "fundo_menu.jpg"),
-            os.path.join(runtime_base, "fundo_menu.png"),
-            os.path.join(runtime_base, "fundomenu.png"),
-            os.path.join(bundle_base, "assets", "fundo_menu.jpeg"),
-            os.path.join(bundle_base, "assets", "fundo_menu.jpg"),
-            os.path.join(bundle_base, "assets", "fundo_menu.png"),
-            os.path.join(bundle_base, "assets", "fundomenu.png"),
-            os.path.join(bundle_base, "fundo_menu.jpeg"),
-            os.path.join(bundle_base, "fundo_menu.jpg"),
-            os.path.join(bundle_base, "fundo_menu.png"),
-            os.path.join(bundle_base, "fundomenu.png"),
-            os.path.join(modulo_base, "assets", "fundo_menu.jpeg"),
-            os.path.join(modulo_base, "assets", "fundo_menu.jpg"),
-            os.path.join(modulo_base, "assets", "fundo_menu.png"),
-            os.path.join(modulo_base, "assets", "fundomenu.png"),
-            _resolver_recurso_existente("assets", "fundo_menu.jpeg"),
-            _resolver_recurso_existente("assets", "fundo_menu.jpg"),
-            _resolver_recurso_existente("assets", "fundo_menu.png"),
-            _resolver_recurso_existente("assets", "fundomenu.png"),
-            _resolver_recurso_existente("fundo_menu.jpeg"),
-            _resolver_recurso_existente("fundo_menu.jpg"),
-            _resolver_recurso_existente("fundo_menu.png"),
-            _resolver_recurso_existente("fundomenu.png"),
-        ]
-
-        img = None
-        caminho_fundo_abs = ""
-        ultimo_erro = ""
-        for caminho in caminhos:
-            try:
-                caminho_abs = os.path.abspath(caminho)
-                if not os.path.exists(caminho_abs):
-                    continue
-                img = Image.open(caminho_abs).convert("RGB")
-                caminho_fundo_abs = caminho_abs
-                break
-            except Exception as exc:
-                ultimo_erro = str(exc)
-
-        if img is None:
-            detalhe = f" Último erro: {ultimo_erro}" if ultimo_erro else ""
-            logger.error("Dashboard fundo_menu não pôde ser carregado.%s", detalhe)
-            self._debug_fundo_dashboard_emitido = True
-            return
-
-        try:
-            escurecedor = Image.new("RGB", img.size, (0, 0, 0))
-            # Overlay forte para manter contraste elevado com cards e textos claros.
-            self._bg_pil_original = Image.blend(img, escurecedor, 0.66)
-            logger.info("Dashboard fundo carregado com sucesso: %s", caminho_fundo_abs)
-        except Exception as exc:
-            logger.info("Falha ao carregar fundo do dashboard: %s", exc)
-            self._bg_pil_original = None
-            self._debug_fundo_dashboard_emitido = True
-            return
-
-        if self._bg_canvas is None or not self._bg_canvas.winfo_exists():
-            self._bg_canvas = tk.Canvas(
-                self.dashboard_frame,
-                highlightthickness=0,
-                bd=0,
-                bg="#0f1720",
-            )
-            self._bg_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
-
-        self._bg_canvas.lower("all")
-        if self.dashboard_content is not None and self.dashboard_content.winfo_exists():
-            self.dashboard_content.lift()
-        self._bg_cache_size = None
-        self._diagnosticar_camadas_dashboard(caminho_fundo_abs)
-        self._debug_fundo_dashboard_emitido = True
-        self.after(80, self._atualizar_fundo)
-
-    def _diagnosticar_camadas_dashboard(self, caminho_fundo: str):
-        try:
-            area_fg = self.area_conteudo.cget("fg_color") if hasattr(self, "area_conteudo") else "N/A"
-            dash_fg = self.dashboard_frame.cget("fg_color") if hasattr(self, "dashboard_frame") else "N/A"
-            logger.info(
-                "Dashboard camada base: fundo=%s | area_conteudo.fg=%s | dashboard_frame.fg=%s",
-                caminho_fundo,
-                area_fg,
-                dash_fg,
-            )
-            filhos = list(self.dashboard_frame.winfo_children()) if hasattr(self, "dashboard_frame") else []
-            for idx, filho in enumerate(filhos[:12], start=1):
-                try:
-                    fg = filho.cget("fg_color")
-                except Exception:
-                    fg = "N/A"
-                logger.info(
-                    "Dashboard camada #%s: tipo=%s fg_color=%s",
-                    idx,
-                    filho.winfo_class(),
-                    fg,
-                )
-            if filhos:
-                logger.info(
-                    "Dashboard possui %s componentes sobre o fundo. Componentes opacos podem ocultar parcialmente a imagem.",
-                    len(filhos),
-                )
-        except Exception as exc:
-            logger.info("Falha no diagnóstico de camadas do dashboard: %s", exc)
 
     def _atualizar_fundo(self, _event=None):
         if self._bg_pil_original is None or Image is None or ImageTk is None:
             return
 
-        if self._dashboard_bg_after_id is not None:
-            try:
-                self.after_cancel(self._dashboard_bg_after_id)
-            except Exception:
-                pass
-            self._dashboard_bg_after_id = None
-
-        largura = max(self.dashboard_frame.winfo_width(), 1)
-        altura = max(self.dashboard_frame.winfo_height(), 1)
+        largura = max(self.winfo_width(), 1)
+        altura = max(self.winfo_height(), 1)
 
         if largura < 30 or altura < 30:
             return
@@ -3915,43 +2381,26 @@ class FrmMenu(ctk.CTk):
         nova_altura = max(int(orig_altura * escala), 1)
 
         # Usar BILINEAR (muito mais rápido que LANCZOS, ainda com boa qualidade)
-        try:
-            if hasattr(Image, "Resampling"):
-                resample_mode = Image.Resampling.BILINEAR
-            elif hasattr(Image, "ANTIALIAS"):
-                resample_mode = Image.ANTIALIAS
-            else:
-                resample_mode = 1  # fallback para ANTIALIAS/LANCZOS
-            redimensionada = self._bg_pil_original.resize((nova_largura, nova_altura), resample_mode)
-        except Exception:
-            # fallback: tenta importar novamente se necessário
-            from PIL import Image as PILImage
-            if hasattr(PILImage, "Resampling"):
-                resample_mode = PILImage.Resampling.BILINEAR
-            elif hasattr(PILImage, "ANTIALIAS"):
-                resample_mode = PILImage.ANTIALIAS
-            else:
-                resample_mode = 1
-            redimensionada = self._bg_pil_original.resize((nova_largura, nova_altura), resample_mode)
+        if hasattr(Image, "Resampling"):
+            redimensionada = self._bg_pil_original.resize((nova_largura, nova_altura), Image.Resampling.BILINEAR)
+        else:
+            redimensionada = self._bg_pil_original.resize((nova_largura, nova_altura), Image.BILINEAR)
 
         left = max((nova_largura - largura) // 2, 0)
         top = max((nova_altura - altura) // 2, 0)
         recorte = redimensionada.crop((left, top, left + largura, top + altura))
 
-        self._bg_tk_image = ImageTk.PhotoImage(recorte)
-        if hasattr(self, "_bg_canvas") and self._bg_canvas is not None:
-            self._bg_canvas.delete("all")
-            self._bg_canvas.create_image(0, 0, anchor="nw", image=self._bg_tk_image)
-            self._bg_canvas.lower("all")
-        if self.dashboard_content is not None and self.dashboard_content.winfo_exists():
-            self.dashboard_content.lift()
-        if hasattr(self, "sidebar") and self.sidebar is not None:
-            self.sidebar.lift()
+        self._bg_ctk_image = ctk.CTkImage(light_image=recorte, dark_image=recorte, size=(largura, altura))
+        self._bg_label.configure(image=self._bg_ctk_image, text="")
+        if hasattr(self, "_bg_area_label") and self._bg_area_label is not None:
+            self._bg_area_label.configure(image=self._bg_ctk_image, text="")
+            self._bg_area_label.lift()
+        self._bg_label.lower()
 
     def abrir_gestao_os(self):
         try:
             from gestao_os import FrmGestaoOrcamentos
-            janela = FrmGestaoOrcamentos(self, on_os_update_callback=self._atualizar_dashboard_modular)
+            janela = FrmGestaoOrcamentos(self)
             self._janela_gestao_os = janela
             janela.focus_force()
         except Exception as e:
@@ -3965,130 +2414,11 @@ class FrmMenu(ctk.CTk):
 
     def abrir_os(self):
         try:
-            janela = tela_os.FrmOS(self, on_save_callback=self._atualizar_dashboard_modular)
-            janela.update()
-            janela.attributes('-topmost', True)
-            janela.focus_force()
-            janela.after(300, lambda: janela.attributes('-topmost', False))
+            import tela_os
+            janela = tela_os.FrmOS(self)
             self._janela_os_atual = janela
         except Exception as e:
             messagebox.showerror("Erro", f"Erro: {e}", parent=self)
-
-    def abrir_pdv(self):
-        try:
-            from pdv import FrmPDV
-            janela = FrmPDV(self, on_os_update_callback=self._atualizar_dashboard_modular)
-            janela.focus_force()
-        except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao abrir PDV: {e}", parent=self)
-
-    def abrir_pdv_v2(self):
-        """Inicia o fluxo limpo do PDV v2 (Refatorado).
-        Esta função prepara o terreno para a futura substituição do PDV atual."""
-        try:
-            messagebox.showinfo("PDV v2", "O fluxo do novo PDV v2 está sendo preparado. O ambiente de vendas será modernizado em breve.")
-            # TODO: Instanciar a nova classe do PDV v2 aqui após a refatoração completa.
-        except Exception as e:
-            logger.exception("Falha ao abrir ambiente do PDV v2: %s", e)
-
-    def buscar_atualizacoes(self):
-        try:
-            info_versao = obter_info_nova_versao() or {}
-            versao_remota = str(info_versao.get("versao", "")).strip()
-            url_download = str(
-                info_versao.get("url_download")
-                or info_versao.get("download")
-                or info_versao.get("download_url")
-                or ""
-            ).strip()
-
-            if versao_remota and not url_download:
-                url_download = (
-                    f"https://github.com/frscomercial6-eng/oficina-pesca-updates/"
-                    f"releases/download/v{versao_remota}/Oficina_Pesca_Instalador.exe"
-                )
-
-            if versao_remota and self._eh_versao_mais_nova(versao_remota, APP_VERSION):
-                if not url_download:
-                    messagebox.showwarning(
-                        "Atualizações",
-                        f"Nova versão disponível: {versao_remota}, mas sem URL de download configurada.",
-                        parent=self,
-                    )
-                    return
-
-                # Mensagem ÚNICA do fluxo de atualização: confirma e avisa
-                # que o sistema será encerrado antes de instalar.
-                confirmar = messagebox.askokcancel(
-                    "Atualização",
-                    "Uma nova versão está disponível. O sistema será encerrado para aplicar a atualização.",
-                    parent=self,
-                )
-                if not confirmar:
-                    return
-
-                self._iniciar_download_atualizacao(url_download, versao_remota)
-                return
-
-            if versao_remota:
-                messagebox.showinfo(
-                    "Atualizações",
-                    f"Seu sistema já está atualizado.\nVersão atual: {APP_VERSION}",
-                    parent=self,
-                )
-                return
-
-            messagebox.showwarning(
-                "Atualizações",
-                "Não foi possível obter informações de versão agora. Tente novamente em instantes.",
-                parent=self,
-            )
-        except Exception as e:
-            messagebox.showerror("Atualizações", f"Erro ao buscar atualizações: {e}", parent=self)
-
-    def _iniciar_download_atualizacao(self, url_download: str, versao_alvo: str = ""):
-        alvo = str(versao_alvo or "").strip()
-        if not alvo:
-            try:
-                info_versao = obter_info_nova_versao() or {}
-                versao_remota = str(info_versao.get("versao", "")).strip()
-                if versao_remota and self._eh_versao_mais_nova(versao_remota, APP_VERSION):
-                    alvo = versao_remota
-            except Exception:
-                pass
-
-        if bloqueio_loop_update_ativo(versao_alvo=alvo):
-            messagebox.showinfo("Atualizações", "Sistema atualizado", parent=self)
-            return
-
-        def _worker_update():
-            ok, msg = executar_atualizacao(
-                url_download,
-                app_executavel=sys.executable,
-                processo_pid=os.getpid(),
-                silenciosa=True,
-                versao_alvo=alvo,
-            )
-
-            def _finalizar():
-                if ok:
-                    # Instalador disparado de forma desacoplada; o launcher
-                    # aguarda este processo encerrar ANTES de executar o
-                    # instalador baixado. Fecha TODO o sistema agora.
-                    fechar_sistema(self)
-                else:
-                    msg_final = str(msg or "").strip()
-                    if msg_final in {"Sistema atualizado", "Sem novas atualizações"}:
-                        messagebox.showinfo("Atualizações", msg_final, parent=self)
-                    else:
-                        messagebox.showerror("Atualizações", msg_final or "Falha ao iniciar atualização.", parent=self)
-
-            try:
-                self.after(0, _finalizar)
-            except Exception:
-                _finalizar()
-
-        threading.Thread(target=_worker_update, daemon=True, name="ofp-update-manual").start()
 
     def abrir_produtos(self):
         FrmProdutos(self)
@@ -4102,65 +2432,18 @@ class FrmMenu(ctk.CTk):
     def gerar_recibo_menu_lateral(self):
         FrmBaixaRecibo(self)
 
-    def _candidatos_pasta_apk(self) -> list[str]:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        return [
-            os.path.join(base_dir, "PACOTE_ENVIO", "apk_celular"),
-            os.path.join(base_dir, "dist", "apk_celular"),
-            os.path.join(base_dir, "apk_celular_distribuicao"),
-            os.path.join(base_dir, "android_apk", "app", "build", "outputs", "apk", "debug"),
-        ]
-
-    def _resolver_pasta_apk_distribuicao(self) -> str:
-        for pasta in self._candidatos_pasta_apk():
-            if os.path.isdir(pasta):
-                return pasta
-        return ""
-
-    def _resolver_arquivo_apk(self) -> str:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        candidatos = [
-            os.path.join(base_dir, "PACOTE_ENVIO", "apk_celular", "oficina_app_signed.apk"),
-            os.path.join(base_dir, "PACOTE_ENVIO", "apk_celular", "Oficina_Pesca_Nativo.apk"),
-            os.path.join(base_dir, "apk_celular_distribuicao", "oficina_app_signed.apk"),
-            os.path.join(base_dir, "android_apk", "app", "build", "outputs", "apk", "debug", "app-debug.apk"),
-        ]
-
-        for dist_apk_dir in [os.path.join(base_dir, "dist", "apk_celular")]:
-            if os.path.isdir(dist_apk_dir):
-                for nome in sorted(os.listdir(dist_apk_dir), reverse=True):
-                    if nome.lower().endswith(".apk"):
-                        candidatos.append(os.path.join(dist_apk_dir, nome))
-
-        for caminho in candidatos:
-            if os.path.exists(caminho):
-                return caminho
-        return ""
-
     def abrir_app_celular_sidebar(self):
-        tipo_licenca = str(obter_tipo_licenca() or "").strip().upper()
-        if tipo_licenca == "TRIAL":
-            messagebox.showwarning(
-                "APP CELULAR",
-                "Atenção: A integração com o App Celular é exclusiva para licenças Ativas. Por favor, ative sua licença para utilizar este recurso.",
-                parent=self,
-            )
-            return
-
-        pasta_apk = self._resolver_pasta_apk_distribuicao()
-        if not pasta_apk:
-            messagebox.showwarning(
-                "APP CELULAR",
-                "Nenhuma pasta de distribuição do APK foi encontrada ainda. Gere o build da versão atual para disponibilizar o app.",
-                parent=self,
-            )
-            return
+        messagebox.showwarning(
+            "APP CELULAR",
+            "ATENÇÃO: DEVIDO ÀS NORMAS E EXIGÊNCIAS DO GOOGLE, ESTA FUNÇÃO AINDA NÃO ESTÁ FUNCIONANDO...",
+            parent=self,
+        )
         self.abrir_pasta_apk_distribuicao()
 
     def abrir_pasta_apk_distribuicao(self):
-        pasta = self._resolver_pasta_apk_distribuicao()
-        if not pasta:
-            messagebox.showwarning("APK", "Pasta de distribuição do APK não encontrada.", parent=self)
+        pasta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "apk_celular_distribuicao")
+        if not os.path.isdir(pasta):
+            messagebox.showwarning("APK", "Pasta apk_celular_distribuicao não encontrada.", parent=self)
             return
         try:
             if hasattr(os, "startfile"):
@@ -4180,124 +2463,13 @@ class FrmMenu(ctk.CTk):
         if self.role != "ADMIN":
             messagebox.showwarning("Acesso negado", "Somente ADMIN pode alterar os dados da oficina.", parent=self)
             return
-
-        # Evita duplicidade e elimina loop de reabertura.
-        for widget in self.winfo_children():
-            if isinstance(widget, FrmDadosOficina) and widget.winfo_exists():
-                widget.lift()
-                widget.focus_force()
-                return
-
-        try:
-            self.update_idletasks()
-            self.after_idle(lambda: FrmDadosOficina(self))
-        except Exception as e:
-            logger.exception("Erro ao abrir tela de Dados da Oficina: %s", e)
-            messagebox.showerror("Erro", f"Não foi possível abrir a tela de Dados da Oficina: {e}", parent=self)
+        FrmDadosOficina(self)
 
     def abrir_cadastro_usuario(self):
         if self.role != "ADMIN":
             messagebox.showwarning("Acesso negado", "Somente ADMIN pode cadastrar usuários.", parent=self)
             return
         FrmCadastroUsuarios(self)
-
-    def _parse_manifesto(self, conteudo: str) -> dict:
-        """
-        Analisa o conteúdo de um manifesto de versão (JSON ou TXT) e retorna um dicionário.
-        Copiado de config.py para uso local.
-        """
-        bruto = str(conteudo or "").strip()
-        if not bruto:
-            return {}
-
-        # Tenta JSON primeiro
-        try:
-            data_json = json.loads(bruto)
-            if isinstance(data_json, dict):
-                return data_json
-        except Exception:
-            pass
-
-        # Formato TXT: chave=valor / chave: valor
-        data_txt = {}
-        for linha in bruto.splitlines():
-            item = linha.strip()
-            if not item or item.startswith("#"):
-                continue
-            if "=" in item:
-                k, v = item.split("=", 1)
-            elif ":" in item:
-                k, v = item.split(":", 1)
-            else:
-                # Permite arquivo com apenas "1.2.3"
-                if re.match(r"^\d+(\.\d+)+$", item):
-                    data_txt.setdefault("versao", item)
-                continue
-
-            chave = str(k or "").strip().lower()
-            valor = str(v or "").strip()
-            if not chave:
-                continue
-            data_txt[chave] = valor
-
-        if not data_txt:
-            return {}
-
-        # Normaliza aliases comuns
-        versao = data_txt.get("versao") or data_txt.get("version") or data_txt.get("tag") or ""
-        novidades = data_txt.get("novidades") or data_txt.get("changelog") or data_txt.get("notes") or ""
-        url_download = (
-            data_txt.get("url_download")
-            or data_txt.get("download")
-            or data_txt.get("url")
-            or data_txt.get("download_url")
-            or ""
-        )
-
-        saida = {
-            "versao": str(versao).strip(),
-            "novidades": str(novidades).strip(),
-            "url_download": str(url_download).strip(),
-        }
-        return {k: v for k, v in saida.items() if v}
-
-    def verificar_atualizacao(self) -> dict:
-        """Retorna dados de atualização de forma resiliente, sem interromper a UI."""
-        try:
-            info_versao = obter_info_nova_versao() or {}
-            if not isinstance(info_versao, dict):
-                return {}
-
-            versao = str(info_versao.get("versao", "")).strip()
-            novidades = str(info_versao.get("novidades", "")).strip()
-            url_download = str(
-                info_versao.get("url_download")
-                or info_versao.get("download")
-                or info_versao.get("url")
-                or ""
-            ).strip()
-
-            if versao and not url_download:
-                url_download = (
-                    f"https://github.com/frscomercial6-eng/oficina-pesca-updates/"
-                    f"releases/download/v{versao}/Oficina_Pesca_Instalador.exe"
-                )
-
-            resultado = {
-                "versao": versao,
-                "novidades": novidades,
-                "url_download": url_download,
-            }
-            return {k: v for k, v in resultado.items() if v}
-        except Exception as e:
-            logger.warning("Falha ao verificar atualizacao: %s", e)
-            return {}
-
-    def _eh_versao_mais_nova(self, versao_remota: str, versao_local: str) -> bool:
-        try:
-            return bool(eh_versao_mais_nova(versao_remota, versao_local))
-        except Exception:
-            return False
 
     def _detectar_ip_local(self) -> str:
         try:
@@ -4428,14 +2600,15 @@ class FrmMenu(ctk.CTk):
                 parent=self,
             )
 
-        caminho_apk = self._resolver_arquivo_apk()
+        # Caminho do APK gerado
+        caminho_apk = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                   "android_apk", "app", "build", "outputs", "apk", "debug", "app-debug.apk")
 
         # Caminho da Área de Trabalho do usuário
         desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-        nome_destino = os.path.basename(caminho_apk) if caminho_apk else "app-oficina-pesca.apk"
-        apk_destino = os.path.join(desktop, nome_destino)
+        apk_destino = os.path.join(desktop, "app-oficina-pesca.apk")
 
-        if caminho_apk and os.path.exists(caminho_apk):
+        if os.path.exists(caminho_apk):
             try:
                 shutil.copy2(caminho_apk, apk_destino)
                 self.clipboard_clear()
@@ -4446,7 +2619,7 @@ class FrmMenu(ctk.CTk):
                     pass
             except Exception as e:
                 logger.error(f"Erro ao copiar APK para a Área de Trabalho: {e}")
-            texto += (f"\nO arquivo APK foi copiado para sua Área de Trabalho como '{nome_destino}'.\n"
+            texto += (f"\nO arquivo APK foi copiado para sua Área de Trabalho como 'app-oficina-pesca.apk'.\n"
                       f"O caminho já está copiado para sua área de transferência.\n"
                       f"No WhatsApp, clique no clipe de anexar e selecione o arquivo na Área de Trabalho.\n")
         else:
@@ -4549,7 +2722,7 @@ class FrmMenu(ctk.CTk):
 
             info_versao = obter_info_nova_versao() or {}
             versao_remota = str(info_versao.get("versao", "")).strip()
-            if versao_remota and self._eh_versao_mais_nova(versao_remota, APP_VERSION):
+            if versao_remota and eh_versao_mais_nova(versao_remota, APP_VERSION):
                 pontos_alerta.append(f"Nova versao disponivel: {versao_remota} (atual: {APP_VERSION}).")
                 sugestoes.append("Planejar atualizacao para receber correcoes e melhorias.")
             else:
@@ -4628,26 +2801,6 @@ class FrmMenu(ctk.CTk):
         except Exception as e:
             logger.exception("Falha na geracao automatica do relatorio IA mensal: %s", e)
 
-    def confirmar_saida(self):
-        if messagebox.askokcancel('Sair', 'Deseja encerrar o programa?', parent=self):
-            self._encerrar_aplicacao()
-        else:
-            self.focus_force()
-
-    def _encerrar_aplicacao(self):
-        self._encerrando_aplicacao = True
-        try:
-            for after_id in self.tk.call('after', 'info'):
-                self.after_cancel(after_id)
-        except Exception:
-            pass
-        try:
-            self.destroy()
-        except SystemExit:
-            raise
-        except Exception:
-            fechar_sistema(self)
-
     def verificacao_ia_melhorias(self):
         if self.role != "ADMIN":
             messagebox.showwarning("Acesso negado", "Somente ADMIN pode executar a analise.", parent=self)
@@ -4670,7 +2823,7 @@ class FrmMenu(ctk.CTk):
 
         ctk.CTkLabel(
             win,
-            text=t("ui_analise_inteligente_de_melhorias"),
+            text="Analise Inteligente de Melhorias",
             font=("Arial", 18, "bold"),
             text_color="orange",
         ).pack(pady=(14, 8))
@@ -4701,8 +2854,8 @@ class FrmMenu(ctk.CTk):
             except Exception as e:
                 messagebox.showwarning("Analise IA", f"Nao foi possivel copiar: {e}", parent=win)
 
-        ctk.CTkButton(f_btn, text=t("ui_copiar_relatorio"), width=150, fg_color="#2980b9", command=copiar_relatorio).pack(side="left")
-        ctk.CTkButton(f_btn, text=t("ui_fechar_1"), width=120, fg_color="#7f8c8d", command=win.destroy).pack(side="right")
+        ctk.CTkButton(f_btn, text="Copiar relatorio", width=150, fg_color="#2980b9", command=copiar_relatorio).pack(side="left")
+        ctk.CTkButton(f_btn, text="Fechar", width=120, fg_color="#7f8c8d", command=win.destroy).pack(side="right")
 
     def configurar_email_nuvem_admin(self) -> str:
         if self.role != "ADMIN":
@@ -4804,12 +2957,21 @@ class FrmMenu(ctk.CTk):
             else:
                 messagebox.showwarning("Nuvem", msg, parent=self)
 
-
-def iniciar_sistema(usuario: str = "", role: str = "VENDEDOR", senha_login: str = ""):
-    """Ponto de entrada do menu principal chamado pelo fluxo de login."""
-    app = FrmMenu(usuario=usuario, role=role, senha_login=senha_login)
-    app.mainloop()
-
+    def confirmar_saida(self):
+        if messagebox.askokcancel("Sair", "Deseja encerrar o programa?", parent=self):
+            self._encerrando_aplicacao = True
+            try:
+                self.withdraw()
+            except Exception:
+                pass
+            try:
+                self.quit()
+            except Exception:
+                try:
+                    self.destroy()
+                except Exception:
+                    pass
 
 if __name__ == "__main__":
-    raise SystemExit("Fluxo direto desabilitado. Execute login.py para autenticar.")
+    app = FrmMenu()
+    app.mainloop()

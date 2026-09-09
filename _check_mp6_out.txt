@@ -1,0 +1,29 @@
+Position 48: ...sses when using the spawn or forkserver
+# start methods.
+#
+# multiprocessing/spa...
+Position 105: ...#
+# multiprocessing/spawn.py
+#
+# Copyright (c) 2006-2008, R Oudkerk
+# Licensed t...
+Position 1733: ... int(value)
+        spawn_main(**kwds)
+        sys.exit()
+
+
+def get_command_line...
+Position 1855: ...mmand line used for spawning a child process
+    '''
+    if getattr(sys, 'frozen...
+Position 2093: ...rom multiprocessing.spawn import spawn_main; spawn_main(%s)'
+        prog %= ', ...
+Position 2106: ...essing.spawn import spawn_main; spawn_main(%s)'
+        prog %= ', '.join('%s=%r...
+Position 2118: ... import spawn_main; spawn_main(%s)'
+        prog %= ', '.join('%s=%r' % item for...
+Position 2358: ...essing-fork']
+
+
+def spawn_main(pipe_handle, parent_pid=None, tracker_fd=None):
+ ...

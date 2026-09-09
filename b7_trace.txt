@@ -1,0 +1,15 @@
+r
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "F:\PROGRAMA\OFICINA DE 
+PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\__main__.py", line 321, in 
+<module>
+    run()
+  File "F:\PROGRAMA\OFICINA DE 
+PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\__main__.py", line 215, in 
+run
+    run_build(pyi_config, spec_file, **vars(args))
+  File "F:\PROGRAMA\OFICINA DE 
+PESCA\OFICINA_PESCA_ORIGINAL\.venv\Lib\site-packages\PyInstaller\__main__.py", line 70, in 
+run_build
