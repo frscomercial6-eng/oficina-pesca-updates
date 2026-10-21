@@ -50,6 +50,72 @@ else:
 if base_dir not in sys.path:
     sys.path.insert(0, base_dir)
 
+# ==============================================================================
+# AUTOSSONO DE BUILD (E7) — SOMENTE TESTE. NUNCA ATIVO PARA CLIENTES.
+# Ativado apenas pela variavel de ambiente OFP_E7_SELFTEST=1, usada para
+# validar o EXECUTAVEL COMPILADO de ponta a ponta sem abrir janelas. O fluxo
+# normal de login nunca define essa variavel. Escreve um JSON com o resultado
+# e encerra. Nao altera nenhum banco, cadastro ou licenca.
+# ==============================================================================
+if os.environ.get("OFP_E7_SELFTEST") == "1":
+    import json as _json
+
+    _res = {"ok": False, "frozen": bool(getattr(sys, "frozen", False))}
+    try:
+        from licensing.machine_identity import (  # verificacao Ed25519
+            collect_machine_identity,
+            legacy_installation_key,
+        )
+        from config import (
+            obter_chave_instalacao,
+            obter_chave_instalacao_frs,
+            obter_status_trial,
+            validar_chave_licenca,
+        )
+
+        _ident = collect_machine_identity()
+        _res["instalacao_legado"] = obter_chave_instalacao()
+        _res["licensing_legado"] = legacy_installation_key()
+        _res["frs_i"] = obter_chave_instalacao_frs()
+        _res["componentes"] = sorted(_ident.component_hashes.keys())
+        _res["total_componentes_fortes"] = len(_ident.component_hashes)
+        _res["minimum_matches"] = _ident.minimum_matches
+
+        # Trial (compatibilidade) — lido sem alterar estado persistente.
+        try:
+            _st = obter_status_trial()
+            _res["trial"] = {
+                "ativo": bool(_st[0]),
+                "mensagem": _st[1],
+                "dias": (_st[2] if len(_st) > 2 else None),
+            }
+        except Exception as _te:  # pragma: no cover
+            _res["trial"] = {"erro": repr(_te)}
+
+        _entrada = os.environ.get("OFP_E7_LICENSE", "")
+        if _entrada and os.path.exists(_entrada):
+            with open(_entrada, "r", encoding="utf-8") as _f:
+                _casos = _json.load(_f)
+            for _nome, _chave in _casos.items():
+                if not _chave:
+                    continue
+                _ok, _msg, _pl = validar_chave_licenca(_chave)
+                _res[_nome] = {
+                    "valida": bool(_ok),
+                    "mensagem": _msg,
+                    "tipo": (_pl or {}).get("tipo") if _pl else None,
+                }
+        _res["ok"] = True
+    except Exception as _exc:  # pragma: no cover - diagnostico de build
+        _res["erro"] = repr(_exc)
+    _saida = os.environ.get("OFP_E7_RESULT", "e7_selftest.json")
+    try:
+        with open(_saida, "w", encoding="utf-8") as _f:
+            _json.dump(_res, _f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    sys.exit(0)
+
 # IMPORTS DOS SEUS MÓDULOS LOCAIS (Que o Mestre já resolveu!)
 
 import importlib
@@ -88,6 +154,7 @@ from config import (
     WHATSAPP_ADMIN_DESTINO,
     enviar_log_automatico_quinzenal,
     obter_chave_instalacao,
+    obter_chave_instalacao_frs,
     diagnosticar_chave_licenca,
     validar_chave_licenca,
     iniciar_sincronizacao_hibrida_nuvem,
@@ -98,6 +165,14 @@ from config import (
     INFINITEPAY_LINK_PAGAMENTO,
 )
 from shutdown_utils import fechar_sistema
+
+# Sincronização de licença com o Supabase (Fase 1 — v1.0.63).
+# Import tolerante: enquanto o config compilado (config.pyd) não incluir a
+# função, o login continua funcionando e o gancho de startup fica inativo.
+try:
+    from config import sincronizar_licenca_supabase_pendente
+except ImportError:
+    sincronizar_licenca_supabase_pendente = None
 
 # Compatibilidade com versões de config.py que não expõem mais estas funções.
 try:
@@ -422,6 +497,19 @@ def _executar_varredura_inicializacao() -> None:
         logger.info("[startup] Configuração: %s", msg_cfg)
     else:
         logger.warning("[startup] Configuração: %s", msg_cfg)
+
+    # Sincronização de licença pendente com o Supabase (idempotente, background).
+    # Não bloqueia a inicialização e nunca quebra o startup com Supabase
+    # indisponível (o orquestrador captura exceções e registra falhas localmente).
+    if sincronizar_licenca_supabase_pendente is not None:
+        try:
+            threading.Thread(
+                target=sincronizar_licenca_supabase_pendente,
+                daemon=True,
+                name="ofp-licenca-sync-startup",
+            ).start()
+        except Exception as exc:
+            logger.warning("[startup] Não foi possível agendar sincronização de licença: %s", exc)
 
 
 
@@ -1407,7 +1495,7 @@ def verificar_login():
 
 
 def abrir_tela_ativacao():
-    chave_inst = obter_chave_instalacao()
+    chave_inst = obter_chave_instalacao_frs()
 
     dialog = ctk.CTkToplevel(janela_login)
     dialog.title("Ativar Licença")
@@ -1423,16 +1511,76 @@ def abrir_tela_ativacao():
 
     frame_chave = ctk.CTkFrame(dialog, fg_color="#1f2a38")
     frame_chave.pack(pady=(0, 14))
-    ctk.CTkLabel(frame_chave, text=chave_inst, text_color="#f1c40f", font=("Courier", 13, "bold")).pack(side="left", padx=(0, 8))
 
-    def _copiar_chave():
-        dialog.clipboard_clear()
-        dialog.clipboard_append(chave_inst)
+    def _copiar_chave_instalacao():
+        try:
+            dialog.clipboard_clear()
+            dialog.clipboard_append(chave_inst)
+        except Exception as exc:
+            messagebox.showerror(
+                "Erro",
+                f"Não foi possível copiar a chave de instalação: {exc}",
+                parent=dialog,
+            )
+            return
+
         btn_copiar.configure(text=t("ui_copiado_1"))
         dialog.after(2000, lambda: btn_copiar.configure(text=t("ui_copiar_chave")))
 
-    btn_copiar = ctk.CTkButton(frame_chave, text=t("ui_copiar_chave"), command=_copiar_chave,
-                               width=130, height=30, fg_color="#2980b9", hover_color="#3498db")
+        enviar = messagebox.askyesno(
+            "Chave de instalação copiada",
+            "Chave de instalação copiada. Deseja enviar para a FRS Solutions pelo WhatsApp?",
+            parent=dialog,
+        )
+        if not enviar:
+            return
+
+        numero = _obter_numero_whatsapp_admin()
+        if not numero:
+            messagebox.showwarning(
+                "WhatsApp",
+                "Número do administrador não configurado em config.cfg (app.whatsapp_admin). "
+                "A chave permanece copiada na área de transferência.",
+                parent=dialog,
+            )
+            return
+
+        texto = (
+            "Olá, FRS Solutions! Preciso ativar minha FRS Oficina de Pesca. "
+            f"Segue minha chave de instalação: {chave_inst}"
+        )
+        link = f"https://wa.me/{numero}?text={quote_plus(texto)}"
+
+        try:
+            abriu = bool(webbrowser.open(link, new=2))
+            if abriu:
+                return
+        except Exception as e:
+            logger.info("Falha ao abrir WhatsApp com webbrowser: %s", e)
+
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(link)  # type: ignore[attr-defined]
+                return
+        except Exception as e:
+            logger.info("Falha ao abrir WhatsApp com os.startfile: %s", e)
+
+        messagebox.showwarning(
+            "WhatsApp",
+            "Não foi possível abrir o WhatsApp automaticamente. "
+            "A chave permanece copiada na área de transferência.",
+            parent=dialog,
+        )
+
+    btn_copiar = ctk.CTkButton(
+        frame_chave,
+        text=t("ui_copiar_chave"),
+        command=_copiar_chave_instalacao,
+        width=130,
+        height=30,
+        fg_color="#2980b9",
+        hover_color="#3498db",
+    )
     btn_copiar.pack(side="left")
 
     ctk.CTkLabel(dialog, text=t("ui_contra_senha_de_ativa_o"), text_color="#bdc3c7").pack(pady=(0, 4))

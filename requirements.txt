@@ -9,3 +9,7 @@ bcrypt
 PyJWT
 httpx
 pydantic>=2.0.0
+firebase-admin
+fpdf2
+reportlab
+

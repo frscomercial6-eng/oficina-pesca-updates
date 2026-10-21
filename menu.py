@@ -93,6 +93,7 @@ from config import (
     obter_status_acesso_centralizado,
     obter_tipo_licenca,
     obter_chave_instalacao,
+    obter_chave_instalacao_frs,
     ativar_licenca,
     diagnosticar_chave_licenca,
     publicar_licenca_drive,
@@ -1483,23 +1484,82 @@ class FrmDadosOficina(ctk.CTkToplevel):
         dialog.grab_set()
         dialog.focus_force()
 
-        chave_inst = str(obter_chave_instalacao() or "").strip()
+        chave_inst = str(obter_chave_instalacao_frs() or "").strip()
         ctk.CTkLabel(dialog, text=t("ui_chave_de_instala_o_deste_pc"), text_color="#bdc3c7").pack(pady=(16, 4))
 
         frame_chave = ctk.CTkFrame(dialog, fg_color="#1f2a38")
         frame_chave.pack(pady=(0, 12), padx=12, fill="x")
-        ctk.CTkLabel(frame_chave, text=chave_inst, text_color="#f1c40f", font=("Courier", 13, "bold")).pack(side="left", padx=(10, 8), pady=8)
 
-        def _copiar_chave():
-            dialog.clipboard_clear()
-            dialog.clipboard_append(chave_inst)
+        def _obter_numero_whatsapp_admin_local() -> str:
+            numero = "".join(ch for ch in str(WHATSAPP_ADMIN_DESTINO or "") if ch.isdigit())
+            if numero and not numero.startswith("55"):
+                numero = "55" + numero
+            return numero
+
+        def _copiar_chave_instalacao():
+            try:
+                dialog.clipboard_clear()
+                dialog.clipboard_append(chave_inst)
+            except Exception as exc:
+                messagebox.showerror(
+                    "Erro",
+                    f"Não foi possível copiar a chave de instalação: {exc}",
+                    parent=dialog,
+                )
+                return
+
             btn_copiar.configure(text=t("ui_copiado"))
             dialog.after(1500, lambda: btn_copiar.configure(text=t("ui_copiar_chave")))
+
+            enviar = messagebox.askyesno(
+                "Chave de instalação copiada",
+                "Chave de instalação copiada. Deseja enviar para a FRS Solutions pelo WhatsApp?",
+                parent=dialog,
+            )
+            if not enviar:
+                return
+
+            numero = _obter_numero_whatsapp_admin_local()
+            if not numero:
+                messagebox.showwarning(
+                    "WhatsApp",
+                    "Número do administrador não configurado em config.cfg (app.whatsapp_admin). "
+                    "A chave permanece copiada na área de transferência.",
+                    parent=dialog,
+                )
+                return
+
+            texto = (
+                "Olá, FRS Solutions! Preciso ativar minha FRS Oficina de Pesca. "
+                f"Segue minha chave de instalação: {chave_inst}"
+            )
+            link = f"https://wa.me/{numero}?text={quote_plus(texto)}"
+
+            try:
+                abriu = bool(webbrowser.open(link, new=2))
+                if abriu:
+                    return
+            except Exception as e:
+                logger.info("Falha ao abrir WhatsApp com webbrowser: %s", e)
+
+            try:
+                if hasattr(os, "startfile"):
+                    os.startfile(link)  # type: ignore[attr-defined]
+                    return
+            except Exception as e:
+                logger.info("Falha ao abrir WhatsApp com os.startfile: %s", e)
+
+            messagebox.showwarning(
+                "WhatsApp",
+                "Não foi possível abrir o WhatsApp automaticamente. "
+                "A chave permanece copiada na área de transferência.",
+                parent=dialog,
+            )
 
         btn_copiar = ctk.CTkButton(
             frame_chave,
             text=t("ui_copiar_chave"),
-            command=_copiar_chave,
+            command=_copiar_chave_instalacao,
             width=130,
             height=30,
             fg_color="#2980b9",

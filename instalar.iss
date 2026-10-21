@@ -8,12 +8,15 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.63"
+#define AppVersion "1.0.64"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
 #define SourceDir "dist\Oficina_Pesca"
-#define LicenseSecret "ALTERAR-EM-PRODUCAO"
+; LicenseSecret removido do uso como segredo em runtime (Fase A1 da v1.0.64).
+; O segredo do licenciamento e configurado por meios seguros:
+;   - variavel de ambiente OFP_LICENCA_SECRET, ou
+;   - chave [licenca] secret no config.cfg.
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -27,7 +30,7 @@ DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.63
+OutputBaseFilename=Setup_OficinaPesca_v1.0.64
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

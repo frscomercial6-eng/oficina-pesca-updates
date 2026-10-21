@@ -437,6 +437,41 @@ VALOR_LICENCA_TRIMESTRAL = 249.90
 VALOR_LICENCA_PERMANENTE = 599.90
 # Permite segredo externo para licenciamento sem quebrar instalaÃ§Ãµes antigas.
 # Se a variÃ¡vel de ambiente nÃ£o existir, tenta fallback automÃ¡tico no instalar.iss.
+_SENTINELAS_LICENCA_SECRET = frozenset({
+    "ALTERAR-EM-PRODUCAO",
+    "CHANGE-ME",
+    "CHANGE_ME",
+    "TROCAR-EM-PRODUCAO",
+    "dev-secret-key",
+    "DEV-SECRET",
+})
+
+def _ler_licenca_secret_do_instalar() -> str:
+    """Compatibilidade com instalacoes antigas: le o LicenseSecret do instalar.iss.
+
+    Usado SOMENTE quando o ambiente/config.cfg nao fornecem um segredo valido
+    e o valor lido NAO e um placeholder conhecido (nunca segredo default).
+    """
+    candidatos = [
+        os.path.join(DIRETORIO_ATUAL, "instalar.iss"),
+        os.path.join(DIRETORIO_RECURSOS, "instalar.iss"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "instalar.iss"),
+    ]
+    for caminho in candidatos:
+        try:
+            if not os.path.exists(caminho):
+                continue
+            with open(caminho, "r", encoding="utf-8", errors="ignore") as f:
+                conteudo = f.read()
+            match = re.search(r'^#define\s+LicenseSecret\s+"([^"]+)"', conteudo, re.MULTILINE)
+            if match:
+                valor = str(match.group(1)).strip()
+                if _segredo_licenca_valido(valor):
+                    return valor
+        except Exception:
+            continue
+    return ""
+
 def _resolver_licenca_secret() -> str:
     secret_env = str(os.environ.get("OFP_LICENCA_SECRET", "")).strip()
     if secret_env:
@@ -462,6 +497,12 @@ def _resolver_licenca_secret() -> str:
 
     return ""
 
+
+def licenca_secret_configurado() -> bool:
+    """Indica se o segredo de licenca esta configurado com valor seguro."""
+    return _segredo_licenca_valido(LICENCA_SECRET)
+
+logger = logging.getLogger("oficina")
 
 LICENCA_SECRET = _resolver_licenca_secret()
 if LICENCA_SECRET:
@@ -3747,6 +3788,54 @@ def obter_chave_instalacao() -> str:
     return f"OFP-INST-{hw[:24]}"
 
 
+def _caminho_dados_licenca() -> str:
+    """Raiz do armazenamento Ed25519 (separada do oficina.db)."""
+    return os.path.join(DIRETORIO_DADOS, "licensing")
+
+
+def _eh_permanente_oficina(expires_at: str) -> bool:
+    return str(expires_at or "").startswith("9999-")
+
+
+def _validar_licenca_ed25519(chave: str):
+    """Valida licença Ed25519 do Gerador Único (FRS-A- ou envelope JSON).
+
+    Ramo ADITIVO: não altera o caminho legado (OFP- HMAC).
+    """
+    try:
+        from licensing import LicenseStorage
+        from licensing.service import verificar_para_app
+    except Exception as _e:
+        return False, "Verificador Ed25519 indisponivel: %s" % _e, None
+    try:
+        _storage = LicenseStorage(_caminho_dados_licenca())
+        _ok, _msg, _pay = verificar_para_app(chave, _storage)
+    except Exception as _e:
+        return False, "Falha na verificacao Ed25519: %s" % _e, None
+    if _ok and isinstance(_pay, dict):
+        _pay = dict(_pay)
+        _plano = str(_pay.get("plano") or "")
+        _val = (
+            "PERMANENTE"
+            if _eh_permanente_oficina(str(_pay.get("expires_at") or ""))
+            else str(_pay.get("expires_at") or "")
+        )
+        _pay["tipo"] = _normalizar_tipo_licenca(_plano, _val)
+    return _ok, _msg, _pay
+
+
+def obter_chave_instalacao_frs() -> str:
+    """Chave curta FRS-I- (protocolo novo Ed25519) desta instalação."""
+    try:
+        from licensing import LicenseStorage
+        from licensing.challenge import create_challenge
+        from licensing.chave_curta import gerar_chave_instalacao
+        _ch = create_challenge(LicenseStorage(_caminho_dados_licenca()))
+        return gerar_chave_instalacao(_ch)
+    except Exception:
+        return ""
+
+
 def normalizar_chave_instalacao(chave_instalacao: str) -> str:
     chave = str(chave_instalacao or "").strip().upper()
     if not chave:
@@ -3816,6 +3905,8 @@ def gerar_chave_licenca(
 ) -> str:
     # cliente mantido apenas por compatibilidade da assinatura.
     _ = cliente
+    # Falha controlada e explicita se o segredo mestre nao estiver configurado.
+    _exigir_licenca_secret()
     tipo_in = str(tipo_licenca or "").upper().strip()
 
     if tipo_in == "PERMANENTE":
@@ -3842,6 +3933,10 @@ def gerar_chave_licenca(
 
 
 def validar_chave_licenca(chave: str):
+    # --- Novo protocolo Ed25519 (Gerador Único): FRS-A- ou envelope JSON ---
+    _raw = str(chave or "").strip()
+    if _raw.startswith("{") or "FRS-A-" in _raw.upper():
+        return _validar_licenca_ed25519(_raw)
     chave = _normalizar_texto_chave_licenca(chave)
     if not chave.startswith("OFP-"):
         return False, "Formato de chave invalido.", None
@@ -4160,10 +4255,14 @@ def publicar_licenca_supabase(
     if not valida:
         return False, msg
 
-    email_norm = str(email or obter_user_id_token_padrao() or "").strip().lower()
+    email_norm = str(email or obter_email_licenca_para_sync() or "").strip().lower()
     if not validar_email_basico(email_norm):
-        return False, "E-mail válido não encontrado para sincronizar licença no Supabase."
+        return False, "Sincronização pendente: e-mail válido não configurado para sincronizar licença no Supabase."
 
+    # Fase 1: idempotência read-before-write para evitar duplicatas no histórico.
+    # Busca as 5 últimas linhas deste e-mail e verifica se já existe uma linha
+    # com a mesma chave + mesma data_expiracao. Se já existe, retorna sucesso sem
+    # duplicar. Isso preserva o histórico e evita re-publicações desnecessárias.
     url, key = _obter_cfg_supabase()
     if not url or not key:
         return False, "SUPABASE_URL/SUPABASE_KEY não configurados."
@@ -4175,6 +4274,24 @@ def publicar_licenca_supabase(
     plano_final = str(plano or tipo_final or "").strip().upper()
     cliente_final = str(cliente or email_norm).strip()
     hw = _normalizar_hw_para_assinatura(str((payload or {}).get("hw") or ""))
+
+    try:
+        client = supabase_create_client(url, key)
+        existentes = (
+            client.table("licencas_geradas")
+            .select("id,chave,data_expiracao")
+            .eq("email", email_norm)
+            .order("id", desc=True)
+            .limit(5)
+            .execute()
+        )
+        for linha in (existentes.data or []):
+            if linha.get("chave") == chave_limpa and linha.get("data_expiracao") == validade:
+                _registrar_sync_supabase_local(chave_limpa, email_norm)
+                return True, f"Licença já sincronizada no Supabase para {email_norm}."
+    except Exception:
+        # Falha na consulta não impede a publicação — segue para o INSERT.
+        pass
 
     row = {
         "chave": chave_limpa,
@@ -4190,10 +4307,284 @@ def publicar_licenca_supabase(
     try:
         client = supabase_create_client(url, key)
         client.table("licencas_geradas").insert(row).execute()
+        _registrar_sync_supabase_local(chave_limpa, email_norm)
         return True, f"Licença sincronizada no Supabase para {email_norm}."
     except Exception as e:
         return False, f"Falha ao sincronizar licença no Supabase: {e}"
 
+
+def _segredo_licenca_valido(segredo: str) -> bool:
+    texto = str(segredo or "").strip()
+    if not texto:
+        return False
+    return texto not in _SENTINELAS_LICENCA_SECRET
+
+def _exigir_licenca_secret() -> str:
+    """Falha controlada e explicita quando o segredo de licenca e exigido.
+
+    Nunca imprime o valor do segredo; a mensagem apenas orienta a configuracao.
+    """
+    if not _segredo_licenca_valido(LICENCA_SECRET):
+        raise RuntimeError(
+            "Segredo de licenciamento nao configurado. Defina OFP_LICENCA_SECRET "
+            "ou a chave '[licenca] secret' no config.cfg."
+        )
+    return LICENCA_SECRET
+
+def obter_email_licenca_para_sync() -> str:
+    """E-mail estrito para sincronização da licença com o Supabase.
+
+    Usa EXCLUSIVAMENTE o e-mail configurado em "Backup na Nuvem"
+    (config.cfg [cloud_backup] email_cliente). Não recorre à conta Google
+    e nunca devolve o sentinela "ofp-user": retorna "" quando ausente/inválido.
+    """
+    email = str(obter_email_backup_nuvem() or "").strip().lower()
+    if validar_email_basico(email):
+        return email
+    return ""
+
+_sync_licenca_supabase_lock = threading.Lock()
+
+_REGISTRO_SYNC_ULTIMA_CHAVE = "licenca_sync_ultima_chave"
+
+_REGISTRO_SYNC_ULTIMO_EMAIL = "licenca_sync_ultimo_email"
+
+def _registrar_sync_supabase_local(chave: str, email: str) -> None:
+    """Fase 1: grava localmente a última chave/e-mail sincronizados no Supabase.
+
+    Base de comparação do orquestrador para detectar pendências (restauração
+    de backup, troca de e-mail, publicação falha). Erros são apenas registrados
+    no log — nunca derrubam a aplicação.
+    """
+    try:
+        chave_norm = str(chave or "").strip()
+        email_norm = str(email or "").strip().lower()
+        if not chave_norm and not email_norm:
+            return
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            if chave_norm:
+                cursor.execute(
+                    "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)",
+                    (_REGISTRO_SYNC_ULTIMA_CHAVE, chave_norm),
+                )
+            if email_norm:
+                cursor.execute(
+                    "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)",
+                    (_REGISTRO_SYNC_ULTIMO_EMAIL, email_norm),
+                )
+            conn.commit()
+    except Exception:
+        logger.exception("Falha ao registrar sincronização local de licença (Supabase).")
+
+def _ler_configuracao_local(chave: str) -> str:
+    """Lê um valor da tabela configuracoes sem propagar exceções."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT valor FROM configuracoes WHERE chave = ?",
+                (str(chave or "").strip(),),
+            )
+            linha = cursor.fetchone()
+            return str(linha[0]) if linha and linha[0] is not None else ""
+    except Exception:
+        logger.exception("Falha ao ler configuração local '%s'.", chave)
+        return ""
+
+class ResultadoSyncLicenca(dict):
+    """Resultado do orquestrador de sincronização de licença (Fase 1).
+
+    dict com, no mínimo, as chaves "pendente", "publicado" e "erro"; mantém
+    compatibilidade com o consumo legado em login.py/menu.py:
+
+        ok, msg = sincronizar_licenca_supabase_pendente()
+    """
+
+    def __iter__(self):
+        # Desempacotamento legado: (ok, msg).
+        return iter((self.ok, self.msg))
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.get("ok"))
+
+    @property
+    def msg(self) -> str:
+        return str(self.get("msg") or "")
+
+def sincronizar_licenca_supabase_pendente(forcar: bool = False) -> ResultadoSyncLicenca:
+    """Fase 1 (v1.0.63): sincroniza a licença ativa com o Supabase se pendente.
+
+    Pendência = licenca_supabase_sync != '1'
+              OU chave ativa divergente de licenca_sync_ultima_chave
+              OU e-mail atual divergente de licenca_sync_ultimo_email.
+
+    - Sem pendência e forcar=False: NENHUM I/O de rede é realizado.
+    - forcar=True: publica mesmo sem pendência detectada.
+    - Trial / sem chave / token de acesso: mensagem informativa, sem rede.
+    - Exceções de rede/publicação NÃO propagam (não quebram a UI).
+    - Protegido por _sync_licenca_supabase_lock contra chamadas concorrentes.
+    """
+    resultado = ResultadoSyncLicenca(
+        pendente=False,
+        publicado=False,
+        erro="",
+        ok=False,
+        msg="",
+    )
+
+    if not _sync_licenca_supabase_lock.acquire(blocking=False):
+        resultado["erro"] = "Sincronização de licença com o Supabase já em andamento."
+        resultado["msg"] = resultado["erro"]
+        return resultado
+
+    try:
+        return _sincronizar_licenca_supabase_pendente_com_lock(bool(forcar), resultado)
+    except Exception as exc:
+        logger.exception("Falha inesperada na sincronização de licença com o Supabase.")
+        resultado["pendente"] = False
+        resultado["publicado"] = False
+        resultado["erro"] = str(exc) or exc.__class__.__name__
+        resultado["msg"] = resultado["erro"]
+        return resultado
+    finally:
+        _sync_licenca_supabase_lock.release()
+
+
+def _sincronizar_licenca_supabase_pendente_com_lock(
+    forcar: bool, resultado: ResultadoSyncLicenca
+) -> ResultadoSyncLicenca:
+    """Corpo do orquestrador; executado sob _sync_licenca_supabase_lock."""
+    chave_ativa = _normalizar_texto_chave_licenca(obter_chave_licenca_ativa())
+
+    if not chave_ativa:
+        # Trial / sem licença: nunca publica nem cria estruturas na nuvem.
+        resultado["msg"] = "Nenhuma chave de licença ativa para sincronizar."
+        return resultado
+
+    valida, _msg_validacao, _payload = validar_chave_licenca(chave_ativa)
+    if not valida:
+        # Conteúdo não-licença (ex.: token de acesso) — nada público a sincronizar.
+        resultado["msg"] = "Nada a sincronizar: a chave ativa não é uma licença OFP válida."
+        return resultado
+
+    email_atual = obter_email_licenca_para_sync()
+    flag_sync = str(_ler_configuracao_local("licenca_supabase_sync") or "").strip()
+    ultima_chave = _normalizar_texto_chave_licenca(
+        _ler_configuracao_local(_REGISTRO_SYNC_ULTIMA_CHAVE)
+    )
+    ultimo_email = str(_ler_configuracao_local(_REGISTRO_SYNC_ULTIMO_EMAIL) or "").strip().lower()
+
+    pendente = (
+        flag_sync != "1"
+        or (bool(ultima_chave) and chave_ativa != ultima_chave)
+        or (bool(ultimo_email) and email_atual != ultimo_email)
+    )
+    resultado["pendente"] = pendente
+
+    if not pendente and not forcar:
+        resultado["ok"] = True
+        resultado["msg"] = "Nenhuma pendência de sincronização de licença com o Supabase."
+        return resultado
+
+    if not validar_email_basico(email_atual):
+        resultado["msg"] = (
+            "Sincronização pendente: e-mail válido não configurado para "
+            "sincronizar licença no Supabase."
+        )
+        return resultado
+
+    tipo_local = str(_ler_configuracao_local("licenca_tipo") or "").strip().upper()
+
+    try:
+        ok_pub, msg_pub = publicar_licenca_supabase(
+            chave_ativa,
+            email=email_atual,
+            tipo=tipo_local,
+            plano=tipo_local,
+        )
+    except Exception as exc:
+        logger.exception("Falha ao publicar licença pendente no Supabase.")
+        resultado["publicado"] = False
+        resultado["erro"] = str(exc) or exc.__class__.__name__
+        resultado["msg"] = f"Falha ao sincronizar licença no Supabase: {exc}"
+        return resultado
+
+    resultado["publicado"] = bool(ok_pub)
+    if ok_pub:
+        resultado["ok"] = True
+        resultado["msg"] = str(msg_pub)
+    else:
+        resultado["erro"] = str(msg_pub)
+        resultado["msg"] = str(msg_pub)
+    return resultado
+
+def reapontar_historico_licenca_supabase(
+    email_antigo: str,
+    email_novo: str,
+    chave: str,
+    confirmar: bool = False,
+) -> tuple[bool, str]:
+    """Fase 1 (v1.0.63): repoint MANUAL do histórico de licenças no Supabase.
+
+    Ferramenta de suporte para migrar registros de licencas_geradas de um
+    e-mail antigo para um novo, preservando o histórico (sem duplicar/apagar).
+
+    Dupla trava OBRIGATÓRIA — sem as duas condições abaixo NADA é executado:
+      1) confirmar=True (chamada explícita do operador);
+      2) variável de ambiente OFP_PERMITIR_REPOINT_LICENCA=1.
+
+    Não possui gancho automático em nenhuma parte do sistema.
+    """
+    if not confirmar:
+        return False, "Repoint bloqueado: operação requer confirmar=True."
+
+    if str(os.environ.get("OFP_PERMITIR_REPOINT_LICENCA", "")).strip() != "1":
+        return False, (
+            "Repoint bloqueado: variável de ambiente OFP_PERMITIR_REPOINT_LICENCA=1 "
+            "não definida."
+        )
+
+    email_antigo_norm = str(email_antigo or "").strip().lower()
+    email_novo_norm = str(email_novo or "").strip().lower()
+    chave_norm = _normalizar_texto_chave_licenca(chave)
+
+    if not validar_email_basico(email_antigo_norm) or not validar_email_basico(email_novo_norm):
+        return False, "Repoint bloqueado: e-mails de origem/destino inválidos."
+    if not chave_norm:
+        return False, "Repoint bloqueado: chave de licença vazia."
+
+    if not _sync_licenca_supabase_lock.acquire(blocking=False):
+        return False, "Repoint bloqueado: sincronização de licença em andamento."
+
+    try:
+        url, key = _obter_cfg_supabase()
+        if not url or not key:
+            return False, "Repoint bloqueado: SUPABASE_URL/SUPABASE_KEY não configurados."
+        if supabase_create_client is None:
+            return False, "Repoint bloqueado: pacote supabase não instalado no ambiente."
+
+        try:
+            client = supabase_create_client(url, key)
+            resultado = (
+                client.table("licencas_geradas")
+                .update({"email": email_novo_norm})
+                .eq("email", email_antigo_norm)
+                .eq("chave", chave_norm)
+                .execute()
+            )
+        except Exception as e:
+            logger.exception("Falha ao reapontar histórico de licença no Supabase.")
+            return False, f"Falha ao reapontar histórico de licença no Supabase: {e}"
+
+        afetadas = len(getattr(resultado, "data", None) or [])
+        return True, (
+            f"Repoint concluído: {afetadas} registro(s) atualizado(s) "
+            f"para {email_novo_norm}."
+        )
+    finally:
+        _sync_licenca_supabase_lock.release()
 
 def obter_chave_licenca_drive() -> tuple[bool, str, str]:
     creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
@@ -4307,7 +4698,7 @@ def ativar_licenca(chave: str):
     if not valida:
         return False, msg
 
-    cliente = ""
+    cliente = str((payload or {}).get("cliente") or "").strip()
     validade = str((payload or {}).get("val", "PERMANENTE"))
     tipo = str((payload or {}).get("tipo", "")).upper().strip()
     tipo = _normalizar_tipo_licenca(tipo, validade)
