@@ -11,6 +11,7 @@ from core.financeiro.calculos import formatar_monetario, parse_monetario
 from core.financeiro.repository import (
     editar_lancamento_financeiro,
     estornar_lancamento_financeiro,
+    excluir_lancamento_financeiro,
     inserir_lancamento_financeiro,
     listar_lancamentos_financeiro,
 )
@@ -54,6 +55,7 @@ class FrmFinanceiro(ctk.CTkToplevel):
         ctk.CTkButton(self.frame_botoes, text=f"+ {t('btn_lancar_receita')}", fg_color="#27ae60", width=170, command=self.lancar_entrada).pack(side="left", padx=8, pady=15)
         ctk.CTkButton(self.frame_botoes, text=t('btn_editar'), fg_color="#8e44ad", width=130, command=self.editar_lancamento).pack(side="left", padx=8, pady=15)
         ctk.CTkButton(self.frame_botoes, text=t('btn_estornar'), fg_color="#7f8c8d", width=130, command=self.estornar_lancamento).pack(side="left", padx=8, pady=15)
+        ctk.CTkButton(self.frame_botoes, text=t('btn_excluir'), fg_color="#c0392b", width=130, command=self.excluir_lancamento).pack(side="left", padx=8, pady=15)
         ctk.CTkButton(self.frame_botoes, text=t('btn_exportar_csv'), fg_color="#2980b9", width=160, command=self.exportar_csv).pack(side="left", padx=8, pady=15)
         ctk.CTkButton(self.frame_botoes, text=t('btn_atualizar'), fg_color="#34495e", width=140, command=self.carregar_dados).pack(side="right", padx=10, pady=15)
 
@@ -418,6 +420,32 @@ class FrmFinanceiro(ctk.CTkToplevel):
             messagebox.showinfo("Sucesso", "Estorno lancado com sucesso.", parent=self)
         except Exception as e:
             messagebox.showerror("Erro", f"Nao foi possivel estornar: {e}", parent=self)
+
+    def excluir_lancamento(self):
+        item = self._selecionado()
+        if not item:
+            messagebox.showwarning("Atencao", "Selecione um lancamento para excluir.", parent=self)
+            return
+
+        id_mov, _data, descricao, _tipo, valor_txt, _categoria, _metodo = item
+        valor = parse_monetario(valor_txt)
+        if not messagebox.askyesno(
+            "Excluir lancamento",
+            f"Excluir o lancamento #{id_mov} - {descricao} (R$ {valor:.2f})?\n\n"
+            "Esta acao sera registrada no historico interno.",
+            parent=self,
+        ):
+            return
+
+        try:
+            usuario = getattr(self.master, "usuario", "")
+            excluir_lancamento_financeiro(id_mov, usuario=usuario)
+            self.carregar_dados()
+            messagebox.showinfo("Sucesso", "Lancamento excluido com sucesso.", parent=self)
+        except sqlite3.Error as e:
+            messagebox.showerror("Erro", str(e), parent=self)
+        except Exception as e:
+            messagebox.showerror("Erro", f"Nao foi possivel excluir: {e}", parent=self)
 
     def exportar_csv(self):
         if not self.tab_caixa.get_children():

@@ -6,7 +6,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.gestao_os_repository import alterar_status_orcamento, buscar_dados_orcamento, listar_orcamentos_para_gestao
+from core.gestao_os_repository import (
+    alterar_status_orcamento,
+    arquivar_orcamento_gestao as _arquivar_orcamento_gestao,
+    buscar_dados_orcamento,
+    listar_orcamentos_para_gestao,
+)
 
 
 def listar_orcamentos_gestao() -> list[tuple[Any, ...]]:
@@ -15,6 +20,10 @@ def listar_orcamentos_gestao() -> list[tuple[Any, ...]]:
 
 def mudar_status_orcamento(os_id: int, novo_status: str) -> None:
     alterar_status_orcamento(os_id, novo_status)
+
+
+def arquivar_orcamento_gestao(os_id: int, usuario: str = "") -> int:
+    return _arquivar_orcamento_gestao(os_id, usuario=usuario)
 
 
 def carregar_dados_orcamento(os_id: int) -> dict[str, Any] | None:

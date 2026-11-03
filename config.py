@@ -1450,6 +1450,13 @@ def listar_os_rejeitados_abandono_dashboard(
     }
 
 
+def _normalizar_sha256_atualizacao(valor: str) -> str:
+    digest = str(valor or "").strip().lower()
+    if digest.startswith("sha256:"):
+        digest = digest[7:]
+    return digest if re.fullmatch(r"[0-9a-f]{64}", digest) else ""
+
+
 def obter_info_nova_versao() -> dict:
     """Obtém dados da versão remota (GitHub Releases/Tags + fallback manifesto)."""
     # Limpeza agressiva da URL para evitar caracteres de controle e prefixos indesejados.
@@ -1560,6 +1567,9 @@ def obter_info_nova_versao() -> dict:
                     "versao": versao_norm or str(versao).strip(),
                     "novidades": str(novidades).strip(),
                     "url_download": str(url_download).strip(),
+                    "sha256": _normalizar_sha256_atualizacao(
+                        data_json.get("sha256") or data_json.get("digest") or ""
+                    ),
                 }
                 return {k: v for k, v in saida.items() if v}
         except Exception:
@@ -1601,6 +1611,9 @@ def obter_info_nova_versao() -> dict:
             or CENTRAL_UPDATE_DOWNLOAD_URL
             or ""
         )
+        sha256 = _normalizar_sha256_atualizacao(
+            data_txt.get("sha256") or data_txt.get("digest") or ""
+        )
         versao_norm = _normalizar_versao(str(versao).strip())
         url_download = _corrigir_url_download_por_versao(str(url_download).strip(), versao_norm)
 
@@ -1608,6 +1621,7 @@ def obter_info_nova_versao() -> dict:
             "versao": versao_norm or str(versao).strip(),
             "novidades": str(novidades).strip(),
             "url_download": str(url_download).strip(),
+            "sha256": sha256,
         }
         return {k: v for k, v in saida.items() if v}
 
@@ -1631,7 +1645,7 @@ def obter_info_nova_versao() -> dict:
         url_download = ""
 
         # Prioriza o instalador oficial e evita selecionar o bootstrapper (Atualizador.exe).
-        executaveis: list[tuple[str, str]] = []
+        executaveis: list[tuple[str, str, str]] = []
         for asset in assets:
             if not isinstance(asset, dict):
                 continue
@@ -1641,30 +1655,42 @@ def obter_info_nova_versao() -> dict:
                 continue
             nome_lower = nome.lower()
             if nome_lower.endswith(".exe"):
-                executaveis.append((nome_lower, link))
+                executaveis.append((nome_lower, link, str(asset.get("digest") or "")))
 
         # 1) Nome canônico esperado pela distribuição.
-        for nome, link in executaveis:
+        sha256 = ""
+        for nome, link, digest in executaveis:
             if nome == "oficina_pesca_instalador.exe":
                 url_download = link
+                sha256 = digest
                 break
 
         # 2) Nome versionado do setup gerado pelo Inno Setup.
         if not url_download:
-            for nome, link in executaveis:
+            for nome, link, digest in executaveis:
                 if nome.startswith("setup_oficinapesca_v"):
                     url_download = link
+                    sha256 = digest
                     break
 
         # 3) Qualquer .exe que não seja o bootstrapper.
         if not url_download:
-            for nome, link in executaveis:
+            for nome, link, digest in executaveis:
                 if "atualizador" not in nome:
                     url_download = link
+                    sha256 = digest
                     break
 
+        sha256 = _normalizar_sha256_atualizacao(sha256)
+        if not sha256:
+            return {}
         url_download = _corrigir_url_download_por_versao(url_download or _montar_url_instalador_por_versao(versao), versao)
-        return {"versao": versao, "novidades": novidades, "url_download": url_download}
+        return {
+            "versao": versao,
+            "novidades": novidades,
+            "url_download": url_download,
+            "sha256": sha256,
+        }
 
     def _consultar_tags(headers: dict) -> dict:
         import urllib.request
@@ -1705,37 +1731,27 @@ def obter_info_nova_versao() -> dict:
             "User-Agent": f"OficinaPesca/{APP_VERSION}",
             "Accept": "application/vnd.github+json",
         }
-
-        # 1) Fonte principal: manifesto RAW oficial controlado pelo release.
-        urls_tentativa = _gerar_urls_remotas_oficiais()
-
         ultimo_erro = ""
-        for url in urls_tentativa:
+
+        # A release publicada, incluindo o digest do asset, é a fonte de verdade.
+        try:
+            info = _consultar_release_latest(headers)
+            if info.get("versao") and info.get("sha256"):
+                return info
+        except Exception as e:
+            ultimo_erro = str(e)
+
+        # Manifests só podem anunciar uma atualização quando incluem SHA-256.
+        for url in _gerar_urls_remotas_oficiais():
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": f"OficinaPesca/{APP_VERSION}"})
                 with urllib.request.urlopen(req, timeout=4) as resp:
                     payload = resp.read().decode("utf-8", errors="ignore")
                 info = _parse_manifesto(payload)
-                if info:
+                if info.get("versao") and info.get("sha256"):
                     return info
             except Exception as e:
                 ultimo_erro = str(e)
-
-        # 2) Fallback: GitHub release mais recente.
-        try:
-            info = _consultar_release_latest(headers)
-            if info.get("versao"):
-                return info
-        except Exception:
-            pass
-
-        # 3) Fallback: tags do repositório quando release ainda não estiver completa.
-        try:
-            info = _consultar_tags(headers)
-            if info.get("versao"):
-                return info
-        except Exception:
-            pass
 
         if ultimo_erro:
             print(f"❌ ERRO CRÍTICO NA BUSCA DE ATUALIZAÇÃO: {ultimo_erro}")
@@ -3009,6 +3025,65 @@ def iniciar_sincronizacao_automatica_nuvem() -> tuple[bool, str]:
     return iniciar_sincronizacao_hibrida_nuvem()
 
 
+def _obter_sha256_release_download(versao: str, url_download: str) -> str:
+    import urllib.parse
+
+    versao_normalizada = ".".join(re.findall(r"\d+", str(versao or "")))
+    if not re.fullmatch(r"\d+(?:\.\d+){2,}", versao_normalizada):
+        raise ValueError("Versão alvo inválida para validar o instalador.")
+
+    url = urllib.parse.urlsplit(str(url_download or "").strip())
+    prefixo_release = (
+        f"/frscomercial6-eng/oficina-pesca-updates/releases/download/"
+        f"v{versao_normalizada}/"
+    )
+    if (
+        url.scheme.lower() != "https"
+        or (url.hostname or "").lower() != "github.com"
+        or not url.path.lower().startswith(prefixo_release.lower())
+    ):
+        raise ValueError("O instalador não aponta para a release oficial esperada.")
+
+    nome_asset = url.path.rsplit("/", 1)[-1]
+    api_url = (
+        "https://api.github.com/repos/frscomercial6-eng/"
+        f"oficina-pesca-updates/releases/tags/v{versao_normalizada}"
+    )
+    request = urllib.request.Request(
+        api_url,
+        headers={
+            "User-Agent": f"OficinaPesca/{APP_VERSION}",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        release = json.loads(response.read().decode("utf-8", errors="strict"))
+
+    versao_release = ".".join(re.findall(r"\d+", str(release.get("tag_name") or "")))
+    if versao_release != versao_normalizada:
+        raise ValueError("A tag da release consultada não corresponde à versão alvo.")
+
+    for asset in release.get("assets", []):
+        if not isinstance(asset, dict):
+            continue
+        if str(asset.get("name") or "").casefold() != nome_asset.casefold():
+            continue
+        asset_url = urllib.parse.urlsplit(
+            str(asset.get("browser_download_url") or "").strip()
+        )
+        if (
+            (asset_url.hostname or "").lower() != "github.com"
+            or asset_url.path != url.path
+        ):
+            raise ValueError("O asset da release não corresponde ao URL do instalador.")
+        digest = _normalizar_sha256_atualizacao(str(asset.get("digest") or ""))
+        if not digest:
+            raise ValueError("A release não publica um SHA-256 válido para o instalador.")
+        return digest
+
+    raise ValueError("O instalador não foi encontrado entre os assets da release oficial.")
+
+
 def executar_atualizacao(
     url_download: str,
     app_executavel: str = "",
@@ -3065,6 +3140,16 @@ def executar_atualizacao(
         return False, f"URL de download inválida. Log: {update_error_log}"
 
     log_upd = get_logger("update-download")
+    if not alvo:
+        match = re.search(r"/releases/download/v(\d+(?:\.\d+)+)/", url, re.IGNORECASE)
+        alvo = match.group(1) if match else ""
+    try:
+        sha256_esperado = _obter_sha256_release_download(alvo, url)
+    except Exception as exc:
+        mensagem = f"Falha ao validar a release e o SHA-256 do instalador: {exc}"
+        log_upd.error("[update] %s", mensagem)
+        _registrar_erro_update(mensagem, exc)
+        return False, f"{mensagem} Log: {update_error_log}"
 
     try:
         import urllib.parse
@@ -3157,6 +3242,25 @@ def executar_atualizacao(
             _registrar_erro_update(f"Assinatura PE inválida para arquivo baixado: {destino_part}")
             return False, f"Falha de integridade no download (executável corrompido). Log: {update_error_log}"
 
+        hash_hex = sha.hexdigest()
+        if hash_hex.lower() != sha256_esperado:
+            log_upd.error(
+                "[update] SHA-256 divergente: esperado=%s recebido=%s",
+                sha256_esperado,
+                hash_hex,
+            )
+            _registrar_erro_update(
+                f"SHA-256 divergente: esperado={sha256_esperado}, recebido={hash_hex}, url={url}"
+            )
+            try:
+                os.remove(destino_part)
+            except OSError as exc:
+                _registrar_erro_update(f"Falha ao remover instalador com hash inválido: {destino_part}", exc)
+            return False, (
+                f"Falha de integridade: o SHA-256 do instalador não corresponde ao asset oficial. "
+                f"Log: {update_error_log}"
+            )
+
         if os.path.exists(destino):
             try:
                 os.remove(destino)
@@ -3165,7 +3269,6 @@ def executar_atualizacao(
                 return False, f"Falha ao substituir arquivo de atualização. Verifique permissões. Log: {update_error_log}"
 
         os.replace(destino_part, destino)
-        hash_hex = sha.hexdigest()
         log_upd.info("[update] Download concluído com integridade: arquivo=%s bytes=%s sha256=%s", destino, total, hash_hex)
         if callable(progresso_cb):
             try:
@@ -3178,6 +3281,7 @@ def executar_atualizacao(
             "arquivo": destino,
             "bytes": total,
             "sha256": hash_hex,
+            "sha256_release": sha256_esperado,
             "versao_local": APP_VERSION,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
@@ -3407,37 +3511,61 @@ def validate_password(password: str) -> tuple[bool, str]:
 
 def inicializar_banco():
     # --- VERIFICAÇÃO DE INTEGRIDADE (RESGATE DE BANCO CORROMPIDO) ---
+    banco_corrompido_quarentenado = ""
     if os.path.exists(CAMINHO_BANCO):
+        conn_test = sqlite3.connect(CAMINHO_BANCO, timeout=2)
+        erro_integridade = None
         try:
-            # Tenta uma conexão rápida e executa o check de integridade
-            with sqlite3.connect(CAMINHO_BANCO, timeout=2) as conn_test:
-                cursor_test = conn_test.cursor()
-                cursor_test.execute("PRAGMA integrity_check")
-                res = cursor_test.fetchone()
-                if not res or res[0] != "ok":
-                    raise sqlite3.DatabaseError("Database is malformed")
-        except (sqlite3.DatabaseError, sqlite3.OperationalError):
-            logger_repair = get_logger("db_repair")
-            logger_repair.error("Detectada corrupção no banco de dados em %s. Iniciando resgate.", CAMINHO_BANCO)
-            
-            # Renomeia o arquivo atual para backup conforme solicitado
-            diretorio_base = os.path.dirname(CAMINHO_BANCO)
-            caminho_corrompido = os.path.join(diretorio_base, 'oficina_corrompido.db')
-            
-            try:
-                if os.path.exists(caminho_corrompido):
-                    os.remove(caminho_corrompido) # Remove backup anterior para permitir a renomeação
-                os.rename(CAMINHO_BANCO, caminho_corrompido)
-                logger_repair.info(f"Sucesso: Arquivo corrompido isolado em {caminho_corrompido}")
-            except Exception as e:
-                logger_repair.exception(f"Falha crítica ao renomear arquivo corrompido: {e}")
+            cursor_test = conn_test.cursor()
+            cursor_test.execute("PRAGMA integrity_check")
+            res = cursor_test.fetchone()
+            if not res or res[0] != "ok":
+                raise sqlite3.DatabaseError("Database is malformed")
+        except (sqlite3.DatabaseError, sqlite3.OperationalError) as exc:
+            erro_integridade = exc
+        finally:
+            conn_test.close()
 
+        if erro_integridade is not None:
+            logger_repair = get_logger("db_repair")
+            logger_repair.error(
+                "Detectada corrupção no banco de dados em %s. Iniciando resgate: %s",
+                CAMINHO_BANCO,
+                erro_integridade,
+            )
+
+            diretorio_base = os.path.dirname(CAMINHO_BANCO)
+            nome_base = f"oficina_corrompido_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            caminho_corrompido = os.path.join(diretorio_base, f"{nome_base}.db")
+            sufixo = 1
+            while os.path.exists(caminho_corrompido):
+                caminho_corrompido = os.path.join(diretorio_base, f"{nome_base}_{sufixo}.db")
+                sufixo += 1
+
+            try:
+                os.rename(CAMINHO_BANCO, caminho_corrompido)
+                banco_corrompido_quarentenado = caminho_corrompido
+                logger_repair.info("Arquivo corrompido preservado em %s", caminho_corrompido)
+            except OSError as exc:
+                logger_repair.exception("Falha ao preservar o banco corrompido.")
+                raise sqlite3.DatabaseError(
+                    f"Não foi possível preservar o banco corrompido em '{caminho_corrompido}'."
+                ) from exc
+
+    ok_restore = False
     try:
         ok_restore, msg_restore = _restaurar_banco_por_backup_se_necessario()
         if ok_restore:
             get_logger("db").info(msg_restore)
     except Exception as e:
         get_logger("db").warning("Falha na restauraÃ§Ã£o automÃ¡tica do banco: %s", e)
+
+    if banco_corrompido_quarentenado and not ok_restore:
+        raise sqlite3.DatabaseError(
+            "O banco estava corrompido e foi preservado em "
+            f"'{banco_corrompido_quarentenado}', mas nenhum backup válido foi restaurado. "
+            "A inicialização foi interrompida para evitar criar um banco vazio sobre os dados."
+        )
 
     os.makedirs(os.path.dirname(CAMINHO_BANCO), exist_ok=True)
     conn = sqlite3.connect(CAMINHO_BANCO)
@@ -3548,6 +3676,7 @@ def inicializar_banco():
         CREATE TABLE IF NOT EXISTS orcamentos_aguardo (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             cliente TEXT,
+            telefone_cliente_whatsapp TEXT,
             equipamento TEXT,
             defeito TEXT,
             valor_total REAL,
@@ -3566,6 +3695,10 @@ def inicializar_banco():
     # Garantir migraÃ§Ã£o do schema existente para adicionar dados_adicionais
     cursor.execute("PRAGMA table_info(orcamentos_aguardo)")
     colunas = [row[1] for row in cursor.fetchall()]
+    if 'telefone_cliente_whatsapp' not in colunas:
+        cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN telefone_cliente_whatsapp TEXT")
+    if 'resumo_equipamento_defeito' not in colunas:
+        cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN resumo_equipamento_defeito TEXT")
     if 'dados_adicionais' not in colunas:
         cursor.execute("ALTER TABLE orcamentos_aguardo ADD COLUMN dados_adicionais TEXT")
     if 'status_entrega' not in colunas:
@@ -3815,11 +3948,9 @@ def _validar_licenca_ed25519(chave: str):
     if _ok and isinstance(_pay, dict):
         _pay = dict(_pay)
         _plano = str(_pay.get("plano") or "")
-        _val = (
-            "PERMANENTE"
-            if _eh_permanente_oficina(str(_pay.get("expires_at") or ""))
-            else str(_pay.get("expires_at") or "")
-        )
+        _expires_at = str(_pay.get("expires_at") or "")
+        _val = "PERMANENTE" if _eh_permanente_oficina(_expires_at) else _expires_at[:10]
+        _pay["val"] = _val
         _pay["tipo"] = _normalizar_tipo_licenca(_plano, _val)
     return _ok, _msg, _pay
 
@@ -4241,11 +4372,10 @@ def publicar_licenca_supabase(
     tipo: str = "",
     plano: str = "",
 ) -> tuple[bool, str]:
-    """Publica a licença OFICIAL no Supabase.
+    """Publica uma licença no Supabase para integrações legadas.
 
-    Chamado estritamente na ativação/compra da licença (via ativar_licenca).
-    Usuários em trial não possuem chave válida e, portanto, nunca geram
-    registros ou estruturas na nuvem.
+    A ativação Desktop não chama esta função: ela valida e persiste a licença
+    localmente, sem depender de configuração ou disponibilidade do Supabase.
     """
     chave_limpa = _normalizar_texto_chave_licenca(chave)
     if not chave_limpa:
@@ -4414,7 +4544,9 @@ class ResultadoSyncLicenca(dict):
         return str(self.get("msg") or "")
 
 def sincronizar_licenca_supabase_pendente(forcar: bool = False) -> ResultadoSyncLicenca:
-    """Fase 1 (v1.0.63): sincroniza a licença ativa com o Supabase se pendente.
+    """Sincroniza licença com Supabase para consumidores legados explícitos.
+
+    Não é chamada pela inicialização nem pelo fluxo de ativação Desktop.
 
     Pendência = licenca_supabase_sync != '1'
               OU chave ativa divergente de licenca_sync_ultima_chave
@@ -4694,6 +4826,7 @@ def diagnosticar_chave_licenca(chave: str) -> dict:
 
 def ativar_licenca(chave: str):
     chave_limpa = _normalizar_texto_chave_licenca(chave)
+    chave_ed25519 = chave_limpa.startswith("{") or "FRS-A-" in chave_limpa.upper()
     valida, msg, payload = validar_chave_licenca(chave_limpa)
     if not valida:
         return False, msg
@@ -4702,6 +4835,15 @@ def ativar_licenca(chave: str):
     validade = str((payload or {}).get("val", "PERMANENTE"))
     tipo = str((payload or {}).get("tipo", "")).upper().strip()
     tipo = _normalizar_tipo_licenca(tipo, validade)
+
+    if chave_ed25519:
+        try:
+            from licensing import LicenseStorage
+            from licensing.errors import LicenseError
+
+            LicenseStorage(_caminho_dados_licenca()).save_license(chave_limpa)
+        except (ImportError, LicenseError) as exc:
+            return False, f"Licença validada, mas falhou ao persistir no armazenamento do usuário: {exc}"
 
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -4726,34 +4868,13 @@ def ativar_licenca(chave: str):
         )
         conn.commit()
 
-    try:
-        caminho_key = os.path.join(DIRETORIO_ATUAL, "licenca.key")
-        with open(caminho_key, "w", encoding="utf-8") as f:
-            f.write(chave_limpa)
-    except Exception as exc:
-        return False, f"Licença validada, mas falhou ao gravar arquivo licenca.key: {exc}"
-
-    try:
-        ok_supabase, msg_supabase = publicar_licenca_supabase(
-            chave_limpa,
-            email=obter_user_id_token_padrao(),
-            cliente=cliente,
-            tipo=tipo,
-            plano=tipo,
-        )
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_supabase_sync', ?)",
-                ("1" if ok_supabase else "0",),
-            )
-            cursor.execute(
-                "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('licenca_supabase_sync_msg', ?)",
-                (msg_supabase,),
-            )
-            conn.commit()
-    except Exception:
-        pass
+    if not chave_ed25519:
+        try:
+            caminho_key = os.path.join(DIRETORIO_ATUAL, "licenca.key")
+            with open(caminho_key, "w", encoding="utf-8") as f:
+                f.write(chave_limpa)
+        except Exception as exc:
+            return False, f"Licença validada, mas falhou ao gravar arquivo licenca.key: {exc}"
 
     return True, "Licenca ativada com sucesso."
 
@@ -4796,7 +4917,21 @@ def obter_status_licenca():
 
     Observação: o fallback para trial é tratado em obter_status_acesso_centralizado().
     """
-    chave, cliente_arquivo, validade_arquivo, _erro_arquivo = _extrair_licenca_de_arquivo()
+    try:
+        from licensing import LicenseStorage
+        from licensing.errors import LicenseError
+
+        chave = LicenseStorage(_caminho_dados_licenca()).load_license() or ""
+    except ImportError:
+        chave = ""
+    except LicenseError as exc:
+        return False, f"Falha ao carregar licença local: {exc}", "", "INVALIDA"
+
+    if chave:
+        cliente_arquivo, validade_arquivo = "", ""
+    else:
+        chave, cliente_arquivo, validade_arquivo, _erro_arquivo = _extrair_licenca_de_arquivo()
+
     if chave:
         ok_chave, msg_chave, payload_chave = validar_chave_licenca(chave)
         if ok_chave:
@@ -5012,6 +5147,15 @@ def obter_tipo_licenca() -> str:
 
 
 def obter_chave_licenca_ativa() -> str:
+    try:
+        from licensing import LicenseStorage
+
+        chave = LicenseStorage(_caminho_dados_licenca()).load_license()
+        if chave:
+            return chave
+    except ImportError:
+        pass
+
     chave, _cliente, _validade, _erro = _extrair_licenca_de_arquivo()
     return chave
 

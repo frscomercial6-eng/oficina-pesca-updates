@@ -1208,17 +1208,25 @@ class FrmOS(ctk.CTkToplevel):
         self.after(1000, self._modo_escuta_pdf_clipboard)
 
     def _modo_escuta_pdf_clipboard(self):
-        def _verificar():
-            try:
-                import pyperclip
-                link = pyperclip.paste()
-                if link and link.lower().endswith('.pdf') and link.startswith('http'):
-                    # Modo teste síncrono: execução direta sem thread.
-                    self._salvar_pdf_silencioso(link)
-            except Exception as e:
-                logger.info(f"Modo Escuta: erro ao ler clipboard: {e}")
-            self.after(2000, self._modo_escuta_pdf_clipboard)
-        _verificar()
+        try:
+            link = str(self.clipboard_get() or "").strip()
+        except tk.TclError:
+            link = ""
+        except Exception as exc:
+            if not getattr(self, "_modo_escuta_erro_clipboard_reportado", False):
+                logger.warning("Modo Escuta: falha ao ler clipboard: %s", exc)
+                self._modo_escuta_erro_clipboard_reportado = True
+            self.after(10000, self._modo_escuta_pdf_clipboard)
+            return
+
+        self._modo_escuta_erro_clipboard_reportado = False
+        ultimo_link = getattr(self, "_modo_escuta_ultimo_link", None)
+        if link != ultimo_link:
+            self._modo_escuta_ultimo_link = link
+            if link.lower().endswith(".pdf") and link.lower().startswith(("http://", "https://")):
+                self._salvar_pdf_silencioso(link)
+
+        self.after(2000, self._modo_escuta_pdf_clipboard)
 
     def _salvar_pdf_silencioso(self, link):
         try:

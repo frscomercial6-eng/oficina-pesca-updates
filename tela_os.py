@@ -4,6 +4,7 @@ from typing import Optional, List, Dict, Any
 import customtkinter as ctk
 import tkinter as tk
 import sqlite3
+import math
 import os
 import json
 import re
@@ -158,6 +159,7 @@ def salvar_os_completa(
     status: str = STATUS_ORCAMENTO,
     forma_pagamento: str | None = None,
     on_save_callback=None,
+    pagamentos: list[tuple[str, float]] | None = None,
 ):
     return salvar_os_completa_service(
         os_id=os_id,
@@ -168,6 +170,7 @@ def salvar_os_completa(
         status=status,
         forma_pagamento=forma_pagamento,
         on_save_callback=on_save_callback,
+        pagamentos=pagamentos,
     )
 
 
@@ -192,11 +195,11 @@ class FrmOS(ctk.CTkToplevel):
         except Exception:
             return False
 
-    def _selecionar_pagamento_simples(self):
-        """Abre janela simples de pagamento e retorna {'condicao','metodo'} ou None."""
+    def _selecionar_pagamento_simples(self, valor_total=None):
+        """Seleciona a condição e as parcelas recebidas por forma de pagamento."""
         dialogo = ctk.CTkToplevel(self)
         dialogo.title(t('titulo_pagamento_os'))
-        dialogo.geometry("460x420")
+        dialogo.geometry("560x560")
         dialogo.resizable(False, False)
         dialogo.attributes("-topmost", True)
         dialogo.configure(fg_color="#161b22")
@@ -204,7 +207,8 @@ class FrmOS(ctk.CTkToplevel):
         dialogo.focus_force()
         dialogo.lift()
 
-        resultado = {"condicao": None, "metodo": None}
+        resultado = {"condicao": None, "pagamentos": [], "metodo": None, "confirmado": False}
+        valor_esperado = {"centavos": None}
 
         ctk.CTkLabel(
             dialogo,
@@ -220,73 +224,97 @@ class FrmOS(ctk.CTkToplevel):
         lbl_cond = ctk.CTkLabel(dialogo, text=t("ui_condi_o_n_o_selecionada"), text_color="#95a5a6")
         lbl_cond.pack(anchor="w", padx=20, pady=(0, 10))
 
+        def ler_parcelas():
+            parcelas = []
+            for metodo, entrada in entradas_metodos.items():
+                texto = entrada.get().strip()
+                if not texto:
+                    continue
+                valor = OSCalculator.parse_monetario(texto, default=float("nan"))
+                if not math.isfinite(valor) or valor < 0:
+                    return [], False
+                centavos = int(round(valor * 100))
+                if centavos > 0:
+                    parcelas.append((metodo, centavos / 100))
+            return parcelas, True
+
+        def atualizar_estado_confirmar():
+            parcelas, valores_validos = ler_parcelas()
+            soma_centavos = sum(int(round(valor * 100)) for _, valor in parcelas)
+            esperado = valor_esperado["centavos"]
+            valido = bool(resultado["condicao"] and valores_validos)
+            if esperado is not None:
+                valido = valido and soma_centavos == esperado
+            else:
+                valido = valido and bool(parcelas)
+            btn_confirmar.configure(state="normal" if valido else "disabled")
+
         def escolher_condicao(valor, texto):
             resultado["condicao"] = valor
             lbl_cond.configure(text=f"Condição: {texto}", text_color="#2ecc71")
+            if valor_total is not None:
+                if valor == "100%_total":
+                    esperado = OSCalculator.parse_monetario(valor_total)
+                elif valor == "50%_sinal":
+                    esperado = OSCalculator.calcular_sinal(valor_total)
+                else:
+                    esperado = 0.0
+                valor_esperado["centavos"] = int(round(esperado * 100))
+                if esperado > 0:
+                    lbl_total.configure(
+                        text=f"Valor a receber: R$ {esperado:.2f}".replace(".", ",")
+                    )
+                else:
+                    lbl_total.configure(text="O pagamento será registrado na entrega da O.S.")
+                parcelas, _valores_validos = ler_parcelas()
+                if esperado > 0 and not parcelas:
+                    entradas_metodos["PIX"].delete(0, "end")
+                    entradas_metodos["PIX"].insert(0, f"{esperado:.2f}".replace(".", ","))
             atualizar_estado_confirmar()
 
         ctk.CTkButton(f_cond, text=t("ui_50_entrada"), width=130, command=lambda: escolher_condicao("50%_sinal", "50% entrada")).pack(side="left", padx=4)
         ctk.CTkButton(f_cond, text=t("ui_100_vista"), width=130, command=lambda: escolher_condicao("100%_total", "100% à vista")).pack(side="left", padx=4)
         ctk.CTkButton(f_cond, text=t("ui_100_na_entrega"), width=130, command=lambda: escolher_condicao("100%_entrega", "100% na entrega")).pack(side="left", padx=4)
 
-        ctk.CTkLabel(dialogo, text=t("ui_forma_de_pagamento"), font=("Arial", 12, "bold"), text_color="#ecf0f1").pack(anchor="w", padx=20) #
-        f_met = ctk.CTkFrame(dialogo, fg_color="#161b22") #
-        f_met.pack(fill="x", padx=20, pady=(4, 10)) #
-        
-        lbl_met = ctk.CTkLabel(dialogo, text=t("ui_forma_n_o_selecionada"), text_color="#95a5a6")
-        lbl_met.pack(anchor="w", padx=20, pady=(0, 14))
+        lbl_total = ctk.CTkLabel(
+            dialogo,
+            text="Informe o valor recebido em cada forma de pagamento.",
+            font=("Arial", 12, "bold"),
+            text_color="#ecf0f1",
+        )
+        lbl_total.pack(anchor="w", padx=20, pady=(6, 4))
 
-        def escolher_metodo(valor):
-            resultado["metodo"] = valor
-            lbl_met.configure(text=f"Forma: {valor}", text_color="#2ecc71")
-            atualizar_estado_confirmar()
-
-        ctk.CTkButton(f_met, text=t("ui_pix"), width=130, command=lambda: escolher_metodo("PIX")).pack(side="left", padx=4)
-        ctk.CTkButton(f_met, text=t("ui_cart_o"), width=130, command=lambda: escolher_metodo("CARTÃO")).pack(side="left", padx=4)
-        ctk.CTkButton(f_met, text=t("ui_dinheiro"), width=130, command=lambda: escolher_metodo("DINHEIRO")).pack(side="left", padx=4)
+        frame_parcelas = ctk.CTkFrame(dialogo, fg_color="#1f2a38")
+        frame_parcelas.pack(fill="x", padx=20, pady=(4, 12))
+        entradas_metodos = {}
+        for linha, metodo in enumerate(("PIX", "DINHEIRO", "CARTÃO")):
+            ctk.CTkLabel(frame_parcelas, text=metodo, width=120, anchor="w").grid(
+                row=linha, column=0, padx=12, pady=8, sticky="w"
+            )
+            entrada = ctk.CTkEntry(frame_parcelas, width=180, placeholder_text="0,00")
+            entrada.insert(0, "0,00")
+            entrada.grid(row=linha, column=1, padx=12, pady=8, sticky="ew")
+            entrada.bind("<KeyRelease>", lambda _event: atualizar_estado_confirmar())
+            entradas_metodos[metodo] = entrada
+        frame_parcelas.grid_columnconfigure(1, weight=1)
 
         botoes = ctk.CTkFrame(dialogo, fg_color="#161b22")
         botoes.pack(fill="x", padx=20, pady=(4, 10))
 
         def confirmar():
+            resultado["pagamentos"] = ler_parcelas()[0]
+            resultado["metodo"] = resultado["pagamentos"][0][0] if len(resultado["pagamentos"]) == 1 else "MISTO"
+            resultado["confirmado"] = True
             dialogo.destroy()
 
         btn_confirmar = ctk.CTkButton(botoes, text=t("btn_confirmar"), fg_color="#27ae60", state="disabled", command=confirmar)
         btn_confirmar.pack(side="left", padx=(0, 8), fill="x", expand=True)
         ctk.CTkButton(botoes, text=t("btn_cancelar"), fg_color="#7f8c8d", command=dialogo.destroy).pack(side="left", fill="x", expand=True)
 
-        def atualizar_estado_confirmar():
-            if resultado["condicao"] and resultado["metodo"]:
-                btn_confirmar.configure(state="normal")
-
         dialogo.wait_window()
-        if resultado["condicao"] and resultado["metodo"]:
+        if resultado["confirmado"]:
             return resultado
         return None
-
-    def _lancar_financeiro_pos_aprovacao(self, total, cliente, forma_pagamento, metodo_pagamento):
-        """Lança no financeiro apenas quando há recebimento imediato."""
-        if forma_pagamento == "100%_entrega":
-            return
-
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM fluxo_caixa WHERE descricao LIKE ?", (f"%O.S. {self.num_oc}%",))
-            if cursor.fetchone() is not None:
-                return
-
-            valor = total if forma_pagamento == "100%_total" else OSCalculator.calcular_sinal(total)
-            descricao = (
-                f"O.S. {self.num_oc} - {cliente} (100% TOTAL)"
-                if forma_pagamento == "100%_total"
-                else f"SINAL O.S. {self.num_oc} - {cliente} (50% ENTRADA)"
-            )
-            cursor.execute(
-                "INSERT INTO fluxo_caixa (data, descricao, tipo, valor, categoria, metodo_pagamento) VALUES (?,?,?,?,?,?)",
-                (datetime.now().strftime("%d/%m/%Y"), descricao, "ENTRADA", valor, "ORDEM DE SERVIÇO", metodo_pagamento),
-            )
-            conn.commit()
-
 
     def __init__(self, master, id_orc=None, on_save_callback=None, dados_precarregados=None):
         # if psutil is not None:
@@ -1007,7 +1035,7 @@ class FrmOS(ctk.CTkToplevel):
             return "100%_entrega"
         return "50%_sinal"
 
-    def salvar_documento(self, status='AGUARDANDO', forma_de_pagamento=None):
+    def salvar_documento(self, status='AGUARDANDO', forma_de_pagamento=None, pagamentos_recebidos=None):
         """Persiste os dados da O.S. no banco local e sincroniza remotamente."""
         inicio_salvamento = time.perf_counter()
         try:
@@ -1040,6 +1068,7 @@ class FrmOS(ctk.CTkToplevel):
                 status=status,
                 forma_pagamento=forma_pagamento,
                 on_save_callback=self.on_save_callback,
+                pagamentos=pagamentos_recebidos,
             )
             
             self.atualizar_identificacao_documento(dados["status"])
@@ -1197,17 +1226,25 @@ class FrmOS(ctk.CTkToplevel):
         self.after(1000, self._modo_escuta_pdf_clipboard)
 
     def _modo_escuta_pdf_clipboard(self):
-        def _verificar():
-            try:
-                import pyperclip
-                link = pyperclip.paste()
-                if link and link.lower().endswith('.pdf') and link.startswith('http'):
-                    # Modo teste síncrono: execução direta sem thread.
-                    self._salvar_pdf_silencioso(link)
-            except Exception as e:
-                logger.info(f"Modo Escuta: erro ao ler clipboard: {e}")
-            self.after(2000, self._modo_escuta_pdf_clipboard)
-        _verificar()
+        try:
+            link = str(self.clipboard_get() or "").strip()
+        except tk.TclError:
+            link = ""
+        except Exception as exc:
+            if not getattr(self, "_modo_escuta_erro_clipboard_reportado", False):
+                logger.warning("Modo Escuta: falha ao ler clipboard: %s", exc)
+                self._modo_escuta_erro_clipboard_reportado = True
+            self.after(10000, self._modo_escuta_pdf_clipboard)
+            return
+
+        self._modo_escuta_erro_clipboard_reportado = False
+        ultimo_link = getattr(self, "_modo_escuta_ultimo_link", None)
+        if link != ultimo_link:
+            self._modo_escuta_ultimo_link = link
+            if link.lower().endswith(".pdf") and link.lower().startswith(("http://", "https://")):
+                self._salvar_pdf_silencioso(link)
+
+        self.after(2000, self._modo_escuta_pdf_clipboard)
 
     def _salvar_pdf_silencioso(self, link):
         try:
@@ -3436,18 +3473,20 @@ class FrmOS(ctk.CTkToplevel):
     def aprovar_os(self, total, cliente):
         """Sequência de Aprovação Sagrada: Salva -> PDF Original (Reportlab) -> Financeiro."""
         try:
-            escolha = self._selecionar_pagamento_simples()
+            escolha = self._selecionar_pagamento_simples(total)
             if not escolha:
                 return
 
             forma_pagamento = self._normalizar_forma_pagamento(escolha.get("condicao"))
-            metodo_pagamento = str(escolha.get("metodo") or "PIX")
             self.var_pagamento.set(forma_pagamento)
-            self.salvar_documento(status='APROVADO', forma_de_pagamento=forma_pagamento)
-            # Gera PDF original com logotipos e termos (Reportlab)
-            pdf_gerado = self.gerar_documento_pdf(eh_os=True, forma_de_pagamento=forma_pagamento)
-            if pdf_gerado:
-                self._lancar_financeiro_pos_aprovacao(total, cliente, forma_pagamento, metodo_pagamento)
+            dados_salvos = self.salvar_documento(
+                status='APROVADO',
+                forma_de_pagamento=forma_pagamento,
+                pagamentos_recebidos=escolha["pagamentos"],
+            )
+            if not dados_salvos:
+                return
+            self.gerar_documento_pdf(eh_os=True, forma_de_pagamento=forma_pagamento)
         except Exception as e:
             messagebox.showerror(t('msg_titulo_aprovacao'), t('msg_erro_aprovar_os').format(erro=e))
 

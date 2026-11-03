@@ -7,9 +7,14 @@ import re
 from tkinter import messagebox, ttk
 from datetime import datetime
 from config import CAMINHO_BANCO, inicializar_banco, get_db_connection, enviar_registro_os_central_silencioso, get_logger
-from util_recibo import gerar_recibo_entrega
+from util_recibo import salvar_recibo_com_dialogo
 from status_os import normalizar_status_orcamento, is_status_aguardando_orcamento, is_status_orcamento
-from core.gestao_os_service import carregar_dados_orcamento, listar_orcamentos_gestao, mudar_status_orcamento
+from core.gestao_os_service import (
+    arquivar_orcamento_gestao,
+    carregar_dados_orcamento,
+    listar_orcamentos_gestao,
+    mudar_status_orcamento,
+)
 from core.i18n import t  # NOVO: import do sistema de i18n
 
 import tela_os
@@ -72,6 +77,10 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
         ctk.CTkButton(
             self.f_botoes, text=t("ui_abrir_o_s"), fg_color="#2980b9", width=140,
             command=self.abrir_orcamento_selecionado
+        ).pack(side="left", padx=(0, 10), pady=10)
+        ctk.CTkButton(
+            self.f_botoes, text=t("btn_excluir"), fg_color="#c0392b", hover_color="#922b21",
+            width=130, command=self.excluir_os_selecionada
         ).pack(side="left", padx=(0, 10), pady=10)
         self.lbl_info = ctk.CTkLabel(self.f_botoes, text=t("ui_selecione_um_or_amento"), justify="left",
                                      font=("Arial", 12), text_color="#bdc3c7")
@@ -366,10 +375,21 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
 
         num_os = int(self.dados_os[0])
         status_atual = str(self.dados_os[7] or "").upper().strip()
-        if status_atual not in {"FINALIZADO", "APROVADO", "ENTREGUE"}:
+        if status_atual == "FINALIZADO":
+            abrir_recibos = getattr(self.master, "gerar_recibo_menu_lateral", None)
+            if callable(abrir_recibos):
+                abrir_recibos()
+                return
             messagebox.showwarning(
                 "Recibo",
-                "O recibo de entrega só pode ser gerado para O.S. FINALIZADA/APROVADA/ENTREGUE.",
+                "Use a tela de Recibos para confirmar o recebimento e a entrega antes de salvar o PDF.",
+                parent=self,
+            )
+            return
+        if status_atual != "ENTREGUE":
+            messagebox.showwarning(
+                "Recibo",
+                "Confirme a finalização técnica e a entrega antes de gerar o recibo.",
                 parent=self,
             )
             return
@@ -377,19 +397,51 @@ class FrmGestaoOrcamentos(ctk.CTkToplevel):
         confirmar = messagebox.askyesno(
             "Gerar recibo",
             f"Gerar recibo de entrega da O.S. {num_os}?\n\n"
-            "Ao gerar, o status será atualizado para ENTREGUE e o financeiro será lançado automaticamente.",
+            "A entrega já está concluída; esta ação somente salva uma cópia do recibo.",
             parent=self,
         )
         if not confirmar:
             return
 
         try:
-            caminho_pdf = gerar_recibo_entrega(self.dados_os)
-            messagebox.showinfo("Recibo", f"Recibo gerado com sucesso:\n{caminho_pdf}", parent=self)
-            self.buscar_os()
-            self._notificar_dashboard()
+            caminho_pdf = salvar_recibo_com_dialogo(self, self.dados_os)
+            if caminho_pdf:
+                messagebox.showinfo("Recibo", f"Recibo salvo em:\n{caminho_pdf}", parent=self)
         except Exception as e:
             messagebox.showerror("Recibo", f"Erro ao gerar recibo: {e}", parent=self)
+
+    def excluir_os_selecionada(self):
+        selecao = self.tab.selection()
+        if not selecao:
+            messagebox.showwarning("Atenção", "Selecione uma O.S. para excluir.", parent=self)
+            return
+
+        item = self.tab.item(selecao[0], "values")
+        os_id = int(item[0])
+        cliente = str(item[1] or "")
+        if not messagebox.askyesno(
+            "Arquivar O.S.",
+            f"Arquivar a O.S. {os_id} ({cliente})?\n\n"
+            "A O.S. sairá da lista operacional. Os dados e lançamentos financeiros vinculados serão preservados no histórico.",
+            parent=self,
+        ):
+            return
+
+        try:
+            movimentos_preservados = arquivar_orcamento_gestao(
+                os_id,
+                usuario=getattr(self.master, "usuario", ""),
+            )
+            self.buscar_os()
+            self._notificar_dashboard()
+            messagebox.showinfo(
+                "O.S. arquivada",
+                f"A O.S. {os_id} foi arquivada. "
+                f"{movimentos_preservados} registro(s) financeiro(s) vinculado(s) foram preservados.",
+                parent=self,
+            )
+        except Exception as exc:
+            messagebox.showerror("Erro", f"Não foi possível arquivar a O.S. {os_id}: {exc}", parent=self)
 
     def selecionar_orcamento(self, event=None):
         selecao = self.tab.selection()

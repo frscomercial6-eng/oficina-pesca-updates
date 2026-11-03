@@ -67,7 +67,15 @@ def montar_payload_os(
     resumo_equipamento_defeito = f"{str(primeiro_item.get('equipamento', '') or '').strip().upper()} - {str(primeiro_item.get('defeito', '') or '').strip().upper()}".strip(" -")
     status_final = normalizar_status_orcamento(status)
 
-    sinal = OSCalculator.calcular_sinal_por_forma(total_os, forma_pagamento) if status_final == "APROVADO" else 0.0
+    forma_normalizada = str(forma_pagamento or "").strip().lower()
+    if status_final != "APROVADO":
+        sinal = 0.0
+    elif forma_normalizada in {"100%_total", "100_total", "100%"}:
+        sinal = float(total_os)
+    elif forma_normalizada == "vista":
+        sinal = OSCalculator.calcular_sinal(total_os)
+    else:
+        sinal = OSCalculator.calcular_sinal_por_forma(total_os, forma_pagamento)
     saldo = float(total_os - sinal)
 
     return {
@@ -109,6 +117,7 @@ def salvar_os_completa(
     status: str = STATUS_ORCAMENTO,
     forma_pagamento: str | None = None,
     on_save_callback=None,
+    pagamentos: list[tuple[str, float]] | None = None,
 ) -> dict[str, Any]:
     """Salva uma O.S. completa usando a camada de serviço isolada."""
     dados = montar_payload_os(
@@ -121,7 +130,23 @@ def salvar_os_completa(
         forma_pagamento=forma_pagamento,
     )
 
-    salvar_orcamento_aguardo_oficial(os_id, dados, sinal=dados["sinal"], saldo=dados["saldo"])
+    valor_recebido = 0.0
+    forma_normalizada = str(forma_pagamento or "").strip().lower()
+    if forma_normalizada in {"100%_total", "100_total", "100%"}:
+        valor_recebido = float(dados["total"])
+    elif forma_normalizada == "vista":
+        valor_recebido = float(dados["sinal"])
+    elif forma_normalizada not in {"100%_entrega", "entrega"}:
+        valor_recebido = float(dados["sinal"])
+
+    salvar_orcamento_aguardo_oficial(
+        os_id,
+        dados,
+        sinal=dados["sinal"],
+        saldo=dados["saldo"],
+        pagamentos=pagamentos,
+        valor_recebido=valor_recebido,
+    )
 
     try:
         enviar_registro_os_central_silencioso(

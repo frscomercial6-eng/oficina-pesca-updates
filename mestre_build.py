@@ -13,7 +13,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 DIV = "═" * 50
-VERSAO = "1.0.64"
+VERSAO = "1.0.66"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -143,6 +143,20 @@ LOCAL_HIDDEN_IMPORTS = [
     ("tela_planos", "tela_planos.py"),
     ("util_recibo", "util_recibo.py"),
     ("core.i18n", "core/i18n.py"),
+    ("licensing", "licensing/__init__.py"),
+    ("licensing._produto", "licensing/_produto.py"),
+    ("licensing.canonical_json", "licensing/canonical_json.py"),
+    ("licensing.errors", "licensing/errors.py"),
+    ("licensing.formats", "licensing/formats.py"),
+    ("licensing.keys", "licensing/keys.py"),
+    ("licensing.chave_curta", "licensing/chave_curta.py"),
+    ("licensing.machine_identity", "licensing/machine_identity.py"),
+    ("licensing.storage", "licensing/storage.py"),
+    ("licensing.challenge", "licensing/challenge.py"),
+    ("licensing.clock_guard", "licensing/clock_guard.py"),
+    ("licensing.revocation", "licensing/revocation.py"),
+    ("licensing.license_verifier", "licensing/license_verifier.py"),
+    ("licensing.service", "licensing/service.py"),
 ]
 
 PYINSTALLER_HIDDEN_IMPORTS = [
@@ -171,6 +185,7 @@ PYINSTALLER_HIDDEN_IMPORTS = [
     "urllib.error",
     "ssl",
     "certifi",
+    "cryptography.hazmat.primitives.asymmetric.ed25519",
 ]
 
 PYINSTALLER_COLLECT_ALL = [
@@ -182,6 +197,7 @@ PYINSTALLER_COLLECT_ALL = [
     "google_auth",
     "google_api_python_client",
     "reportlab",
+    "cryptography",
 ]
 
 def print_header():
@@ -218,7 +234,10 @@ def atualizar_versao_json(nova_versao):
         dados = json.load(f)
     versao_antiga = dados.get("versao", "")
     dados["versao"] = nova_versao
-    dados["novidades"] = f"v{nova_versao}: Atualização de versão automática."
+    dados["novidades"] = (
+        f"v{nova_versao}: pagamentos mistos idempotentes, entrega sem depender do PDF, "
+        "arquivamento rastreável de O.S. e atualização validada por SHA-256."
+    )
     dados["url_download"] = release_url
     dados["download_url"] = release_url
     if not isinstance(dados.get("apk"), dict):
@@ -235,7 +254,10 @@ def atualizar_versao_json(nova_versao):
     caminho_version = "version.json"
     dados_version = {
         "versao": nova_versao,
-        "novidades": f"v{nova_versao}: Atualização de versão automática.",
+        "novidades": (
+            f"v{nova_versao}: pagamentos mistos idempotentes, entrega sem depender do PDF, "
+            "arquivamento rastreável de O.S. e atualização validada por SHA-256."
+        ),
         "url_download": release_url,
         "download_url": release_url,
         "force_update": False,
@@ -255,7 +277,10 @@ def atualizar_versao_json(nova_versao):
         if not isinstance(dados_cfg.get("update"), dict):
             dados_cfg["update"] = {}
         dados_cfg["update"]["versao"] = nova_versao
-        dados_cfg["update"]["novidades"] = f"v{nova_versao}: Atualização de versão automática."
+        dados_cfg["update"]["novidades"] = (
+            f"v{nova_versao}: pagamentos mistos idempotentes, entrega sem depender do PDF, "
+            "arquivamento rastreável de O.S. e atualização validada por SHA-256."
+        )
         dados_cfg["update"]["url_download"] = release_url
         dados_cfg["update"]["download_url"] = release_url
         with open(caminho_config, "w", encoding="utf-8") as f:
@@ -271,7 +296,8 @@ def _sincronizar_manifests(nova_versao: str) -> None:
     with open("versao.txt", "w", encoding="utf-8") as _f:
         _f.write(
             f"versao={nova_versao}\n"
-            f"novidades=v{nova_versao}: APK limpo versionado e sincronização de licenças por e-mail com Supabase.\n"
+            f"novidades=v{nova_versao}: pagamentos mistos idempotentes, entrega sem depender do PDF, "
+            "arquivamento rastreável de O.S. e atualização validada por SHA-256.\n"
         )
     _cfg = configparser.ConfigParser()
     if os.path.exists("config.cfg"):
@@ -567,7 +593,12 @@ def _gerar_log_saude_sistema(versao: str, apk_path: str, instalador_path: str = 
 
     os.makedirs("logs", exist_ok=True)
     caminho_log = os.path.join("logs", "saude_sistema_producao.json")
-    apk_info = _validar_apk_gerado(apk_path)
+    apk_info = _validar_apk_gerado(apk_path) if apk_path else {
+        "path": "",
+        "exists": False,
+        "size": 0,
+        "sha256": "",
+    }
     instalador_abs = os.path.abspath(instalador_path) if instalador_path else ""
 
     try:
@@ -698,6 +729,16 @@ def _limpar_obsoletos_distribuicao(versao: str) -> None:
                 print(f"   ⚠️  Não foi possível remover {nome}: {exc}")
     print(f"✅ Distribuição limpa ({removidos} artefato(s) obsoleto(s) removido(s)); somente a versão {versao} permanece.")
     print(DIV)
+
+
+def _obter_alvo_build() -> str:
+    argumentos = sys.argv[1:]
+    for indice, argumento in enumerate(argumentos):
+        if argumento.startswith("--target="):
+            return argumento.split("=", 1)[1].strip().lower()
+        if argumento == "--target" and indice + 1 < len(argumentos):
+            return argumentos[indice + 1].strip().lower()
+    return os.environ.get("OFP_BUILD_TARGET", "all").strip().lower()
 
 
 def _remotos_push_git() -> list[str]:
@@ -935,14 +976,15 @@ def resumo(projeto, versao, alteracoes):
     resp = input("🚀 Deseja iniciar o Build e Release? (s/n): ").strip().lower()
     return resp == "s"
 
-def limpar_pastas():
-    for pasta in ["build", "dist"]:
+def limpar_pastas(include_android: bool = True):
+    pastas = ["build", "dist"] if include_android else ["build", os.path.join("dist", APP_NAME)]
+    for pasta in pastas:
         if os.path.exists(pasta):
             print(f"🧹 Limpando pasta: {pasta}/")
-            if os.name == "nt":
+            if os.name == "nt" and os.path.normcase(pasta) == os.path.normcase("build"):
                 subprocess.run(f'rmdir /s /q {pasta}', shell=True)
             else:
-                subprocess.run(f'rm -rf {pasta}', shell=True)
+                shutil.rmtree(pasta, ignore_errors=True)
 
 def _coletar_add_data_args() -> tuple[list[str], list[tuple[str, str, bool]]]:
     add_data_args: list[str] = []
@@ -1075,10 +1117,21 @@ def _limpar_apks_assets_internos(base_dir: str) -> int:
     return removidos
 
 
-def _limpeza_total_pre_build() -> None:
+def _limpeza_total_pre_build(target: str = "all") -> None:
     print(DIV)
-    print("🧼 Limpeza total pré-build (dist, build, __pycache__ e APKs antigos)...")
+    if target == "windows":
+        print("🧼 Limpeza de build Windows; artefatos e caches Android serão preservados.")
+        for base in dict.fromkeys(map(os.path.abspath, [REPO_ROOT, BUILD_ROOT])):
+            for rel_pasta in ["build", os.path.join("dist", APP_NAME)]:
+                pasta = os.path.join(base, rel_pasta)
+                if os.path.exists(pasta):
+                    print(f"🧹 Limpando pasta: {pasta}")
+                    shutil.rmtree(pasta, ignore_errors=True)
+        print("✅ Limpeza Windows concluída; APKs e distribuições anteriores preservados.")
+        print(DIV)
+        return
 
+    print("🧼 Limpeza total pré-build (dist, build, __pycache__ e APKs antigos)...")
     bases = []
     for candidato in [REPO_ROOT, BUILD_ROOT]:
         abs_candidato = os.path.abspath(candidato)
@@ -1176,39 +1229,121 @@ def executar_smoke_test() -> bool:
         return False
 
 
-def validar_pre_build() -> bool:
+def validar_pre_build(target: str = "all") -> bool:
+    target = str(target or "all").strip().lower()
+    if target not in {"windows", "android", "all"}:
+        print(f"❌ Alvo de build inválido: {target}. Use windows, android ou all.")
+        return False
+
     faltando: list[str] = []
-    if not os.path.exists(ENTRY_SCRIPT):
-        faltando.append(ENTRY_SCRIPT)
+    resumo: list[tuple[str, str, bool]] = []
+    resumo_instalador: list[tuple[str, str, bool]] = []
+    if target in {"windows", "all"}:
+        if not os.path.exists(ENTRY_SCRIPT):
+            faltando.append(ENTRY_SCRIPT)
 
-    _add_data_args, resumo = _coletar_add_data_args()
-    for origem, _destino, existe in resumo:
-        if not existe:
-            faltando.append(origem)
+        _add_data_args, resumo = _coletar_add_data_args()
+        for origem, _destino, existe in resumo:
+            if not existe:
+                faltando.append(origem)
 
-    resumo_instalador = _coletar_resumo_recursos(INSTALLER_REQUIRED_SPECS)
-    for origem, _destino, existe in resumo_instalador:
-        if not existe:
-            faltando.append(origem)
+        resumo_instalador = _coletar_resumo_recursos(INSTALLER_REQUIRED_SPECS)
+        for origem, _destino, existe in resumo_instalador:
+            if not existe:
+                faltando.append(origem)
+
+    if target in {"android", "all"} and not os.path.isdir(ANDROID_PROJECT_DIR):
+        faltando.append(ANDROID_PROJECT_DIR)
+
+    problemas_credenciais = _validar_credenciais_integracoes(target=target)
+    faltando.extend(problemas_credenciais)
 
     print(DIV)
-    print("🔎 Verificação de pré-build")
-    print(f"   Entry script: {ENTRY_SCRIPT} -> {'OK' if os.path.exists(ENTRY_SCRIPT) else 'FALTANDO'}")
-    _imprimir_resumo_recursos(resumo)
-    print("📦 Recursos adicionais do instalador:")
-    for origem, destino, existe in resumo_instalador:
-        status = "OK" if existe else "FALTANDO"
-        print(f"   [{status}] {origem} -> {destino}")
+    print(f"🔎 Verificação de pré-build por alvo: {target}")
+    if target in {"windows", "all"}:
+        print(f"🪟 Windows/Desktop: {ENTRY_SCRIPT} -> {'OK' if os.path.exists(ENTRY_SCRIPT) else 'FALTANDO'}")
+        _imprimir_resumo_recursos(resumo)
+    else:
+        print("🪟 Windows/Desktop: fora do alvo; requisitos não verificados.")
+    if target in {"windows", "all"}:
+        print("📦 Recursos adicionais do instalador:")
+        for origem, destino, existe in resumo_instalador:
+            status = "OK" if existe else "FALTANDO"
+            print(f"   [{status}] {origem} -> {destino}")
+    print(
+        "🤖 Android: "
+        + (
+            "requisitos verificados para este alvo."
+            if target in {"android", "all"}
+            else "fora do alvo; Firebase não bloqueia Windows."
+        )
+    )
+    print("☁️ Serviços remotos: não são requisito da ativação local nem do instalador Windows.")
     print(DIV)
 
     if faltando:
-        print("❌ Pré-build reprovado. Itens ausentes:")
+        faltando = list(dict.fromkeys(faltando))
+        print("❌ Pré-build reprovado. Corrija os itens abaixo:")
         for item in faltando:
             print(f"   - {item}")
         return False
 
-    print("✅ Pré-build aprovado. Recursos e entrypoint localizados.")
+    print(f"✅ Pré-build aprovado para o alvo {target}.")
     return True
+
+
+def _validar_credenciais_integracoes(
+    oauth_path: str = "client_secret_desktop.json",
+    firebase_path: str = os.path.join("android_apk", "app", "google-services.json"),
+    *,
+    target: str = "all",
+) -> list[str]:
+    problemas: list[str] = []
+
+    if target in {"windows", "all"}:
+        try:
+            with open(oauth_path, encoding="utf-8") as arquivo:
+                oauth = json.load(arquivo)
+            cliente = oauth.get("installed", {})
+            client_id = str(cliente.get("client_id") or "")
+            client_secret = str(cliente.get("client_secret") or "")
+            if (
+                not client_id
+                or not client_secret
+                or "placeholder" in client_id.lower()
+                or "placeholder" in client_secret.lower()
+            ):
+                problemas.append("client_secret_desktop.json sem credenciais OAuth desktop válidas")
+        except (OSError, json.JSONDecodeError, AttributeError):
+            problemas.append("client_secret_desktop.json ausente ou inválido")
+
+    if target in {"android", "all"}:
+        try:
+            with open(firebase_path, encoding="utf-8") as arquivo:
+                firebase = json.load(arquivo)
+            project_id = str(firebase.get("project_info", {}).get("project_id") or "")
+            pacotes = {
+                str(cliente.get("client_info", {}).get("android_client_info", {}).get("package_name") or "")
+                for cliente in firebase.get("client", [])
+            }
+            api_keys = {
+                str(api_key.get("current_key") or "")
+                for cliente in firebase.get("client", [])
+                for api_key in cliente.get("api_key", [])
+            }
+            if (
+                not project_id
+                or "placeholder" in project_id.lower()
+                or "oficina-pesca-ci" in project_id.lower()
+                or "com.frs.oficinadepesca" not in pacotes
+                or not api_keys
+                or any(not key or "placeholder" in key.lower() for key in api_keys)
+            ):
+                problemas.append("google-services.json sem configuração Firebase oficial válida")
+        except (OSError, json.JSONDecodeError, AttributeError, TypeError):
+            problemas.append("google-services.json ausente ou inválido")
+
+    return problemas
 
 
 def _imprimir_resumo_recursos(resumo: list[tuple[str, str, bool]]) -> None:
@@ -1290,13 +1425,14 @@ def _nome_instalador_final(versao: str) -> str:
     return f"Setup_OficinaPesca_v{versao}.exe"
 
 
-def _compilar_instalador_final(versao: str) -> str:
+def _compilar_instalador_final(versao: str, include_android: bool = True) -> str:
     iscc = _localizar_iscc()
     output_name = os.path.splitext(_nome_instalador_final(versao))[0]
     cmd_installer = [
         iscc,
         f"/DAppVersion={versao}",
         f"/DInstallerOutputName={output_name}",
+        f"/DIncludeAndroidApkEnabled={1 if include_android else 0}",
         INSTALLER_SCRIPT,
     ]
     subprocess.run(cmd_installer, check=True)
@@ -1544,11 +1680,17 @@ def _copiar_artefatos_para_instalador_final(instalador: str, bootstrapper_bundle
     return setup_destino, bootstrapper_destino
 
 
-def _validar_pacote_distribuicao(instalador_destino: str, bootstrapper_destino: str) -> None:
+def _validar_pacote_distribuicao(
+    instalador_destino: str,
+    bootstrapper_destino: str,
+    include_android: bool = True,
+) -> None:
     faltando: list[str] = []
     zip_portatil = os.path.join(DISTRIBUTION_DIR, PORTABLE_ZIP_NAME)
-    apk_distribuicao = os.path.join(ANDROID_APK_PACKAGE_DIR, _nome_apk_final(VERSAO))
-    for caminho in [instalador_destino, bootstrapper_destino, zip_portatil, apk_distribuicao]:
+    caminhos = [instalador_destino, bootstrapper_destino, zip_portatil]
+    if include_android:
+        caminhos.append(os.path.join(ANDROID_APK_PACKAGE_DIR, _nome_apk_final(VERSAO)))
+    for caminho in caminhos:
         if not os.path.exists(caminho):
             faltando.append(caminho)
     if faltando:
@@ -1600,7 +1742,7 @@ def _copiar_executavel_com_retry(origem: str, destino: str, tentativas: int = 8,
             "Feche instaladores, explorador ou antivírus que possam estar usando o arquivo."
         ) from (e if e else ultimo_erro)
 
-def build(projeto, versao):
+def build(projeto, versao, include_android: bool = True):
     versao = str(versao or VERSAO).strip() or VERSAO
     nome = APP_NAME
     print(f"⚙️  Executando PyInstaller para {nome}...")
@@ -1612,13 +1754,14 @@ def build(projeto, versao):
 
     try:
         # 1. Limpa as pastas build e dist antigas antes de iniciar a geração de novos arquivos
-        for pasta in ["build", "dist"]:
+        pastas_build = ["build", "dist"] if include_android else ["build", os.path.join("dist", APP_NAME)]
+        for pasta in pastas_build:
             if os.path.exists(pasta):
                 print(f"🧹 Limpando pasta: {pasta}/")
-                if os.name == "nt":
+                if os.name == "nt" and os.path.normcase(pasta) == os.path.normcase("build"):
                     subprocess.run(f'rmdir /s /q {pasta}', shell=True)
                 else:
-                    subprocess.run(f'rm -rf {pasta}', shell=True)
+                    shutil.rmtree(pasta, ignore_errors=True)
 
         # 2. Agora gera os arquivos necessários para o build (incluindo o version_file.txt dentro da pasta build recriada)
         add_data_args, resumo_recursos = _coletar_add_data_args()
@@ -1628,7 +1771,7 @@ def build(projeto, versao):
         hidden_import_args = _hidden_import_args()
         collect_all_args = _collect_all_args()
 
-        if not validar_pre_build():
+        if not validar_pre_build("all" if include_android else "windows"):
             raise RuntimeError("Pré-build falhou; ajuste os recursos antes de gerar o executável.")
 
         # Executa diretamente o build final; gerar .spec antes disso só duplica a análise.
@@ -1665,8 +1808,13 @@ def build(projeto, versao):
         caminho_bootstrapper = _garantir_bootstrapper_no_bundle(dist_dir)
         print(f"✅ Bootstrapper de atualização garantido no bundle: {caminho_bootstrapper}")
 
-        apk_dist, apk_distribuicao = _build_apk_android(versao)
-        print(f"✅ APK Nativo alinhado à versão {versao}: {apk_dist}")
+        apk_dist = ""
+        apk_distribuicao = ""
+        if include_android:
+            apk_dist, apk_distribuicao = _build_apk_android(versao)
+            print(f"✅ APK Nativo alinhado à versão {versao}: {apk_dist}")
+        else:
+            print("ℹ️  Alvo Windows: build Android não executado; APKs existentes preservados.")
 
         stage_portatil = _montar_stage_portatil(dist_dir, caminho_bootstrapper)
         _validar_stage_portatil(stage_portatil)
@@ -1678,7 +1826,7 @@ def build(projeto, versao):
         print(f"📤 ZIP portátil copiado para distribuição: {zip_portatil_distribuicao}")
 
         print("🛠️  Compilando instalador final com Inno Setup...")
-        instalador = _compilar_instalador_final(versao)
+        instalador = _compilar_instalador_final(versao, include_android=include_android)
         print(f"✅ Instalador final gerado: {instalador}")
 
         setup_instalador_final, bootstrapper_instalador_final = _copiar_artefatos_para_instalador_final(
@@ -1691,10 +1839,15 @@ def build(projeto, versao):
 
         destino_distribuicao = _copiar_instalador_para_distribuicao(instalador)
         destino_bootstrapper = _copiar_bootstrapper_para_distribuicao(caminho_bootstrapper)
-        _validar_pacote_distribuicao(destino_distribuicao, destino_bootstrapper)
+        _validar_pacote_distribuicao(
+            destino_distribuicao,
+            destino_bootstrapper,
+            include_android=include_android,
+        )
         print(f"📤 Instalador copiado para distribuição: {destino_distribuicao}")
         print(f"📤 Bootstrapper copiado para distribuição: {destino_bootstrapper}")
-        print(f"📤 APK Nativo copiado para distribuição: {apk_distribuicao}")
+        if include_android:
+            print(f"📤 APK Nativo copiado para distribuição: {apk_distribuicao}")
         _gerar_log_saude_sistema(versao, apk_dist, instalador)
         return instalador, destino_distribuicao
     finally:
@@ -1704,11 +1857,24 @@ def main():
     print_header()
     if not _validar_pasta_trabalho():
         sys.exit(1)
+    target = _obter_alvo_build()
+    if target not in {"windows", "android", "all"}:
+        print(f"❌ Alvo de build inválido: {target}. Use --target windows|android|all.")
+        sys.exit(2)
+    if not validar_pre_build(target):
+        sys.exit(1)
+
+    if target == "android":
+        apk_dist, apk_distribuicao = _build_apk_android(VERSAO)
+        print(f"✅ APK Android validado: {apk_dist}")
+        print(f"📦 APK distribuído em: {apk_distribuicao}")
+        return
+
     if NO_BUMP or IS_CI:
         print("ℹ️  Incremento automático de versão desativado (--no-bump/CI).")
     else:
         _incrementar_versao_patch()
-    _limpeza_total_pre_build()
+    _limpeza_total_pre_build(target)
     projeto, versao = get_input()
     if versao != VERSAO:
         print(f"ℹ️  Versão informada ({versao}) ignorada. Usando fonte única do mestre_build.py: {VERSAO}")
@@ -1721,9 +1887,11 @@ def main():
     if not executar_smoke_test():
         print("❌ Abortando build por falha no smoke test.")
         sys.exit(1)
-    limpar_pastas()
-    instalador, destino_distribuicao = build(projeto, versao)
-    _limpar_obsoletos_distribuicao(versao)
+    include_android = target == "all"
+    limpar_pastas(include_android=include_android)
+    instalador, destino_distribuicao = build(projeto, versao, include_android=include_android)
+    if include_android:
+        _limpar_obsoletos_distribuicao(versao)
     if IS_CI:
         print("ℹ️  Publicação Git automática desativada (CI).")
     elif NO_GIT:

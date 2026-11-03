@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 # -*- coding: utf-8 -*-
 import os
+import tempfile
 from datetime import datetime
+from tkinter import filedialog
 
 from fpdf import FPDF
 
 from config import CAMINHO_BANCO, get_db_connection, enviar_arquivo_para_drive_usuario
+from core.financeiro.repository import obter_total_recebido_os, registrar_recebimentos_os
 
 
 TERMO_GARANTIA = (
@@ -42,7 +45,7 @@ def _obter_dados_os(cursor, os_id):
         """
         SELECT id, COALESCE(cliente,''), COALESCE(equipamento,''), COALESCE(defeito,''),
                COALESCE(valor_total,0), COALESCE(saldo,0), COALESCE(itens_detalhes,''),
-               COALESCE(data,''), COALESCE(status,'')
+               COALESCE(data,''), COALESCE(status,''), COALESCE(status_entrega,'')
         FROM orcamentos_aguardo
         WHERE id = ?
         """,
@@ -66,32 +69,106 @@ def _obter_dados_oficina(cursor):
     return row[0] or "OFICINA DE PESCA", row[1] or "", row[2] or ""
 
 
-def _inserir_financeiro_entrega(cursor, os_id, cliente, valor_total, saldo, data_entrega):
-    valor_lancamento = _valor_float(saldo) if _valor_float(saldo) > 0 else _valor_float(valor_total)
-    if valor_lancamento <= 0:
-        return
-
-    descricao = f"ENTREGA O.S. {os_id} - {cliente}".strip()
-    cursor.execute(
-        """
-        SELECT 1
-        FROM fluxo_caixa
-        WHERE UPPER(tipo) = 'ENTRADA'
-          AND descricao = ?
-        LIMIT 1
-        """,
-        (descricao,),
+def _inserir_financeiro_entrega(cursor, os_id, cliente, pagamentos, valor_esperado, data_entrega):
+    registrar_recebimentos_os(
+        cursor,
+        os_id,
+        cliente,
+        pagamentos,
+        valor_esperado,
+        "ENTREGA",
+        data_entrega,
     )
-    if cursor.fetchone() is not None:
-        return
 
-    cursor.execute(
-        """
-        INSERT INTO fluxo_caixa (data, descricao, tipo, valor, categoria, metodo_pagamento)
-        VALUES (?, ?, 'ENTRADA', ?, ?, ?)
-        """,
-        (data_entrega, descricao, valor_lancamento, "ORDEM DE SERVICO", "ENTREGA"),
+
+def concluir_entrega_os(dados_os, pagamentos_entrega=None):
+    """Confirma a entrega e grava os recebimentos em uma única transação."""
+    os_id = _normalizar_id_os(dados_os)
+    if os_id <= 0:
+        raise ValueError("Identificador de O.S. invalido para confirmar a entrega.")
+
+    data_entrega = datetime.now().strftime("%d/%m/%Y")
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        row = _obter_dados_os(cursor, os_id)
+        os_id, cliente, _equipamento, _defeito, valor_total, _saldo, _itens, _data, status, status_entrega = row
+        status = str(status or "").strip().upper()
+        status_entrega = str(status_entrega or "").strip().upper()
+        if status == "EXCLUIDO":
+            raise ValueError(f"A O.S. {os_id} esta arquivada e nao pode ser entregue.")
+        if status == "ENTREGUE" or status_entrega == "ENTREGUE":
+            cursor.execute(
+                """
+                UPDATE orcamentos_aguardo
+                SET status = 'ENTREGUE',
+                    status_entrega = 'ENTREGUE',
+                    data_entrega = COALESCE(NULLIF(data_entrega, ''), ?)
+                WHERE id = ?
+                """,
+                (data_entrega, os_id),
+            )
+            conn.commit()
+            return False
+        if status != "FINALIZADO":
+            raise ValueError("Somente uma O.S. finalizada e aguardando retirada pode ser entregue.")
+
+        recebido_centavos = obter_total_recebido_os(cursor, os_id)
+        total_centavos = int(round(_valor_float(valor_total) * 100))
+        pendente_centavos = max(0, total_centavos - recebido_centavos)
+        pagamentos_entrega = list(pagamentos_entrega or [])
+        if pendente_centavos:
+            if not pagamentos_entrega:
+                raise ValueError("Informe as formas e os valores recebidos antes de confirmar a entrega.")
+            _inserir_financeiro_entrega(
+                cursor,
+                os_id,
+                cliente,
+                pagamentos_entrega,
+                pendente_centavos / 100,
+                data_entrega,
+            )
+        elif pagamentos_entrega:
+            raise ValueError("A O.S. nao possui saldo pendente para receber.")
+
+        cursor.execute(
+            """
+            UPDATE orcamentos_aguardo
+            SET status = 'ENTREGUE',
+                status_entrega = 'ENTREGUE',
+                data_entrega = ?,
+                data_finalizacao = COALESCE(NULLIF(data_finalizacao, ''), ?)
+            WHERE id = ? AND UPPER(COALESCE(status, '')) = 'FINALIZADO'
+            """,
+            (data_entrega, data_entrega, os_id),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError(f"Nao foi possivel atualizar o status da O.S. {os_id}.")
+        conn.commit()
+        return True
+
+
+def obter_valor_pendente_os(os_id, valor_total):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        recebido_centavos = obter_total_recebido_os(cursor, int(os_id))
+    total_centavos = int(round(_valor_float(valor_total) * 100))
+    return max(0, total_centavos - recebido_centavos) / 100
+
+
+def salvar_recibo_com_dialogo(parent, dados_os):
+    os_id = _normalizar_id_os(dados_os)
+    caminho_pdf = filedialog.asksaveasfilename(
+        parent=parent,
+        title="Salvar recibo",
+        initialdir=os.path.dirname(CAMINHO_BANCO),
+        initialfile=f"Recibo_OS_{os_id:05d}.pdf",
+        defaultextension=".pdf",
+        filetypes=[("Arquivo PDF", "*.pdf")],
     )
+    if not caminho_pdf:
+        return None
+    return gerar_recibo_entrega(dados_os, caminho_pdf)
 
 
 def _montar_descricao_servicos(defeito, itens_detalhes):
@@ -172,68 +249,73 @@ def _desenhar_bloco(pdf, y_top, via_titulo, dados):
 
 
 
-def gerar_recibo_entrega(dados_os):
-    """
-    Gera recibo em A4 com duas vias identicas e linha de corte central,
-    atualiza status para ENTREGUE e registra automaticamente no financeiro.
-    """
+def gerar_recibo_entrega(dados_os, caminho_pdf):
+    """Gera um PDF de uma O.S. cuja entrega ja foi confirmada."""
     os_id = _normalizar_id_os(dados_os)
-    if os_id <= 0:
+    caminho_pdf = str(caminho_pdf or "").strip()
+    if os_id <= 0 or not caminho_pdf:
         raise ValueError("Dados da O.S. invalidos para gerar recibo.")
-
-    data_entrega = datetime.now().strftime("%d/%m/%Y")
+    caminho_pdf = os.path.abspath(caminho_pdf)
 
     with get_db_connection() as conn:
         cursor = conn.cursor()
         row = _obter_dados_os(cursor, os_id)
-        os_id, cliente, equipamento, defeito, valor_total, saldo, itens_detalhes, _data, _status = row
+        os_id, cliente, equipamento, defeito, valor_total, _saldo, itens_detalhes, data_entrega, status, _status_entrega = row
+        if str(status or "").strip().upper() != "ENTREGUE":
+            raise ValueError("Confirme a entrega da O.S. antes de gerar o recibo.")
+        data_entrega = data_entrega or datetime.now().strftime("%d/%m/%Y")
+        nome_oficina, endereco, telefone = _obter_dados_oficina(cursor)
+        descricao_servicos = _montar_descricao_servicos(defeito, itens_detalhes)
 
-        cursor.execute(
-            """
-            UPDATE orcamentos_aguardo
-            SET status = 'ENTREGUE',
-                status_entrega = 'ENTREGUE',
-                data_entrega = ?,
-                data_finalizacao = COALESCE(NULLIF(data_finalizacao, ''), ?)
-            WHERE id = ?
-            """,
-            (data_entrega, data_entrega, os_id),
+        pdf = ReciboPDF(orientation="P", unit="mm", format="A4")
+        pdf.set_auto_page_break(auto=False)
+        pdf.add_page()
+
+        dados_pdf = (
+            int(os_id),
+            str(cliente or ""),
+            str(equipamento or ""),
+            descricao_servicos,
+            _valor_float(valor_total),
+            data_entrega,
+            nome_oficina,
+            endereco,
+            telefone,
         )
 
-        nome_oficina, endereco, telefone = _obter_dados_oficina(cursor)
-        _inserir_financeiro_entrega(cursor, os_id, cliente, valor_total, saldo, data_entrega)
-        conn.commit()
+        _desenhar_bloco(pdf, 10, "VIA OFICINA", dados_pdf)
+        _desenhar_bloco(pdf, 148, "VIA CLIENTE", dados_pdf)
 
-    descricao_servicos = _montar_descricao_servicos(defeito, itens_detalhes)
+        pdf.set_draw_color(110, 110, 110)
+        pdf.set_line_width(0.4)
+        pdf.line(10, 148, 200, 148)
 
-    pasta = os.path.join(os.path.dirname(CAMINHO_BANCO), "recibos_entrega")
-    os.makedirs(pasta, exist_ok=True)
-    caminho_pdf = os.path.join(pasta, f"Recibo_OS_{int(os_id):05d}.pdf")
+        diretorio = os.path.dirname(caminho_pdf)
+        if not os.path.isdir(diretorio):
+            raise FileNotFoundError(f"O diretorio escolhido nao existe: {diretorio}")
 
-    pdf = ReciboPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=False)
-    pdf.add_page()
+        arquivo_temporario = tempfile.NamedTemporaryFile(
+            prefix=".recibo_",
+            suffix=".pdf",
+            dir=diretorio,
+            delete=False,
+        )
+        caminho_temporario = arquivo_temporario.name
+        arquivo_temporario.close()
+        try:
+            pdf.output(caminho_temporario)
+            if not os.path.isfile(caminho_temporario) or os.path.getsize(caminho_temporario) == 0:
+                raise OSError("O arquivo PDF nao foi gravado corretamente.")
+            with open(caminho_temporario, "rb") as arquivo:
+                if arquivo.read(5) != b"%PDF-":
+                    raise OSError("O arquivo gerado nao possui um cabecalho PDF valido.")
+            os.replace(caminho_temporario, caminho_pdf)
+        finally:
+            if os.path.exists(caminho_temporario):
+                os.remove(caminho_temporario)
 
-    dados_pdf = (
-        int(os_id),
-        str(cliente or ""),
-        str(equipamento or ""),
-        descricao_servicos,
-        _valor_float(valor_total),
-        data_entrega,
-        nome_oficina,
-        endereco,
-        telefone,
-    )
-
-    _desenhar_bloco(pdf, 10, "VIA OFICINA", dados_pdf)
-    _desenhar_bloco(pdf, 148, "VIA CLIENTE", dados_pdf)
-
-    pdf.set_draw_color(110, 110, 110)
-    pdf.set_line_width(0.4)
-    pdf.line(10, 148, 200, 148)
-
-    pdf.output(caminho_pdf)
+        if not os.path.isfile(caminho_pdf) or os.path.getsize(caminho_pdf) == 0:
+            raise OSError(f"Nao foi possivel confirmar a gravacao do recibo: {caminho_pdf}")
 
     try:
         enviar_arquivo_para_drive_usuario(caminho_pdf, pasta_remota="Oficina de Pesca - PDFs")
@@ -243,7 +325,7 @@ def gerar_recibo_entrega(dados_os):
     try:
         if hasattr(os, "startfile"):
             os.startfile(caminho_pdf)  # type: ignore[attr-defined]
-    except Exception:
+    except OSError:
         pass
 
     return caminho_pdf

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from config import get_db_connection, get_logger
@@ -28,7 +29,14 @@ def obter_proximo_numero_orcamento_oficial() -> int:
         return 501
 
 
-def salvar_orcamento_aguardo_oficial(os_id: int, dados: dict[str, Any], sinal: float = 0.0, saldo: float = 0.0) -> None:
+def salvar_orcamento_aguardo_oficial(
+    os_id: int,
+    dados: dict[str, Any],
+    sinal: float = 0.0,
+    saldo: float = 0.0,
+    pagamentos: list[tuple[str, float]] | None = None,
+    valor_recebido: float = 0.0,
+) -> None:
     """Persistência oficial de O.S. usada pela tela e por fluxos rápidos do PDV."""
     if not isinstance(dados, dict):
         raise ValueError("Dados inválidos para salvar O.S.")
@@ -37,6 +45,11 @@ def salvar_orcamento_aguardo_oficial(os_id: int, dados: dict[str, Any], sinal: f
 
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("SELECT status FROM orcamentos_aguardo WHERE id = ?", (int(os_id),))
+        registro_existente = cursor.fetchone()
+        if registro_existente and str(registro_existente[0] or "").strip().upper() == "EXCLUIDO":
+            raise ValueError(f"A O.S. {int(os_id)} está arquivada e não pode ser alterada.")
         cursor.execute(
             """
             INSERT OR REPLACE INTO orcamentos_aguardo
@@ -61,6 +74,18 @@ def salvar_orcamento_aguardo_oficial(os_id: int, dados: dict[str, Any], sinal: f
             ),
         )
         cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('ultimo_orcamento', ?)", (int(os_id),))
+        if pagamentos is not None:
+            from core.financeiro.repository import registrar_recebimentos_os
+
+            registrar_recebimentos_os(
+                cursor,
+                int(os_id),
+                str(dados.get("cliente", "")),
+                pagamentos,
+                valor_recebido,
+                "APROVACAO",
+                datetime.now().strftime("%d/%m/%Y"),
+            )
         conn.commit()
 
 
@@ -135,5 +160,6 @@ def garantir_colunas_orcamentos_aguardo() -> None:
                 """
             )
             conn.commit()
-    except Exception as exc:
-        logger.info("Falha ao garantir colunas extras de orcamentos_aguardo: %s", exc)
+    except Exception:
+        logger.exception("Falha ao migrar a estrutura de orcamentos_aguardo.")
+        raise

@@ -101,6 +101,7 @@
   "menu_pdv": "POS",
   "menu_principal": "Main Menu",
   "menu_relatorio": "Report",
+  "menu_recibos": "Receipts",
   "menu_sair": "Exit",
   "msg_anexar_pdf_imagem": "A downloaded PDF/image exists for this part. Do you want to open the folder to attach it in WhatsApp?",
   "msg_cadastro_atualizado_sucesso": "Registration updated successfully!",

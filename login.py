@@ -132,7 +132,6 @@ from config import (
     obter_status_trial,
     obter_status_licenca,
     ativar_licenca,
-    publicar_licenca_drive,
     get_logger,
     verificar_nova_versao,
     obter_info_nova_versao,
@@ -165,14 +164,6 @@ from config import (
     INFINITEPAY_LINK_PAGAMENTO,
 )
 from shutdown_utils import fechar_sistema
-
-# Sincronização de licença com o Supabase (Fase 1 — v1.0.63).
-# Import tolerante: enquanto o config compilado (config.pyd) não incluir a
-# função, o login continua funcionando e o gancho de startup fica inativo.
-try:
-    from config import sincronizar_licenca_supabase_pendente
-except ImportError:
-    sincronizar_licenca_supabase_pendente = None
 
 # Compatibilidade com versões de config.py que não expõem mais estas funções.
 try:
@@ -498,21 +489,6 @@ def _executar_varredura_inicializacao() -> None:
     else:
         logger.warning("[startup] Configuração: %s", msg_cfg)
 
-    # Sincronização de licença pendente com o Supabase (idempotente, background).
-    # Não bloqueia a inicialização e nunca quebra o startup com Supabase
-    # indisponível (o orquestrador captura exceções e registra falhas localmente).
-    if sincronizar_licenca_supabase_pendente is not None:
-        try:
-            threading.Thread(
-                target=sincronizar_licenca_supabase_pendente,
-                daemon=True,
-                name="ofp-licenca-sync-startup",
-            ).start()
-        except Exception as exc:
-            logger.warning("[startup] Não foi possível agendar sincronização de licença: %s", exc)
-
-
-
 # ==============================================================================
 # EULA / CONTRATO DE LICENÇA — aceite obrigatório no primeiro acesso
 # Idioma 100% automático: o contrato é carregado conforme o idioma do Windows
@@ -647,6 +623,22 @@ def _inicializar_fluxo_pos_termos() -> None:
     global _APP_INIT_DONE
     if _APP_INIT_DONE:
         return
+    logger.info("[startup] Inicializando esquema do banco antes de consultar trial/licença.")
+    try:
+        inicializar_banco()
+    except Exception as exc:
+        logger.exception("[startup] Falha ao inicializar o banco antes do login.")
+        mensagem = (
+            "Não foi possível inicializar o banco de dados com segurança. "
+            "Os dados existentes foram preservados e o acesso foi bloqueado.\n\n"
+            f"Detalhe: {exc}"
+        )
+        messagebox.showerror("Banco de dados", mensagem, parent=janela_login)
+        label_status.configure(text="Falha ao inicializar o banco de dados.", text_color="red")
+        btn_entrar.configure(state="disabled")
+        janela_login.deiconify()
+        return
+
     _APP_INIT_DONE = True
     trial_ativo, dias_trial, data_limite_trial = _trial_ativo_prioritario()
     if trial_ativo:
@@ -655,11 +647,7 @@ def _inicializar_fluxo_pos_termos() -> None:
             dias_trial,
             data_limite_trial,
         )
-        try:
-            inicializar_banco()
-            logger.info("[startup] Banco inicializado em modo trial sem validações externas.")
-        except Exception as exc:
-            logger.warning("[startup] Falha ao inicializar banco em modo trial: %s", exc)
+        logger.info("[startup] Banco inicializado antes da consulta de trial.")
         atualizar_status_trial_tela()
         atualizar_status_primeiro_acesso()
         return
@@ -686,10 +674,6 @@ def _inicializar_fluxo_pos_termos() -> None:
         janela_login.deiconify()
         btn_entrar.configure(state="disabled")
         return
-
-    logger.info("[startup] Inicializando conexão com banco de dados.")
-    inicializar_banco()
-    logger.info("[startup] Banco inicializado com sucesso.")
 
     try:
         ok_sync_bg, msg_sync_bg = iniciar_sincronizacao_hibrida_nuvem()
@@ -1596,18 +1580,6 @@ def abrir_tela_ativacao():
         btn_confirmar.configure(state="disabled", text=t("ui_ativando"))
         ok, msg = ativar_licenca(chave)
         if ok:
-            def _publicar_drive_background() -> None:
-                try:
-                    publicar_licenca_drive(chave)
-                except Exception as exc:
-                    logger.warning("Falha silenciosa ao publicar licença no Drive após ativação: %s", exc)
-
-            threading.Thread(
-                target=_publicar_drive_background,
-                daemon=True,
-                name="ofp-licenca-drive-auto",
-            ).start()
-
             label_status.configure(text=t("ui_licen_a_ativada_com_sucesso"), text_color="#2ecc71")
             atualizar_status_trial_tela()
             dialog.after(80, dialog.destroy)

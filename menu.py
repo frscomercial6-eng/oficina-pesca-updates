@@ -14,6 +14,7 @@ from firebase_admin import credentials
 import customtkinter as ctk
 import sqlite3
 import os
+import math
 import sys
 import shutil
 import zipfile
@@ -29,7 +30,8 @@ from tkinter import ttk, messagebox, simpledialog, filedialog
 from datetime import datetime, timedelta
 from urllib.parse import quote_plus, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
-from util_recibo import gerar_recibo_entrega
+from util_recibo import concluir_entrega_os, obter_valor_pendente_os, salvar_recibo_com_dialogo
+from core.financeiro.calculos import parse_monetario
 from version_info import VERSION
 from config import (
     CAMINHO_BANCO,
@@ -96,7 +98,6 @@ from config import (
     obter_chave_instalacao_frs,
     ativar_licenca,
     diagnosticar_chave_licenca,
-    publicar_licenca_drive,
     obter_modo_operacao,
     URL_APP_CELULAR_PUBLICA,
     WHATSAPP_ADMIN_DESTINO,
@@ -1580,13 +1581,6 @@ class FrmDadosOficina(ctk.CTkToplevel):
             btn_confirmar.configure(state="disabled", text=t("ui_ativando"))
             ok, msg = ativar_licenca(chave)
             if ok:
-                def _publicar_drive_bg():
-                    try:
-                        publicar_licenca_drive(chave)
-                    except Exception as exc:
-                        logger.warning("Falha silenciosa ao publicar licença no Drive: %s", exc)
-
-                threading.Thread(target=_publicar_drive_bg, daemon=True, name="ofp-licenca-drive-menu").start()
                 self._configurar_labels_info()
                 messagebox.showinfo("Ativação", "Licença ativada com sucesso.", parent=dialog)
                 dialog.destroy()
@@ -2520,6 +2514,110 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
             )
         return dados
 
+    def _atualizar_apos_entrega(self):
+        master = self.master
+        janela_gestao = getattr(master, "_janela_gestao_os", None)
+        janela_viva = getattr(master, "_janela_viva", None)
+        if callable(janela_viva) and janela_viva(janela_gestao):
+            janela_gestao.buscar_os()
+        if hasattr(master, "_ultima_os_contexto"):
+            master._ultima_os_contexto = None
+        atualizar_dashboard = getattr(master, "_atualizar_dashboard_modular", None)
+        if callable(atualizar_dashboard):
+            atualizar_dashboard()
+        self.carregar_os_finalizadas()
+
+    def _perguntar_pagamentos(self, valor_pendente):
+        dialogo = ctk.CTkToplevel(self)
+        dialogo.title("Recebimento da O.S.")
+        dialogo.geometry("440x340")
+        dialogo.resizable(False, False)
+        dialogo.configure(fg_color="#161b22")
+        dialogo.grab_set()
+        dialogo.focus_force()
+        resultado = {"pagamentos": None}
+        esperado_centavos = int(round(float(valor_pendente) * 100))
+
+        ctk.CTkLabel(
+            dialogo,
+            text=f"Saldo a receber: R$ {float(valor_pendente):.2f}".replace(".", ","),
+            font=("Arial", 15, "bold"),
+            text_color="orange",
+        ).pack(pady=(18, 8))
+        ctk.CTkLabel(
+            dialogo,
+            text="Informe o valor efetivamente recebido em cada forma.",
+            text_color="#ecf0f1",
+        ).pack(pady=(0, 10))
+
+        frame = ctk.CTkFrame(dialogo, fg_color="#1f2a38")
+        frame.pack(fill="x", padx=20, pady=8)
+        entradas = {}
+        for linha, metodo in enumerate(("PIX", "DINHEIRO", "CARTÃO")):
+            ctk.CTkLabel(frame, text=metodo, width=120, anchor="w").grid(
+                row=linha, column=0, padx=12, pady=7, sticky="w"
+            )
+            entrada = ctk.CTkEntry(frame, width=170, placeholder_text="0,00")
+            entrada.insert(0, "0,00")
+            entrada.grid(row=linha, column=1, padx=12, pady=7, sticky="ew")
+            entradas[metodo] = entrada
+        frame.grid_columnconfigure(1, weight=1)
+
+        botoes = ctk.CTkFrame(dialogo, fg_color="#161b22")
+        botoes.pack(fill="x", padx=20, pady=(12, 16))
+
+        def parcelas():
+            resultado_parcelas = []
+            for metodo, entrada in entradas.items():
+                texto = entrada.get().strip()
+                if not texto:
+                    continue
+                valor = parse_monetario(texto, default=float("nan"))
+                if not math.isfinite(valor) or valor < 0:
+                    return None
+                if valor > 0:
+                    resultado_parcelas.append((metodo, valor))
+            return resultado_parcelas
+
+        def atualizar_confirmacao(_event=None):
+            valores = parcelas()
+            if valores is None:
+                btn_confirmar.configure(state="disabled")
+                return
+            total_centavos = sum(
+                int(round(valor * 100)) for _, valor in valores
+            )
+            btn_confirmar.configure(
+                state="normal" if total_centavos == esperado_centavos else "disabled"
+            )
+
+        def confirmar():
+            resultado["pagamentos"] = parcelas()
+            dialogo.destroy()
+
+        btn_confirmar = ctk.CTkButton(
+            botoes,
+            text=t("btn_confirmar"),
+            fg_color="#27ae60",
+            state="disabled",
+            command=confirmar,
+        )
+        btn_confirmar.pack(side="left", padx=(0, 8), fill="x", expand=True)
+        ctk.CTkButton(
+            botoes,
+            text=t("btn_cancelar"),
+            fg_color="#7f8c8d",
+            command=dialogo.destroy,
+        ).pack(side="left", fill="x", expand=True)
+        for entrada in entradas.values():
+            entrada.bind("<KeyRelease>", atualizar_confirmacao)
+
+        entradas["PIX"].delete(0, "end")
+        entradas["PIX"].insert(0, f"{float(valor_pendente):.2f}".replace(".", ","))
+        atualizar_confirmacao()
+        dialogo.wait_window()
+        return resultado["pagamentos"]
+
     def gerar_recibo_selecionado(self, _event=None):
         dados_os = self._selecionar_os()
         if not dados_os:
@@ -2528,24 +2626,58 @@ class FrmBaixaRecibo(ctk.CTkToplevel):
 
         num_os = int(dados_os[0])
         confirmar = messagebox.askyesno(
-            "Dar baixa",
-            f"Gerar recibo e dar baixa na O.S. {num_os}?\n\n"
-            "O status sera alterado para ENTREGUE e o financeiro sera atualizado automaticamente.",
+            "Confirmar entrega",
+            f"Confirma o recebimento e a entrega da O.S. {num_os}?\n\n"
+            "A baixa financeira sera concluida antes da opcao de salvar o recibo.",
             parent=self,
         )
         if not confirmar:
             return
 
         try:
-            caminho_pdf = gerar_recibo_entrega(dados_os)
-            if hasattr(self.master, "_janela_viva") and self.master._janela_viva(getattr(self.master, "_janela_gestao_os", None)):
-                self.master._janela_gestao_os.buscar_os()
-            if hasattr(self.master, "_ultima_os_contexto"):
-                self.master._ultima_os_contexto = None
-            messagebox.showinfo("Recibo", f"Baixa concluida com sucesso.\n\nArquivo: {caminho_pdf}", parent=self)
-            self.carregar_os_finalizadas()
+            valor_pendente = obter_valor_pendente_os(num_os, dados_os[4])
+            pagamentos = self._perguntar_pagamentos(valor_pendente) if valor_pendente else []
+            if pagamentos is None:
+                return
+
+            nova_entrega = concluir_entrega_os(dados_os, pagamentos_entrega=pagamentos)
+            self._atualizar_apos_entrega()
         except Exception as exc:
-            messagebox.showerror("Recibo", f"Nao foi possivel dar baixa na O.S.: {exc}", parent=self)
+            messagebox.showerror(
+                "Entrega",
+                f"Nao foi possivel concluir a entrega e a baixa financeira da O.S. {num_os}: {exc}",
+                parent=self,
+            )
+            return
+
+        try:
+            caminho_pdf = salvar_recibo_com_dialogo(self, dados_os)
+        except Exception as exc:
+            messagebox.showwarning(
+                "Entrega concluida",
+                f"O recebimento e a entrega da O.S. {num_os} foram concluidos. "
+                f"O recibo nao foi salvo devido a um erro: {exc}",
+                parent=self,
+            )
+            return
+
+        prefixo = (
+            f"A O.S. {num_os} ja estava entregue; nenhum recebimento duplicado foi criado."
+            if not nova_entrega
+            else f"O recebimento e a entrega da O.S. {num_os} foram concluidos."
+        )
+        if caminho_pdf:
+            messagebox.showinfo(
+                "Entrega concluida",
+                f"{prefixo}\n\nRecibo salvo em:\n{caminho_pdf}",
+                parent=self,
+            )
+        else:
+            messagebox.showinfo(
+                "Entrega concluida",
+                f"{prefixo}\nO salvamento do recibo foi cancelado; a baixa financeira permanece concluida.",
+                parent=self,
+            )
 
 
 # =================================================================
@@ -2710,7 +2842,7 @@ class FrmMenu(ctk.CTk):
             botoes_menu.append((f"🧑‍🤝‍🧑  {t('menu_clientes')}", self.abrir_clientes, "#34495e"))
             botoes_menu.append((f"📋  {t('menu_nova_os')}", self.abrir_os, "#27ae60"))
             botoes_menu.append((f"🔍  {t('menu_consulta')}", self.abrir_gestao_os, "#d35400"))
-            botoes_menu.append((f"🧾  {t('menu_relatorio')}", self.gerar_recibo_menu_lateral, "#8e6b3b"))
+            botoes_menu.append((f"🧾  {t('menu_recibos')}", self.gerar_recibo_menu_lateral, "#8e6b3b"))
         
         if self.role in ("ADMIN", "VENDEDOR"):
             botoes_menu.append((f"🧾  {t('menu_pdv')}", self.abrir_pdv, "#1abc9c"))
@@ -2776,7 +2908,7 @@ class FrmMenu(ctk.CTk):
             botoes_menu.append((f"🧑‍🤝‍🧑  {t('menu_clientes')}", self.abrir_clientes, "#34495e"))
             botoes_menu.append((f"📋  {t('menu_nova_os')}", self.abrir_os, "#27ae60"))
             botoes_menu.append((f"🔍  {t('menu_consulta')}", self.abrir_gestao_os, "#d35400"))
-            botoes_menu.append((f"🧾  {t('menu_relatorio')}", self.gerar_recibo_menu_lateral, "#8e6b3b"))
+            botoes_menu.append((f"🧾  {t('menu_recibos')}", self.gerar_recibo_menu_lateral, "#8e6b3b"))
 
         if self.role in ("ADMIN", "VENDEDOR"):
             botoes_menu.append((f"🧾  {t('menu_pdv')}", self.abrir_pdv, "#1abc9c"))
@@ -3113,7 +3245,7 @@ class FrmMenu(ctk.CTk):
                 """
                 SELECT COALESCE(SUM(saldo), 0)
                 FROM orcamentos_aguardo
-                WHERE UPPER(COALESCE(status,'')) NOT IN ('ENTREGUE', 'REPROVADO', 'CANCELADO')
+                WHERE UPPER(COALESCE(status,'')) NOT IN ('ENTREGUE', 'REPROVADO', 'CANCELADO', 'EXCLUIDO')
                 """
             )
             total_receber_abertas = float((cursor.fetchone() or [0])[0] or 0)
@@ -3615,7 +3747,7 @@ class FrmMenu(ctk.CTk):
                     """
                     SELECT id, cliente, equipamento, defeito, valor_total, sinal, saldo, status, data
                     FROM orcamentos_aguardo
-                    WHERE id = ?
+                    WHERE id = ? AND UPPER(COALESCE(status, '')) <> 'EXCLUIDO'
                     """,
                     (int(os_id),),
                 )

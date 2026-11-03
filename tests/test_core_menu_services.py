@@ -6,8 +6,14 @@ from core import licenca, sincronizacao
 
 class TestCoreMenuServices(unittest.TestCase):
     def test_obter_info_licenca_visual_uses_status_acesso_centralizado(self):
-        with patch("config.obter_status_acesso_centralizado", return_value={"licenca_ativa": True, "trial_ativo": False, "validade": "PERMANENTE"}), patch(
-            "config.obter_tipo_licenca", return_value="PERMANENTE"
+        with patch.object(
+            licenca,
+            "obter_status_acesso_centralizado",
+            return_value={"licenca_ativa": True, "trial_ativo": False, "validade": "PERMANENTE"},
+        ), patch.object(
+            licenca,
+            "obter_tipo_licenca",
+            return_value="PERMANENTE",
         ):
             texto, cor = licenca.obter_info_licenca_visual()
 
