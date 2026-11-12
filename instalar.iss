@@ -8,7 +8,7 @@
 ;    3. Pressione F9 para compilar
 ;    4. O instalador sera gerado em: INSTALADOR_FINAL\Instalador_Oficina_Pesca.exe
 ; ==============================================================
-#define AppVersion "1.0.66"
+#define AppVersion "1.0.67"
 #define AppName "Oficina de Pesca"
 #define AppPublisher "FRS Solucoes"
 #define AppExeName "Oficina_Pesca.exe"
@@ -33,7 +33,7 @@ DisableDirPage=yes
 AllowNoIcons=yes
 
 OutputDir=INSTALADOR_FINAL
-OutputBaseFilename=Setup_OficinaPesca_v1.0.66
+OutputBaseFilename=Setup_OficinaPesca_v1.0.67
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -78,12 +78,10 @@ Source: "icone_oficina.ico"; DestDir: "{app}"; Components: core; Flags: ignoreve
 Source: "servidor.py";          DestDir: "{app}"; Components: core; Flags: ignoreversion
 Source: "config.py";            DestDir: "{app}"; Components: core; Flags: ignoreversion
 Source: "config.cfg";           DestDir: "{app}"; Components: core; Flags: ignoreversion onlyifdoesntexist
-Source: "config.json";          DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "config.json";          DestDir: "{app}"; Components: core; Flags: ignoreversion onlyifdoesntexist
 Source: "versao.json";          DestDir: "{app}"; Components: core; Flags: ignoreversion onlyifdoesntexist
 Source: "iniciar_servidor.bat"; DestDir: "{app}"; Components: core; Flags: ignoreversion
 Source: "Atualizador.exe";      DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "client_secret_desktop.json"; DestDir: "{app}\_internal"; Components: core; Flags: ignoreversion skipifsourcedoesntexist
-Source: "client_secret_desktop.json"; DestDir: "{app}\_internal\assets"; Components: core; Flags: ignoreversion skipifsourcedoesntexist
 ; Garante recursos visuais também no bundle interno (compatível com runtime _internal/assets)
 Source: "assets\*";             DestDir: "{app}\_internal\assets"; Components: core; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "assets\fundo_menu.jpeg"; DestDir: "{app}\_internal\assets"; Components: core; Flags: ignoreversion skipifsourcedoesntexist
@@ -232,7 +230,8 @@ begin
 		'  "acbr_saida": "' + EscapeJson(ArquivoSaida) + '",' + #13#10 +
 		'  "acbr_ini": "' + EscapeJson(ArquivoIni) + '"' + #13#10 +
 		'}' + #13#10;
-	SaveStringToFile(JsonPath, JsonConteudo, False);
+	if not FileExists(JsonPath) then
+		SaveStringToFile(JsonPath, JsonConteudo, False);
 
 	IniConteudo :=
 		'[ACBrMonitor]' + #13#10 +
@@ -241,7 +240,8 @@ begin
 		'ArquivoSAI=' + ArquivoSaida + #13#10 + #13#10 +
 		'[Fiscal]' + #13#10 +
 		'Modalidade=nfe' + #13#10;
-	SaveStringToFile(ArquivoIni, IniConteudo, False);
+	if not FileExists(ArquivoIni) then
+		SaveStringToFile(ArquivoIni, IniConteudo, False);
 
 	SetupConteudo :=
 		'CONFIGURACAO PADRAO ACBrMonitor' + #13#10 +
@@ -251,9 +251,11 @@ begin
 		'SAI (saida): ' + ArquivoSaida + #13#10 +
 		'INI ACBr: ' + ArquivoIni + #13#10 +
 		'Modalidade fiscal: nfe' + #13#10;
-	SaveStringToFile(SetupTxtPath, SetupConteudo, False);
+	if not FileExists(SetupTxtPath) then
+		SaveStringToFile(SetupTxtPath, SetupConteudo, False);
 
-	if (not WizardIsComponentSelected('acbrmonitor')) and ConfirmouModoSemNota then begin
+	if (not WizardIsComponentSelected('acbrmonitor')) and ConfirmouModoSemNota and
+		(not FileExists(ExpandConstant('{app}\\MODO_GESTAO_SEM_NOTA.txt'))) then begin
 		SaveStringToFile(
 			ExpandConstant('{app}\\MODO_GESTAO_SEM_NOTA.txt'),
 			'Modo de Gestão sem Nota ativo: o ACBrMonitorPLUS não foi instalado nesta máquina.' + #13#10,

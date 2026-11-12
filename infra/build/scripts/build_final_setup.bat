@@ -38,6 +38,14 @@ if /I not "%PY_VER%"=="Python 3.12.13" if /I not "%PY_VER%"=="Python 3.14.4" (
   exit /b 1
 )
 
+echo [1.5/5] Validando dependencia de leitura PDF...
+"%VENV_PY%" -c "import pypdf" >nul 2>nul
+if errorlevel 1 (
+  echo [ERRO] Dependencia de leitura PDF ausente na venv.
+  echo        Rode: .venv\Scripts\python.exe -m pip install -r requirements.txt
+  exit /b 1
+)
+
 echo [2/5] Limpando artefatos antigos...
 if exist "%BUILD_ROOT%\build" rmdir /s /q "%BUILD_ROOT%\build"
 if exist "%DIST_ROOT%" rmdir /s /q "%DIST_ROOT%"

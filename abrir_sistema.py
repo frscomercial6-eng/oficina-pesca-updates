@@ -9,6 +9,8 @@ import traceback
 
 def main():
     try:
+        import rede_validacao
+        rede_validacao.iniciar_se_solicitado()
         import config
         config.inicializar_banco()
 

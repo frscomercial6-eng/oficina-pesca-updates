@@ -7,6 +7,18 @@ Coloque este bloco sempre no topo do arquivo!
 """
 import sys
 import os
+
+if getattr(sys, "frozen", False) and len(sys.argv) == 5 and sys.argv[1] == "--ofp-busca-vista-pdf-worker":
+    import json
+    import busca_vista_pdf
+
+    url, fabricante, modelo = json.loads(sys.argv[4])
+    with open(sys.argv[2], "rb") as arquivo:
+        resultado = busca_vista_pdf.analisar_pdf_bytes(arquivo.read(), url, fabricante, modelo)
+    with open(sys.argv[3], "w", encoding="utf-8") as arquivo:
+        json.dump(resultado, arquivo, ensure_ascii=True)
+    sys.exit(0)
+
 import json
 import configparser      # <--- ADICIONADO PARA RETIRAR O ERRO DA LINHA 215!
 import urllib.request   # <--- Garante as requisições de atualização

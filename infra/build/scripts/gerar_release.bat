@@ -40,9 +40,10 @@ if not exist "login.py" (
 )
 
 echo [2/9] Validando dependencias Python...
-"%VENV_PY%" -c "import customtkinter, reportlab, sqlite3, fpdf, PIL; print('Dependencias OK')"
+"%VENV_PY%" -c "import customtkinter, reportlab, sqlite3, fpdf, PIL, pypdf; print('Dependencias OK')"
 if errorlevel 1 (
     echo [ERRO] Dependencias ausentes na venv.
+    echo        Instale a dependencia PDF com: .venv\Scripts\python.exe -m pip install -r requirements.txt
     exit /b 1
 )
 

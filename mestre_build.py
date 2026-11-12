@@ -13,7 +13,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 DIV = "═" * 50
-VERSAO = "1.0.66"
+VERSAO = "1.0.67"
 APP_NAME = "Oficina_Pesca"
 ENTRY_SCRIPT = "login.py"
 INSTALLER_SCRIPT = "instalar.iss"
@@ -66,8 +66,6 @@ BUILD_ROOT = _resolver_diretorio_build()
 
 RESOURCE_SPECS = [
     ("assets", "assets"),
-    ("client_secret_desktop.json", "."),
-    ("client_secret_desktop.json", "assets"),
     ("dados_oficina.py", "."),
     ("fundomenu.png", "."),
     ("LOGO.bmp", "."),
@@ -191,6 +189,10 @@ PYINSTALLER_HIDDEN_IMPORTS = [
 PYINSTALLER_COLLECT_ALL = [
     "customtkinter",
     "fpdf",
+    "pypdf",
+    "pypdfium2",
+    "ctranslate2",
+    "sentencepiece",
     "googleapiclient",
     "google_auth_oauthlib",
     "google",
@@ -235,15 +237,16 @@ def atualizar_versao_json(nova_versao):
     versao_antiga = dados.get("versao", "")
     dados["versao"] = nova_versao
     dados["novidades"] = (
-        f"v{nova_versao}: pagamentos mistos idempotentes, entrega sem depender do PDF, "
-        "arquivamento rastreável de O.S. e atualização validada por SHA-256."
+        f"v{nova_versao}: melhorias no PDV e Busca Vista. Restauração e sincronização "
+        "automática temporariamente bloqueadas por segurança."
     )
     dados["url_download"] = release_url
     dados["download_url"] = release_url
     if not isinstance(dados.get("apk"), dict):
         dados["apk"] = {}
-    dados["apk"]["versao"] = nova_versao
-    dados["apk"]["canal"] = "nativo"
+    if _obter_alvo_build() in {"android", "all"}:
+        dados["apk"]["versao"] = nova_versao
+        dados["apk"]["canal"] = "nativo"
     with open(caminho, "w", encoding="utf-8") as f:
         json.dump(dados, f, ensure_ascii=False, indent=2)
     if versao_antiga == nova_versao:
@@ -255,16 +258,13 @@ def atualizar_versao_json(nova_versao):
     dados_version = {
         "versao": nova_versao,
         "novidades": (
-            f"v{nova_versao}: pagamentos mistos idempotentes, entrega sem depender do PDF, "
-            "arquivamento rastreável de O.S. e atualização validada por SHA-256."
+            f"v{nova_versao}: melhorias no PDV e Busca Vista. Restauração e sincronização "
+            "automática temporariamente bloqueadas por segurança."
         ),
         "url_download": release_url,
         "download_url": release_url,
         "force_update": False,
-        "apk": {
-            "versao": nova_versao,
-            "canal": "nativo",
-        },
+        "apk": dados["apk"].copy(),
     }
     with open(caminho_version, "w", encoding="utf-8") as f:
         json.dump(dados_version, f, ensure_ascii=False, indent=2)
@@ -278,8 +278,8 @@ def atualizar_versao_json(nova_versao):
             dados_cfg["update"] = {}
         dados_cfg["update"]["versao"] = nova_versao
         dados_cfg["update"]["novidades"] = (
-            f"v{nova_versao}: pagamentos mistos idempotentes, entrega sem depender do PDF, "
-            "arquivamento rastreável de O.S. e atualização validada por SHA-256."
+            f"v{nova_versao}: melhorias no PDV e Busca Vista. Restauração e sincronização "
+            "automática temporariamente bloqueadas por segurança."
         )
         dados_cfg["update"]["url_download"] = release_url
         dados_cfg["update"]["download_url"] = release_url
@@ -296,8 +296,8 @@ def _sincronizar_manifests(nova_versao: str) -> None:
     with open("versao.txt", "w", encoding="utf-8") as _f:
         _f.write(
             f"versao={nova_versao}\n"
-            f"novidades=v{nova_versao}: pagamentos mistos idempotentes, entrega sem depender do PDF, "
-            "arquivamento rastreável de O.S. e atualização validada por SHA-256.\n"
+            f"novidades=v{nova_versao}: melhorias no PDV e Busca Vista. Restauração e sincronização "
+            "automática temporariamente bloqueadas por segurança.\n"
         )
     _cfg = configparser.ConfigParser()
     if os.path.exists("config.cfg"):
@@ -997,6 +997,65 @@ def _coletar_add_data_args() -> tuple[list[str], list[tuple[str, str, bool]]]:
     return add_data_args, resumo
 
 
+def _arquivos_sensiveis_assets(pasta_assets: str = "assets") -> list[str]:
+    encontrados = []
+    caminhos = []
+
+    def falha_leitura(erro):
+        raise erro
+
+    if os.path.isfile(pasta_assets):
+        caminhos.append(pasta_assets)
+    else:
+        for pasta, _subpastas, arquivos in os.walk(pasta_assets, onerror=falha_leitura):
+            caminhos.extend(os.path.join(pasta, nome) for nome in arquivos)
+    padrao_chave = re.compile(
+        rb'-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----\s*(?:[A-Za-z0-9+/=]{20,}\s*){3,}'
+        rb'-----END (?:[A-Z]+ )?PRIVATE KEY-----',
+        re.IGNORECASE,
+    )
+    padrao_config = re.compile(
+        rb'^\s*(?:client_secret|refresh_token|access_token|private_key|password|senha|secret)\s*=\s*[^\s#;]+',
+        re.MULTILINE | re.IGNORECASE,
+    )
+    for caminho in caminhos:
+        nome_lower = os.path.basename(caminho).lower()
+        if (nome_lower.startswith("client_secret") or nome_lower in {
+            "token.json", "google_drive_user_token.json", ".env", "credentials.json",
+        } or nome_lower.endswith((".key", ".p12", ".pfx"))):
+            encontrados.append(caminho)
+        elif nome_lower.endswith((".json", ".cfg", ".ini", ".yaml", ".yml", ".env", ".pem", ".py")):
+            with open(caminho, "rb") as arquivo:
+                conteudo = arquivo.read()
+                if padrao_chave.search(conteudo) or (
+                    not nome_lower.endswith((".py", ".json")) and padrao_config.search(conteudo)
+                ):
+                    encontrados.append(caminho)
+                    continue
+                if nome_lower.endswith(".json"):
+                    try:
+                        dados = json.loads(conteudo)
+                    except (ValueError, UnicodeDecodeError):
+                        raise ValueError(f"Arquivo JSON inválido durante inspeção: {caminho}")
+                    pendentes = [dados]
+                    while pendentes:
+                        item = pendentes.pop()
+                        if isinstance(item, dict):
+                            if any(
+                                str(chave).lower() in {
+                                    "client_secret", "refresh_token", "access_token",
+                                    "private_key", "password", "senha",
+                                } and isinstance(valor, str) and valor.strip()
+                                for chave, valor in item.items()
+                            ):
+                                encontrados.append(caminho)
+                                break
+                            pendentes.extend(item.values())
+                        elif isinstance(item, list):
+                            pendentes.extend(item)
+    return encontrados
+
+
 def _coletar_resumo_recursos(specs: list[tuple[str, str]]) -> list[tuple[str, str, bool]]:
     return [(origem, destino, os.path.exists(origem)) for origem, destino in specs]
 
@@ -1242,6 +1301,19 @@ def validar_pre_build(target: str = "all") -> bool:
         if not os.path.exists(ENTRY_SCRIPT):
             faltando.append(ENTRY_SCRIPT)
 
+        try:
+            resultado_pypdf = subprocess.run(
+                [_resolver_python_build(), "-c", "import pypdf"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            resultado_pypdf = None
+        if resultado_pypdf is None or resultado_pypdf.returncode != 0:
+            faltando.append("pypdf (instale com python -m pip install -r requirements.txt)")
+
         _add_data_args, resumo = _coletar_add_data_args()
         for origem, _destino, existe in resumo:
             if not existe:
@@ -1255,8 +1327,17 @@ def validar_pre_build(target: str = "all") -> bool:
     if target in {"android", "all"} and not os.path.isdir(ANDROID_PROJECT_DIR):
         faltando.append(ANDROID_PROJECT_DIR)
 
-    problemas_credenciais = _validar_credenciais_integracoes(target=target)
+    problemas_credenciais = _validar_credenciais_integracoes(target=target, validar_oauth=False)
     faltando.extend(problemas_credenciais)
+    if target in {"windows", "all"}:
+        fontes = dict.fromkeys(
+            [origem for origem, _ in RESOURCE_SPECS + INSTALLER_REQUIRED_SPECS] + ["config.py"]
+        )
+        for origem in fontes:
+            faltando.extend(
+                f"Arquivo sensível em recursos; não inclua no pacote: {caminho}"
+                for caminho in _arquivos_sensiveis_assets(origem)
+            )
 
     print(DIV)
     print(f"🔎 Verificação de pré-build por alvo: {target}")
@@ -1297,10 +1378,11 @@ def _validar_credenciais_integracoes(
     firebase_path: str = os.path.join("android_apk", "app", "google-services.json"),
     *,
     target: str = "all",
+    validar_oauth: bool = True,
 ) -> list[str]:
     problemas: list[str] = []
 
-    if target in {"windows", "all"}:
+    if validar_oauth and target in {"windows", "all"}:
         try:
             with open(oauth_path, encoding="utf-8") as arquivo:
                 oauth = json.load(arquivo)
@@ -1818,6 +1900,9 @@ def build(projeto, versao, include_android: bool = True):
 
         stage_portatil = _montar_stage_portatil(dist_dir, caminho_bootstrapper)
         _validar_stage_portatil(stage_portatil)
+        sensiveis = _arquivos_sensiveis_assets(stage_portatil)
+        if sensiveis:
+            raise RuntimeError("Stage portátil contém arquivos sensíveis: " + ", ".join(sensiveis))
         _validar_fundo_menu_em_diretorio(stage_portatil, "stage portátil")
         print(f"✅ Stage portátil validado em: {stage_portatil}")
 

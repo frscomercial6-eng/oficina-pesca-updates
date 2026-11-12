@@ -9,7 +9,11 @@ import os
 import json
 import re
 import concurrent.futures
+import copy
 import time
+import queue
+import unicodedata
+import html
 import base64
 import configparser
 import traceback
@@ -29,6 +33,12 @@ from reportlab.lib.pagesizes import A4
 from datetime import datetime
 # Corrige imports ausentes para web scraping
 from urllib.request import Request, urlopen
+import busca_vista_catalogo
+import busca_vista_fontes
+import rede_validacao
+import busca_vista_pdf
+from busca_vista_pdf import texto_pdf_ilegivel as _texto_pdf_ilegivel, peca_parece_dado_pessoal as _peca_parece_dado_pessoal
+from busca_vista_visualizador import VisualizadorPdfBuscaVista, baixar_pdf, baixar_pdf_marine, baixar_imagem
 from core.financeiro.calculos import OSCalculator, formatar_monetario
 from core.i18n import t
 from core.os_repository import (
@@ -59,6 +69,98 @@ from config import (
 
 # Inicialização da variável global logger (Resolve o NameError)
 logger = get_logger()
+
+# Busca Vista: limites de tempo (segundos) e cache de pesquisas repetidas.
+PRAZO_FONTE_BUSCA_VISTA = 6.0
+PRAZO_CATALOGO_BUSCA_VISTA = 30.0
+PRAZO_TOTAL_BUSCA_VISTA = 20.0
+PRAZO_TOTAL_PDF_BUSCA_VISTA = 30.0
+VALIDADE_CACHE_BUSCA_VISTA = 300.0
+FABRICANTES_RECONHECIDOS_BUSCA_VISTA = (
+    "MARINE FISHING", "MARINE SPORTS", "SAINT PLUS", "REEL SCHEMATICS", "ABU GARCIA", "KASTKING", "SAINT",
+    "SHIMANO", "MARURI", "DAISEN", "OKUMA", "JOGA", "JOGÁ", "DAIWA", "SUMAX",
+    "PINNACLE", "ALBATROZ", "PENN",
+)
+# Nomes de modelo conhecidos por fabricante (cadastro técnico). Palavra fora desta lista bloqueia a consulta externa.
+MODELOS_CONHECIDOS_BUSCA_VISTA = {
+    "SUMAX": frozenset({"AKITA"}),
+    "MARURI": frozenset({"BLACK", "PIRA", "BG"}),
+    "SHIMANO": frozenset({
+        "STELLA", "SIENNA", "SAHARA", "CURADO", "CALCUTTA", "TRANX", "TWIN", "POWER", "TWINPOWER", "FX",
+        "ALIVIO", "NASCI", "VANFORD", "ULTEGRA", "STRADIC", "SLX", "SCORPION", "ANTARES", "CHRONARCH",
+        "METANIUM", "TEKOTA", "TALICA", "SPEEDMASTER", "SOCORRO", "SUSTAIN", "SPHEROS", "EXSENCE",
+        "CATANA", "SARAGOSA",
+    }),
+    "DAIWA": frozenset({
+        "TATULA", "EXCELER", "FUEGO", "CERTATE", "LEXA", "SALTIGA", "REGAL", "LEGALIS", "CALDIA", "EXIST",
+        "STEEZ", "ZILLION", "MORETHAN", "SALTIST", "SWEEPFIRE", "ALPHAS", "CROSSFIRE",
+    }),
+    "OKUMA": frozenset({"CEYMAR", "INSPIRA", "AVENGER", "CEDROS", "AZORES", "EPIXOR", "SALINA", "HELIOS"}),
+    "KASTKING": frozenset({"SHARKY", "ROYALE", "LEGEND", "MEGATRON", "ZEPHYR", "ROVER", "CENTRON"}),
+    "ABU GARCIA": frozenset({"AMBASSADEUR", "REVO", "ROCKET", "PRO", "BLACK", "ORRA", "CARDINAL", "MORRUM"}),
+    "PENN": frozenset({
+        "BATTLE", "SPINFISHER", "SLAMMER", "FIERCE", "CONFLICT", "SQUALL", "SENATOR", "INTERNATIONAL",
+        "PURSUIT", "CLASH", "AUTHORITY", "FATHOM", "TORQUE",
+    }),
+    # Sem referência confiável de famílias: aceitam apenas códigos técnicos (ex.: 4000, BG400).
+    "MARINE SPORTS": frozenset(),
+    "MARINE FISHING": frozenset(),
+    "SAINT PLUS": frozenset(),
+    "DAISEN": frozenset(),
+    "ALBATROZ": frozenset(),
+    "PINNACLE": frozenset(),
+}
+# Domínios de catálogos por fabricante, usados para consultas direcionadas (site:).
+DOMINIOS_CATALOGO_BUSCA_VISTA = ("reelschematic.com", "marinefishing.com.br", "marurifishing.com.py")
+# Mecanismos públicos sem autenticação. Google Programmable Search não é usado: não há configuração legítima no projeto.
+MOTORES_BUSCA_VISTA = {
+    "bing": "https://www.bing.com/search?q={q}",
+    "duckduckgo": "https://duckduckgo.com/html/?q={q}",
+}
+NOMES_MOTORES_BUSCA_VISTA = {"bing": "Bing", "duckduckgo": "DuckDuckGo"}
+DOMINIOS_POR_FABRICANTE_BUSCA_VISTA = {
+    "KASTKING": ("kastking.com",),
+    "OKUMA": ("okumabrasil.com.br",),
+    "SHIMANO": ("shimano.com",),
+    "MARURI": ("marurifishing.com.py",),
+    "MARINE FISHING": ("marinefishing.com.br",),
+    "MARINE SPORTS": ("marinefishing.com.br",),
+}
+# Códigos técnicos curtos usados como sufixo de modelo (ex.: STELLA 4000 XG).
+SUFIXOS_MODELO_BUSCA_VISTA = frozenset({"HG", "XG", "PG", "SH", "XH", "FD", "FA", "FB", "FC", "FE", "LH", "RH", "SW", "SF", "LD", "DH", "BG", "XD"})
+NUMEROS_ROMANOS_BUSCA_VISTA = frozenset({"I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"})
+def _texto_visivel_html(bruto):
+    """Texto da página sem scripts, estilos e atributos (evita falso bloqueio por nomes de arquivos)."""
+    texto = re.sub(r"<(script|style|noscript)\b[^>]*>.*?</\1>", " ", str(bruto or ""), flags=re.I | re.S)
+    return re.sub(r"<[^>]+>", " ", texto)
+
+
+_cache_busca_vista = {}
+_cache_busca_vista_lock = threading.Lock()
+
+
+def _cache_busca_vista_obter(chave):
+    with _cache_busca_vista_lock:
+        entrada = _cache_busca_vista.get(chave)
+        if entrada and time.monotonic() - entrada["quando"] <= VALIDADE_CACHE_BUSCA_VISTA:
+            return entrada
+        _cache_busca_vista.pop(chave, None)
+    return None
+
+
+def _cache_busca_vista_guardar(chave, resultados, limitacoes, fontes):
+    with _cache_busca_vista_lock:
+        _cache_busca_vista[chave] = {
+            "quando": time.monotonic(),
+            "resultados": copy.deepcopy(resultados),
+            "limitacoes": list(limitacoes),
+            "fontes": copy.deepcopy(fontes),
+        }
+
+
+def _limpar_cache_busca_vista():
+    with _cache_busca_vista_lock:
+        _cache_busca_vista.clear()
 
 # Espaçamento vertical entre "CONDIÇÕES DA ORDEM DE SERVIÇO" e "TERMO DE GARANTIA".
 ESPACO_ENTRE_CONDICOES_E_TERMOS_OS = 52
@@ -353,12 +455,14 @@ class FrmOS(ctk.CTkToplevel):
         self.tipo_documento = "ORÇAMENTO"
         self._cliente_em_validacao = False
         self._busca_vista_em_andamento = False
+        self._busca_vista_cancelamento = None
+        self._callbacks_busca_vista = queue.Queue()
         self._vigilancia_after_id = None
         self._vigilancia_token = 0
         self._cache_vigilancia_modelo = {}
         self._alerta_preventivo_msg = ""
         self._alerta_preventivo_tooltip = None
-        self._vigilancia_habilitada = True
+        self._vigilancia_habilitada = False
         self._gerando_orcamento = False
         self._gerando_recibo = False
         self._salvando_documento = False
@@ -550,8 +654,6 @@ class FrmOS(ctk.CTkToplevel):
 
         self.txt_equip = ctk.CTkEntry(f_modelo, placeholder_text=t("ui_modelo_equipamento"), width=300)
         self.txt_equip.grid(row=0, column=0, padx=(0, 4), pady=0, sticky="ew")
-        self.txt_equip.bind("<KeyRelease>", self._agendar_vigilancia_preventiva)
-        self.txt_equip.bind("<FocusOut>", self._iniciar_vigilancia_preventiva)
         self.txt_equip.bind("<Return>", lambda _e: self._adicionar_equipamento())
 
         self.lbl_alerta_preventivo = ctk.CTkLabel(f_modelo, text="", width=22, text_color="#f1c40f", font=("Arial", 15, "bold"), cursor="hand2")
@@ -747,6 +849,7 @@ class FrmOS(ctk.CTkToplevel):
             self.ent_opcional, self.ent_frete, self.ent_desc,
             self.txt_prazo, self.txt_obs,
         ]
+        self.after(100, self._processar_callbacks_busca_vista)
 
     def atualizar_identificacao_documento(self, status):
         """Atualiza a identidade visual do documento (Orçamento vs O.S.) e o título com base no status."""
@@ -1222,8 +1325,7 @@ class FrmOS(ctk.CTkToplevel):
                 pass
 
     def setup_campos(self):
-        # --- MODO ESCUTA SILENCIOSO ---
-        self.after(1000, self._modo_escuta_pdf_clipboard)
+        """A escuta automática da área de transferência está desativada na DEV."""
 
     def _modo_escuta_pdf_clipboard(self):
         try:
@@ -2870,6 +2972,17 @@ class FrmOS(ctk.CTkToplevel):
             uddg = parse_qs(parsed.query).get("uddg", [""])[0]
             if uddg:
                 return unquote(uddg)
+        if parsed.netloc.lower().endswith("bing.com") and parsed.path.startswith("/ck/"):
+            codificado = parse_qs(parsed.query).get("u", [""])[0]
+            if codificado.startswith("a1"):
+                try:
+                    bruto = codificado[2:]
+                    return base64.urlsafe_b64decode(bruto + "=" * (-len(bruto) % 4)).decode("utf-8")
+                except Exception:
+                    return ""
+            return ""
+        if parsed.netloc.lower().endswith(("bing.com", "duckduckgo.com", "google.com")):
+            return ""
         return link
 
     def _pasta_download_vistas(self) -> str:
@@ -2950,19 +3063,539 @@ class FrmOS(ctk.CTkToplevel):
             logger.info("Google AI: chamada de texto falhou.")
         return ""
 
+    def _variantes_modelo(self, modelo: str) -> list[str]:
+        """Grafias equivalentes do modelo (2/II, com e sem espaço) para consultas de busca."""
+        base = self._normalizar_termo_tecnico(modelo, separar_alfanumerico=True).split()
+        if not base:
+            return []
+        romanos = {"1": "I", "2": "II", "3": "III", "4": "IV", "5": "V", "6": "VI", "7": "VII", "8": "VIII", "9": "IX", "10": "X"}
+        variantes = []
+        if base[-1] in romanos:
+            variantes.append(" ".join(base[:-1] + [romanos[base[-1]]]).upper())
+        if len(base) >= 2 and base[-1].isdigit():
+            variantes.append("".join(base).upper())
+        arabicos = {valor: chave for chave, valor in romanos.items()}
+        if base[-1].upper() in arabicos and len(base) >= 2:
+            numero = arabicos[base[-1].upper()]
+            variantes.append(" ".join(base[:-1] + [numero]).upper())
+            variantes.append("".join(base[:-1] + [numero]).upper())
+        original = " ".join(str(modelo or "").upper().split())
+        return [valor for valor in dict.fromkeys(variantes) if valor and valor != original][:3]
+
     def _normalizar_modelo_key(self, fabricante: str, modelo: str) -> str:
-        base = f"{fabricante} {modelo}".strip().lower()
+        base = self._normalizar_termo_tecnico(f"{fabricante} {modelo}")
         base = re.sub(r"\s+", " ", base)
         return re.sub(r"[^a-z0-9 ]+", "", base).strip()
 
+    def _normalizar_termo_tecnico(self, texto: str, separar_alfanumerico: bool = False) -> str:
+        return busca_vista_pdf.normalizar_termo_tecnico(texto, separar_alfanumerico)
+
+    @rede_validacao.rede_tecnica
+    def _buscar_pagina_tecnica(self, url: str, timeout: float = 6.0) -> tuple[str, str]:
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; FRSTechnicalSearch/1.0)"})
+        with urlopen(req, timeout=timeout) as response:
+            content_type = str(response.headers.get("Content-Type") or "").lower()
+            content_length = int(response.headers.get("Content-Length") or 0)
+            if content_length > 2_000_000:
+                raise ValueError("Página excede o limite de leitura de 2 MB.")
+            body = response.read(2_000_001)
+            if len(body) > 2_000_000:
+                raise ValueError("Página excede o limite de leitura de 2 MB.")
+            charset_match = re.search(r"charset=([\w.-]+)", content_type)
+            encoding = charset_match.group(1) if charset_match else "utf-8"
+            return body.decode(encoding, errors="replace"), content_type
+
+    def _extrair_pecas_pdf_texto(self, texto: str, pagina: int) -> list[dict]:
+        return busca_vista_pdf.extrair_pecas_pdf_texto(texto, pagina)
+
+    @rede_validacao.rede_tecnica
+    def _baixar_e_extrair_pdf(
+        self,
+        url: str,
+        fabricante: str,
+        modelo: str,
+        cancelamento=None,
+        timeout: float = 8.0,
+    ) -> dict:
+        resultado = {
+            "status": "error",
+            "pages": 0,
+            "text_pages": 0,
+            "parts": [],
+            "manufacturer": "",
+            "model": "",
+            "error": "",
+        }
+        corpo = bytearray()
+        try:
+            req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; FRSTechnicalSearch/1.0)"})
+            with urlopen(req, timeout=timeout) as response:
+                content_type = str(response.headers.get("Content-Type") or "").lower()
+                length_text = str(response.headers.get("Content-Length") or "").strip()
+                if length_text.isdigit() and int(length_text) > 25 * 1024 * 1024:
+                    raise ValueError("PDF excede o limite de 25 MB.")
+                if content_type and "pdf" not in content_type and not urlparse(response.geturl()).path.lower().endswith(".pdf"):
+                    raise ValueError("A fonte não retornou um arquivo PDF.")
+                while True:
+                    if cancelamento is not None and cancelamento.is_set():
+                        resultado["status"] = "cancelled"
+                        return resultado
+                    bloco = response.read(64 * 1024)
+                    if not bloco:
+                        break
+                    corpo.extend(bloco)
+                    if len(corpo) > 25 * 1024 * 1024:
+                        raise ValueError("PDF excede o limite de 25 MB.")
+            if cancelamento is not None and cancelamento.is_set():
+                resultado["status"] = "cancelled"
+                return resultado
+        except Exception as exc:
+            logger.info("Não foi possível baixar o PDF técnico %s: %s", url, exc)
+            resultado.update(status="error", error=f"{type(exc).__name__}: {exc}")
+            return resultado
+        try:
+            return busca_vista_pdf.analisar_em_processo(bytes(corpo), url, fabricante, modelo, cancelamento)
+        except InterruptedError:
+            resultado["status"] = "cancelled"
+            return resultado
+        except Exception as exc:
+            logger.exception("Falha na análise isolada do PDF técnico %s.", url)
+            resultado.update(status="error", error=f"{type(exc).__name__}: {exc}")
+            return resultado
+
+    def _analisar_pdf_bytes(self, corpo, url, fabricante, modelo, cancelamento=None, resultado=None) -> dict:
+        """Extrai texto e peças de um PDF já baixado (usado pela busca e pelo visualizador)."""
+        return busca_vista_pdf.analisar_pdf_bytes(corpo, url, fabricante, modelo, cancelamento, resultado)
+
+    def _extrair_pecas_pagina_tecnica(self, html_bruto: str) -> list[dict]:
+        pecas = []
+        vistos = set()
+        for linha in re.findall(r"<tr\b[^>]*>(.*?)</tr>", html_bruto or "", re.I | re.S):
+            celulas = re.findall(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", linha, re.I | re.S)
+            valores = [
+                re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", celula))).strip()
+                for celula in celulas
+            ]
+            valores = [valor for valor in valores if valor]
+            if len(valores) < 2:
+                continue
+            texto = " | ".join(valores)
+            posicao = ""
+            if len(valores) >= 3 and re.fullmatch(r"\d{1,3}", valores[0]) and re.search(r"\d", valores[1]):
+                posicao, codigo = valores[0], valores[1]
+                descricao = " | ".join(valores[2:])
+            else:
+                codigo = valores[0]
+                descricao = " | ".join(valores[1:])
+            if not re.search(r"\d", codigo) or len(codigo) > 40 or _peca_parece_dado_pessoal(codigo, descricao):
+                continue
+            chave = texto.casefold()
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            pecas.append({
+                "codigo": codigo,
+                "descricao": descricao,
+                "posicao": posicao,
+            })
+
+        texto_com_codigos = re.findall(
+            r"<strong\b[^>]*>\s*([A-Z0-9][A-Z0-9./_-]{3,})\s*</strong>\s*(?:\||:|-)\s*([^<\r\n]{3,160})",
+            html_bruto or "",
+            re.I,
+        )
+        for codigo, descricao in texto_com_codigos:
+            descricao = re.sub(r"\s+", " ", html.unescape(descricao)).strip(" :-|")
+            chave = f"{codigo} {descricao}".casefold()
+            if not descricao or chave in vistos or _peca_parece_dado_pessoal(codigo, descricao):
+                continue
+            vistos.add(chave)
+            posicao = ""
+            # Catálogos como o da Maruri trazem a posição do diagrama como "#100" na descrição.
+            match_posicao = re.search(r"#([A-Z]?\d{1,3}[A-Z]?)\b\s*(.*)$", descricao, re.I)
+            if match_posicao and match_posicao.group(2).strip():
+                posicao = match_posicao.group(1).upper()
+                descricao = match_posicao.group(2).strip(" :-|")
+            pecas.append({"codigo": codigo.strip(), "descricao": descricao, "posicao": posicao})
+        return pecas[:300]
+
+    def _extrair_conhecimento_pagina_tecnica(self, html_bruto: str) -> dict:
+        conhecimento = {
+            "defeitos": [],
+            "causas": [],
+            "solucoes": [],
+            "compatibilidades": [],
+            "desgaste_manutencao": [],
+        }
+        marcadores = {
+            "defeitos": ("defeito", "falha", "problema", "symptom", "failure"),
+            "causas": ("causa", "caused by", "reason", "origem"),
+            "solucoes": ("solucao", "reparo", "conserto", "repair", "replace"),
+            "compatibilidades": ("compativel", "compatibilidade", "compatible", "fits model"),
+            "desgaste_manutencao": ("desgaste", "manutencao", "lubrificacao", "wear", "maintenance"),
+        }
+        blocos = re.findall(r"<(?:p|li|td|dd)\b[^>]*>(.*?)</(?:p|li|td|dd)>", html_bruto or "", re.I | re.S)
+        vistos = set()
+        for bloco in blocos:
+            texto = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", bloco))).strip()
+            texto_normalizado = self._normalizar_termo_tecnico(texto)
+            if not texto or len(texto) > 400 or re.search(r"@|(?:\+?\d[\d\s().-]{7,}\d)", texto):
+                continue
+            if any(termo in texto_normalizado.split() for termo in ("email", "telefone", "whatsapp", "contato", "endereco")):
+                continue
+            for campo, termos in marcadores.items():
+                if any(self._normalizar_termo_tecnico(termo) in texto_normalizado for termo in termos):
+                    chave = (campo, texto_normalizado)
+                    if chave not in vistos:
+                        vistos.add(chave)
+                        conhecimento[campo].append(texto)
+        return {campo: valores[:5] for campo, valores in conhecimento.items() if valores}
+
+    def _tipo_documentacao_tecnica(self, url: str, titulo: str = "") -> str:
+        caminho = urlparse(url).path.lower()
+        texto = f"{caminho} {titulo}".lower()
+        if caminho.endswith(".pdf"):
+            return "PDF técnico (abrir para conferir)"
+        if any(ext in caminho for ext in (".xls", ".xlsx", ".csv")):
+            return "Tabela de peças"
+        if any(palavra in texto for palavra in ("schematic", "exploded", "diagram", "vista", "explodida")):
+            return "Vista explodida (não verificada)"
+        if any(palavra in texto for palavra in ("manual", "instruction")):
+            return "Manual (não verificado)"
+        if any(palavra in texto for palavra in ("parts", "pecas", "repuestos", "catalog")):
+            return "Catálogo / peças (não verificado)"
+        return "Página de fabricante / produto (não verificada)"
+
+    def _rotulo_fonte_tecnica(self, url: str) -> str:
+        host = urlparse(url).netloc.lower().removeprefix("www.")
+        fontes = (
+            ("reelschematic.com", "Reel Schematics"),
+            ("marinefishing.com.br", "Marine Fishing"),
+            ("marurifishing.com.py", "Maruri Fishing"),
+            ("kastking.com", "KastKing"),
+            ("okumabrasil.com.br", "Okuma Brasil"),
+            ("shimano.com", "Shimano"),
+        )
+        rotulo = next((nome for dominio, nome in fontes if host == dominio or host.endswith(f".{dominio}")), "")
+        if rotulo:
+            return rotulo
+        # Domínios não cadastrados: reconhece pelo nome da marca no endereço, sem presumir URLs.
+        palavras = (
+            ("daisen", "Daisen"), ("saintplus", "Jogá / Saint Plus"), ("joga", "Jogá / Saint Plus"),
+            ("daiwa", "Daiwa"), ("shimano", "Shimano"), ("abugarcia", "Abu Garcia"),
+            ("marinesports", "Marine Sports"), ("marinefishing", "Marine Fishing"),
+        )
+        return next((nome for chave, nome in palavras if chave in host.replace("-", "").replace(".", "")), host or "Busca web")
+
+    @rede_validacao.navegador_usuario
+    def _abrir_url_busca_vista(self, url: str, tipo: str = "fonte") -> bool:
+        """Abre no navegador padrão um endereço HTTP(S) exibido nos resultados."""
+        endereco = str(url or "").strip()
+        parsed = urlparse(endereco)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            self._atualizar_status_busca_diagrama("Endereço da fonte inválido.", cor="#e74c3c")
+            return False
+        try:
+            aberto = webbrowser.open(endereco, new=2)
+        except Exception:
+            logger.exception("Falha ao abrir %s da Busca Vista: %s", tipo, endereco)
+            self._atualizar_status_busca_diagrama("Não foi possível abrir o endereço no navegador.", cor="#e74c3c")
+            return False
+        if not aberto:
+            self._atualizar_status_busca_diagrama("O navegador padrão não confirmou a abertura do endereço.", cor="#e67e22")
+            return False
+        return True
+
+    def _processar_callbacks_busca_vista(self):
+        if not self.winfo_exists():
+            return
+        while True:
+            try:
+                callback = self._callbacks_busca_vista.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                callback()
+            except Exception:
+                logger.exception("Falha ao atualizar a interface da Busca Vista.")
+        if self.winfo_exists():
+            self.after(80, self._processar_callbacks_busca_vista)
+
+    def _concluir_busca_vista(self, termo, resultados, cancelada=False, erro=False, mensagem="", catalogo=None):
+        self._busca_vista_em_andamento = False
+        self._busca_vista_cancelamento = None
+        if not self.winfo_exists():
+            return
+        self.btn_buscar_vista.configure(text="🔎 BUSCAR DIAGRAMA")
+        if mensagem:
+            self._atualizar_status_busca_diagrama(mensagem, cor="#e67e22")
+            return
+        if cancelada:
+            self._atualizar_status_busca_diagrama("Busca cancelada.", cor="#95a5a6")
+            return
+        if erro:
+            self._atualizar_status_busca_diagrama("Falha técnica na busca. Tente novamente.", cor="#e74c3c")
+            return
+        self._processar_conclusao_busca(termo, resultados, catalogo)
+
+    def _descobrir_catalogo_busca_vista(self, fabricante, modelo, cancelamento):
+        """Descobre variações com PDF de diagrama; só fabricante e modelo técnico validados são usados."""
+        def buscar_html(url):
+            bruto, content_type = self._buscar_pagina_tecnica(url, timeout=PRAZO_FONTE_BUSCA_VISTA + 2)
+            if not any(tipo in content_type for tipo in ("text/html", "application/xhtml", "application/xml", "text/xml")):
+                raise ValueError("Fonte não retornou página HTML ou mapa XML.")
+            return bruto
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        trabalhos = [
+            pool.submit(busca_vista_catalogo.descobrir_variantes_reelschematic, fabricante, modelo, buscar_html, cancelamento),
+            pool.submit(busca_vista_fontes.descobrir, fabricante, modelo, buscar_html, cancelamento),
+        ]
+        documentos, falhas = [], []
+        fim = time.monotonic() + 17.0
+        pendentes = set(trabalhos)
+        try:
+            while pendentes and time.monotonic() < fim and not cancelamento.is_set():
+                prontos, pendentes = concurrent.futures.wait(
+                    pendentes, timeout=min(0.2, max(0, fim - time.monotonic())),
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for futuro in prontos:
+                    try:
+                        itens, estado, mensagem = futuro.result()
+                        documentos.extend(itens)
+                        if estado == "incompleto" and mensagem:
+                            falhas.append(mensagem)
+                    except Exception:
+                        logger.exception("Falha na descoberta de catálogo técnico.")
+                        falhas.append("Falha na descoberta de catálogo técnico.")
+            if cancelamento.is_set():
+                return [], "cancelado", ""
+            if pendentes:
+                falhas.append("Prazo de descoberta de catálogo esgotado.")
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        documentos = busca_vista_catalogo.combinar_candidatos(documentos)
+        return documentos, "incompleto" if falhas else ("ok" if documentos else "sem_resultado"), " ".join(falhas)
+
+    def _abrir_visualizador_pdf_busca_vista(self, candidato):
+        nome_modelo = candidato.get("nome") or ""
+        if candidato.get("origem_url") == busca_vista_catalogo.MANUAIS_MARINE_URL:
+            baixar = baixar_pdf_marine
+        elif candidato.get("tipo_documento") == "imagem":
+            baixar = baixar_imagem
+        else:
+            baixar = baixar_pdf
+        VisualizadorPdfBuscaVista(
+            self,
+            candidato,
+            analisar=lambda corpo, cancel: busca_vista_pdf.analisar_em_processo(
+                corpo, candidato["pdf_url"], candidato.get("fabricante", ""), nome_modelo, cancel
+            ),
+            baixar=baixar,
+        )
+
+    def _apresentar_catalogo_busca_vista(self, termo, links, catalogo) -> bool:
+        """Mostra variações identificadas (ou abre o PDF único). False = nada a mostrar no catálogo."""
+        variantes, estado, mensagem = catalogo
+        seguro = self._equipamento_seguro_para_consulta(termo)
+        manuais_marine = bool(variantes) and all(
+            item.get("fonte") == "Marine Fishing"
+            and item.get("origem_url") == busca_vista_catalogo.MANUAIS_MARINE_URL
+            for item in variantes
+        )
+        catalogo_local = bool(variantes) and all(item.get("validado_no_catalogo") for item in variantes)
+        if seguro is None and not (manuais_marine or catalogo_local):
+            return False
+        fabricante, modelo = seguro if seguro else self._extrair_fabricante_modelo(termo)
+        if estado == "incompleto" and mensagem:
+            self._ultima_busca_limitacoes = list(getattr(self, "_ultima_busca_limitacoes", [])) + [mensagem]
+        extras = [] if manuais_marine or catalogo_local else (
+            busca_vista_catalogo.variantes_de_pdfs_genericos(links, fabricante, modelo)
+            + busca_vista_fontes.catalogos_html(links, fabricante, modelo)
+        )
+        candidatos = variantes if manuais_marine or catalogo_local else busca_vista_catalogo.combinar_candidatos(variantes, extras)
+        if not candidatos:
+            return False
+        aviso_marine = "Catálogo oficial Marine Fishing indisponível." in getattr(self, "_ultima_busca_limitacoes", [])
+        aviso = " Catálogo oficial Marine Fishing indisponível." if aviso_marine else ""
+        if estado == "incompleto" and mensagem:
+            aviso += " " + mensagem
+        cor_aviso = "#e67e22" if aviso else "#2ecc71"
+        unica_generica = len(candidatos) == 1 and candidatos[0].get("identificacao_exata") is True
+        unica_preexistente = (len(candidatos) == 1 and "identificacao_exata" not in candidatos[0]
+                              and busca_vista_catalogo.correspondencia_inequivoca(candidatos, modelo))
+        if not manuais_marine and estado != "incompleto" and (unica_generica or unica_preexistente):
+            self._atualizar_status_busca_diagrama(
+                f"Correspondência única: {candidatos[0]['nome']}. Abrindo no visualizador interno.{aviso}",
+                cor=cor_aviso
+            )
+            self._abrir_visualizador_pdf_busca_vista(candidatos[0])
+            return True
+        self._atualizar_status_busca_diagrama(
+            f"{len(candidatos)} documento(s) candidato(s) encontrado(s); selecione um.{aviso}",
+            cor=cor_aviso
+        )
+        self._exibir_catalogo_modelos(termo, fabricante, candidatos, links)
+        return True
+
+    def _exibir_catalogo_modelos(self, termo, fabricante, candidatos, links):
+        win = ctk.CTkToplevel(self)
+        win.withdraw()
+        pai = self.winfo_toplevel()
+        win.transient(pai)
+        win.title(f"Modelos encontrados: {termo}")
+        largura, altura = 820, 520
+        x = max(0, pai.winfo_rootx() + (pai.winfo_width() - largura) // 2)
+        y = max(0, pai.winfo_rooty() + (pai.winfo_height() - altura) // 2)
+        win.geometry(f"{largura}x{altura}+{x}+{y}")
+        win.configure(fg_color="#0d1117")
+        ctk.CTkLabel(win, text=f"Documentos técnicos candidatos — {termo}", font=("Arial", 16, "bold"), text_color="#f8f8f8").pack(anchor="w", padx=15, pady=(14, 2))
+        ctk.CTkLabel(
+            win,
+            text="Candidatos não verificados: confira o modelo no diagrama. Selecione e clique em Abrir diagrama (ou duplo clique).",
+            text_color="#f1c40f", font=("Arial", 10), wraplength=860, justify="left",
+        ).pack(anchor="w", padx=15)
+        filtro = ctk.CTkEntry(win, placeholder_text="Filtrar por nome ou código (somente nesta lista)")
+        filtro.pack(fill="x", padx=15, pady=8)
+        quadro = tk.Frame(win, bg="#0d1117")
+        quadro.pack(fill="both", expand=True, padx=15)
+        estilo = ttk.Style(win)
+        estilo.configure("BVL.Treeview", background="#0d1117", foreground="#e6edf3", fieldbackground="#0d1117", rowheight=24)
+        estilo.configure("BVL.Treeview.Heading", background="#21262d", foreground="#f8f8f8")
+        tree = ttk.Treeview(quadro, columns=("fab", "fam", "nome", "cod", "fonte"), show="headings", style="BVL.Treeview")
+        for col, txt, larg in (("fab", "Fabricante", 90), ("fam", "Família", 110), ("nome", "Variação", 300), ("cod", "Código", 130), ("fonte", "Fonte", 120)):
+            tree.heading(col, text=txt)
+            tree.column(col, width=larg, anchor="w")
+        barra = ttk.Scrollbar(quadro, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=barra.set)
+        barra.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+        por_iid = {}
+        geracao_lista = [0]
+
+        def preencher(*_):
+            geracao_lista[0] += 1
+            geracao = geracao_lista[0]
+            tree.delete(*tree.get_children())
+            por_iid.clear()
+            texto = busca_vista_catalogo._norm(filtro.get())
+            def inserir_lote(inicio=0):
+                if geracao != geracao_lista[0] or not win.winfo_exists():
+                    return
+                fim = min(inicio + 50, len(candidatos))
+                for item in candidatos[inicio:fim]:
+                    if texto and texto not in busca_vista_catalogo._norm(f"{item['nome']} {item['codigo']}"):
+                        continue
+                    iid = tree.insert("", "end", values=(item["fabricante"], item["familia"], item["nome"], item["codigo"], item["fonte"]))
+                    por_iid[iid] = item
+                if fim < len(candidatos):
+                    win.after(1, lambda: inserir_lote(fim))
+            inserir_lote()
+
+        def abrir(_evento=None):
+            selecao = tree.selection()
+            item = por_iid.get(selecao[0]) if selecao else None
+            if item:
+                self._abrir_visualizador_pdf_busca_vista(item)
+
+        filtro.bind("<KeyRelease>", preencher)
+        tree.bind("<Double-1>", abrir)
+        preencher()
+        if candidatos:
+            endereco = tk.StringVar(master=win, value="")
+            origem = tk.StringVar(master=win, value="")
+            ctk.CTkLabel(win, text="Endereço do documento selecionado:", font=("Arial", 10)).pack(anchor="w", padx=15)
+            ctk.CTkEntry(win, textvariable=endereco, state="readonly").pack(fill="x", padx=15, pady=(6, 0))
+            ctk.CTkLabel(win, text="Página de origem:", font=("Arial", 10)).pack(anchor="w", padx=15)
+            ctk.CTkEntry(win, textvariable=origem, state="readonly").pack(fill="x", padx=15)
+
+            def selecionar_link(_evento=None):
+                selecao = tree.selection()
+                item = por_iid.get(selecao[0]) if selecao else None
+                endereco.set(item["pdf_url"] if item else "")
+                origem.set(item.get("origem_url", "") if item else "")
+
+            tree.bind("<<TreeviewSelect>>", selecionar_link)
+        rodape = ctk.CTkFrame(win, fg_color="transparent")
+        rodape.pack(fill="x", padx=15, pady=10)
+        ctk.CTkButton(rodape, text="Abrir diagrama", width=150, command=abrir).pack(side="left")
+        if candidatos:
+            ctk.CTkButton(
+                rodape, text="Abrir link da fonte", width=140, fg_color="#30363d",
+                command=lambda: endereco.get() and self._abrir_url_busca_vista(endereco.get(), "site"),
+            ).pack(side="left", padx=8)
+        outros = [l for l in links if not str(urlparse(str(l.get("url") or "")).path).lower().endswith(".pdf")]
+        if outros:
+            ctk.CTkButton(
+                rodape, text=f"Outras referências ({len(outros)})", width=170, fg_color="#30363d",
+                command=lambda: self._exibir_janela_diagramas_multiplas_escolhas(termo, outros),
+            ).pack(side="left", padx=8)
+        ctk.CTkButton(rodape, text="Fechar", width=100, fg_color="#c0392b", command=win.destroy).pack(side="right")
+        def apresentar():
+            if win.winfo_exists():
+                win.deiconify()
+                win.lift()
+                filtro.focus_set()
+        win.after(20, apresentar)
+
     def _extrair_fabricante_modelo(self, equipamento: str) -> tuple[str, str]:
-        txt = str(equipamento or "").strip().upper()
+        txt = re.sub(r"\s+", " ", str(equipamento or "").strip().upper())
         if not txt:
             return "", ""
-        partes = [p for p in re.split(r"\s+", txt) if p]
-        if len(partes) == 1:
-            return partes[0], partes[0]
-        return partes[0], " ".join(partes[1:])
+        genericos = {"CARRETILHA", "MOLINETE", "REEL", "CARRETEL", "PECAS", "PEÇAS", "DIAGRAMA", "MANUAL", "ESQUEMA"}
+        partes_iniciais = txt.split()
+        while len(partes_iniciais) > 1 and partes_iniciais[0] in genericos:
+            partes_iniciais.pop(0)
+        txt = " ".join(partes_iniciais)
+        fabricantes = FABRICANTES_RECONHECIDOS_BUSCA_VISTA
+        for fabricante in fabricantes:
+            if txt == fabricante or txt.startswith(f"{fabricante} "):
+                return fabricante, txt[len(fabricante):].strip() or fabricante
+        partes = txt.split()
+        return (partes[0], " ".join(partes[1:])) if len(partes) > 1 else (partes[0], partes[0])
+
+    def _equipamento_seguro_para_consulta(self, equipamento: str):
+        """Reduz o texto do equipamento a (fabricante reconhecido, modelo técnico).
+
+        Retorna None quando não há identificação segura; nesse caso nada deve ser enviado
+        a serviços externos. O texto original da OS nunca é alterado.
+        """
+        bruto = re.sub(r"\s+", " ", unicodedata.normalize("NFC", str(equipamento or "")).strip().upper())
+        if not bruto:
+            return None
+        fabricante, restante = self._extrair_fabricante_modelo(bruto)
+        if fabricante not in FABRICANTES_RECONHECIDOS_BUSCA_VISTA:
+            return None
+        if restante == fabricante:
+            return None
+        # Separadores comuns de observações encerram a parte técnica do texto.
+        restante = re.split(r"\s[-–—]\s|[,;:()\[\]|/\\\n\r@]", restante, maxsplit=1)[0]
+        palavras_conhecidas = MODELOS_CONHECIDOS_BUSCA_VISTA.get(fabricante, frozenset())
+        tokens = restante.split()
+        if not tokens or len(tokens) > 6:
+            return None
+        numericos = 0
+        for token in tokens:
+            if token in palavras_conhecidas or token in NUMEROS_ROMANOS_BUSCA_VISTA:
+                continue
+            if token.isdigit() and len(token) <= 4:
+                numericos += 1
+                if numericos > 1:
+                    return None
+                continue
+            if token in SUFIXOS_MODELO_BUSCA_VISTA:
+                continue
+            if fabricante == "DAIWA" and token in {"SV", "TW"}:
+                continue
+            # Código alfanumérico (ex.: BG400, FX2500): letras e poucos dígitos, nunca só letras.
+            if re.fullmatch(r"(?=[A-Z0-9\-]*[A-Z])(?=[A-Z0-9\-]*\d)[A-Z0-9\-]{2,10}", token) and sum(c.isdigit() for c in token) <= 4:
+                continue
+            # Palavra desconhecida: pode ser nome, observação ou endereço; nada é enviado.
+            return None
+        modelo_txt = " ".join(tokens)
+        if modelo_txt == fabricante:
+            return None
+        return fabricante, modelo_txt
 
     def _higienizar_termo_busca(self, equipamento: str) -> str:
         termo = str(equipamento or "").strip().upper()
@@ -3167,55 +3800,63 @@ class FrmOS(ctk.CTkToplevel):
             pass
 
     def _link_eh_tecnico_valido(self, link: str) -> bool:
-        l = (link or "").lower().split("?")[0]
+        l = (link or "").strip().lower().split("#", 1)[0]
+        parsed = urlparse(l)
+        path = parsed.path
         if not l.startswith(("http://", "https://")):
             return False
 
-        # Blacklist rigorosa: ignora logos, ícones, redes sociais e termos genéricos
-        blacklist = ("logo", "banner", "icon", "cart", "index", "promocao", "social", "favicon", "sprite", "css", "js", "facebook", "instagram", "twitter")
-        if any(x in l for x in blacklist):
+        blacklist = ("logo", "banner", "favicon", "sprite", "facebook.com", "instagram.com", "twitter.com")
+        if any(x in l for x in blacklist) or path.endswith((".css", ".js", ".svg", ".woff", ".woff2")):
             return False
 
-        # Ignora páginas HTML genéricas que não são arquivos de documento
-        if l.endswith((".html", ".htm", ".php", ".aspx")):
-            return False
-
-        if any(l.split("?")[0].endswith(ext) for ext in (".pdf", ".png", ".jpg", ".jpeg", ".webp")):
+        if path.endswith((".pdf", ".png", ".jpg", ".jpeg", ".webp", ".doc", ".docx", ".xls", ".xlsx", ".csv")):
             return True
 
-        # Palavras-chave técnicas obrigatórias para validar o link
-        palavras = ("schematic", "pdf", "parts list", "exploded view", "manual", "parts", "diagram", "vista", "explodida")
-        return any(p in l for p in palavras)
+        # Página inicial e troca de idioma não são documentação técnica.
+        if path in ("", "/") or path.startswith(("/locale/", "/login", "/cadastro", "/carrinho")):
+            return False
 
-    def _salvar_diagrama_silencioso(self, fabricante, modelo, url):
-        """Motor de Inteligência: Catalogação automática no DB local e Sincronização imediata no Google Drive."""
+        termos = ("schematic", "manual", "parts", "catalog", "catalogo", "diagram", "exploded", "explodida", "pecas", "repuestos", "assistencia-tecnica")
+        dominios_tecnicos = (
+            "reelschematic.com", "marinefishing.com.br", "marurifishing.com.py",
+            "kastking.com", "okumabrasil.com.br", "shimano.com",
+        )
+        return any(termo in path or termo in parsed.netloc for termo in termos) or any(
+            dominio in parsed.netloc for dominio in dominios_tecnicos
+        )
+
+    def _salvar_diagrama_silencioso(self, fabricante, modelo, url, dados_tecnicos=None, fonte=""):
+        """Salva uma referência técnica somente após ação explícita do usuário."""
         if not url:
             return
 
         def _thread_save():
             try:
-                # 1. Registro no Banco de Dados Local
                 fabricante_up = fabricante.upper()
                 modelo_up = modelo.upper()
                 with get_db_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
                         "INSERT OR IGNORE INTO esquemas_vistas (fabricante, modelo, url, origem) VALUES (?, ?, ?, ?)",
-                        (fabricante_up, modelo_up, url, "Inteligência Compartilhada")
+                        (fabricante_up, modelo_up, url, fonte or "Referência técnica selecionada")
                     )
                     conn.commit()
-
-                # 2. Upload em tempo real para a PLANILHA_CONHECIMENTO (Google Drive) via config.py
-                # Isso garante a alimentação do cérebro compartilhado do sistema
-                salvar_link_alerta_conhecimento(fabricante_up, modelo_up, url, origem="ia_auto_feed")
-                
-                if self.winfo_exists(): #
-                    self.after(0, lambda: self._feedback_silencioso("Check: Link sincronizado com a nuvem"))
+                # Salvamento exclusivamente local: nenhuma sincronização externa é feita aqui.
+                self._callbacks_busca_vista.put(
+                    lambda: self._atualizar_status_busca_diagrama(
+                        "Referência técnica salva localmente neste computador.", "#2ecc71"
+                    )
+                )
             except Exception as e:
-                logger.info(f"Falha na sincronização inteligente com Drive: {e}")
+                logger.exception("Falha ao salvar referência técnica: %s", e)
+                self._callbacks_busca_vista.put(
+                    lambda: self._atualizar_status_busca_diagrama(
+                        "Não foi possível salvar a referência técnica localmente.", "#e74c3c"
+                    )
+                )
         
-        # Modo teste síncrono: execução direta sem thread.
-        _thread_save()
+        threading.Thread(target=_thread_save, daemon=True).start()
 
     def _pontuar_link_diagrama(self, link: str, fabricante: str, modelo: str) -> int:
         l = (link or "").lower()
@@ -3225,6 +3866,10 @@ class FrmOS(ctk.CTkToplevel):
             "daiwa",
             "marine",
             "maruri",
+            "kastking",
+            "daisen",
+            "joga",
+            "saintplus",
             "abu",
             "okuma",
         )
@@ -3255,70 +3900,401 @@ class FrmOS(ctk.CTkToplevel):
         win.geometry(f"700x350+{x}+{y}")
         return win
 
-    def _buscar_links_web_diagrama(self, fabricante: str, modelo: str) -> list[dict]:
-        consulta_base = f"{fabricante} {modelo}".strip()
-        # Query de pesquisa refinada conforme solicitado
-        query = f"{consulta_base} schematic pdf parts list exploded view"
+    def _buscar_links_web_diagrama(self, fabricante: str, modelo: str, cancelamento=None) -> list[dict]:
+        # Última barreira antes da rede: só fabricante reconhecido e modelo técnico saem da máquina.
+        seguro = self._equipamento_seguro_para_consulta(f"{fabricante} {modelo}")
+        if seguro is None:
+            self._ultima_busca_limitacoes = []
+            self._ultima_busca_fontes_consultadas = []
+            return []
+        fabricante, modelo = seguro
+        fabricante = str(fabricante or "").strip()
+        modelo = str(modelo or "").strip()
+        termo = f"{fabricante} {modelo}".strip()
+        if not termo:
+            return []
 
-        consultas = [
-            query,
-            f"site:reelschematic.com {consulta_base} exploded",
-            f"site:shimano.com {consulta_base} schematic",
-            f"site:daiwa.com {consulta_base} schematic",
-            f"site:daiwa.com {consulta_base} manual",
-            f"site:marinefishing.com.br {consulta_base} manual",
-            f"site:marurifishing.com.py {consulta_base} manual",
+        def norm(texto):
+            return self._normalizar_termo_tecnico(texto, separar_alfanumerico=True)
+
+        chave_cache = norm(termo)
+        em_cache = _cache_busca_vista_obter(chave_cache)
+        if em_cache is not None:
+            self._ultima_busca_limitacoes = list(em_cache["limitacoes"])
+            self._ultima_busca_fontes_consultadas = copy.deepcopy(em_cache["fontes"])
+            return copy.deepcopy(em_cache["resultados"])
+
+        variacao = self._normalizar_termo_tecnico(termo)
+        variantes_modelo = self._variantes_modelo(modelo)
+        consultas = list(dict.fromkeys((
+            f'"{termo}" (schematic OR exploded view OR parts list OR manual OR catalog)',
+            f'"{variacao}" (diagram OR spare parts OR service manual OR PDF)',
+            f'"{modelo}" fishing reel parts diagram manual',
+            f'"{modelo}" (Shimano OR Daisen OR "Saint Plus" OR Jogá) (parts OR manual OR diagram)',
+            f'"{modelo}" (KastKing OR Okuma OR Maruri OR "Marine Fishing" OR reelschematic) (parts OR manual OR schematic)',
+            *(f'"{fabricante} {variante}" (parts OR manual OR schematic)' for variante in variantes_modelo),
+            *(
+                f'"{fabricante} {ident}" (parts OR manual OR schematic)'
+                for ident in busca_vista_catalogo.identificadores_tecnicos(fabricante, modelo)
+            ),
+            *(
+                f'site:{dominio} "{fabricante} {modelo}"'
+                for dominio in dict.fromkeys(
+                    DOMINIOS_POR_FABRICANTE_BUSCA_VISTA.get(fabricante, ()) + DOMINIOS_CATALOGO_BUSCA_VISTA
+                )
+            ),
+        )))
+        fontes_conhecidas = (
+            ("Maruri Fishing", "https://marurifishing.com.py/produto/pecas-carretilha-black-pira-bg-400"),
+            ("KastKing", "https://kastking.com/collections/fishing-reels?ref=shopbycategory"),
+            ("KastKing", "https://kastking.com/pages/manuals-schematics?ref=top"),
+            ("Okuma Brasil", "https://www.okumabrasil.com.br/assistencia-tecnica"),
+            # Pesquisa interna do site (somente fabricante e modelo normalizados).
+            ("Reel Schematics", "https://www.reelschematic.com/?s=" + quote_plus(termo)),
+        )
+        resultados = {}
+        limitacoes = set()
+        motores_bloqueados = set()
+        estado_motores = {}
+        resultado_incompleto = []  # falhas transitórias: impedem o uso do cache
+        termos_modelo = [
+            token for token in norm(modelo).split()
+            if len(token) >= 2
         ]
+        if not termos_modelo:
+            termos_modelo = [norm(termo)]
+        minimo_correspondencias = 1 if len(termos_modelo) == 1 else max(1, (len(termos_modelo) + 1) // 2)
+        # Número isolado (ex.: 3000) não identifica o modelo: exige ao menos uma palavra do nome.
+        palavras_nome = [t for t in termos_modelo if len(t) >= 3 and not any(c.isdigit() for c in t)]
 
-        encontrados = []
-        vistos = set()
+        def casa_modelo(texto_normalizado_):
+            palavras = set(texto_normalizado_.split())
+            total = sum(1 for token in termos_modelo if token in palavras)
+            return total >= minimo_correspondencias and (
+                not palavras_nome or any(t in palavras for t in palavras_nome)
+            )
+        def cancelado():
+            return cancelamento is not None and cancelamento.is_set()
 
-        for consulta in consultas:
+        def incluir(url, titulo="", snippet="", source_html="", fuente="", contexto_modelo=False):
+            url = self._normalizar_link_resultado(url)
+            if not url or not self._link_eh_tecnico_valido(url):
+                return
+            texto_match = norm(
+                f"{url} {titulo} {snippet} {source_html[:300000]}"
+            )
+            coincidentes = sum(1 for token in termos_modelo if token in texto_match.split())
+            if not casa_modelo(texto_match) and not contexto_modelo:
+                return
+
+            parts = self._extrair_pecas_pagina_tecnica(source_html) if source_html else []
+            for peca in parts:
+                peca.setdefault("origem_url", url)
+            score = self._pontuar_link_diagrama(url, fabricante, modelo) + coincidentes * 15
+            if parts:
+                score += 40
+            item = {
+                "url": url,
+                "display_name": (html.unescape(titulo).strip() or f"{fabricante} {modelo}").strip(),
+                "source": fuente or self._rotulo_fonte_tecnica(url),
+                "kind": self._tipo_documentacao_tecnica(url, titulo),
+                "parts": parts,
+                "knowledge": self._extrair_conhecimento_pagina_tecnica(source_html) if source_html else {},
+                "snippet": (
+                    "PDF detectado; o conteúdo e a relação entre posição, código e descrição precisam ser conferidos no documento."
+                    if urlparse(url).path.lower().endswith(".pdf") and not snippet
+                    else re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", snippet)))[:360]
+                ),
+                "score": score,
+                "verified": False,
+            }
+            anterior = resultados.get(url)
+            if anterior is None or item["score"] > anterior["score"]:
+                resultados[url] = item
+
+        def buscar_web(motor, consulta):
+            if cancelado() or motor in motores_bloqueados:
+                return [], None, motor
+            search_url = MOTORES_BUSCA_VISTA[motor].format(q=quote_plus(consulta))
             try:
-                url = f"https://duckduckgo.com/html/?q={quote_plus(consulta)}"
-                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    html = resp.read().decode("utf-8", errors="ignore")
-                links = [self._normalizar_link_resultado(l) for l in self._extrair_links_html(html, url)]
+                bruto, _ = self._buscar_pagina_tecnica(search_url, timeout=7.0)
+                if re.search(
+                    r"captcha|verify you are human|unusual traffic|robot check|anomaly-modal|anomaly\.js|bots use DuckDuckGo",
+                    bruto if motor == "duckduckgo" else _texto_visivel_html(bruto), re.I,
+                ):
+                    motores_bloqueados.add(motor)
+                    return [], f"{NOMES_MOTORES_BUSCA_VISTA[motor]} apresentou verificação anti-robô.", motor
+            except urllib.error.HTTPError as exc:
+                if exc.code in (401, 403, 429):
+                    motores_bloqueados.add(motor)
+                return [], f"{NOMES_MOTORES_BUSCA_VISTA[motor]} bloqueou ou limitou a busca (HTTP {exc.code}).", motor
+            except Exception as exc:
+                return [], f"{NOMES_MOTORES_BUSCA_VISTA[motor]} indisponível: {type(exc).__name__}.", motor
+
+            links = []
+            for href, anchor_html in re.findall(
+                r"<a\b[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>",
+                bruto,
+                re.I | re.S,
+            ):
+                url = self._normalizar_link_resultado(html.unescape(href))
+                titulo = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", anchor_html))).strip()
+                if url and titulo and self._link_eh_tecnico_valido(url):
+                    links.append((url, titulo))
+            return links, None, motor
+
+        def ler_fonte(url):
+            if cancelado():
+                return url, None, "Busca cancelada.", "cancelled"
+            try:
+                bruto, content_type = self._buscar_pagina_tecnica(url, timeout=PRAZO_FONTE_BUSCA_VISTA)
+                if "text/html" not in content_type and "application/xhtml" not in content_type:
+                    return url, None, "Conteúdo não HTML; documento correspondente não confirmado.", "not_html"
+                if re.search(r"captcha|verify you are human|unusual traffic|robot check|sign in to continue", _texto_visivel_html(bruto), re.I):
+                    limitacoes.add(f"{self._rotulo_fonte_tecnica(url)} exige verificação ou login.")
+                    return url, None, "Exige verificação ou login.", "blocked"
+                return url, bruto, "Página consultada; documento correspondente não confirmado.", "ok"
+            except urllib.error.HTTPError as exc:
+                if exc.code in (401, 403, 429):
+                    limitacoes.add(f"{self._rotulo_fonte_tecnica(url)} exige login ou bloqueou o acesso automático (HTTP {exc.code}).")
+                    return url, None, f"Exige login ou bloqueou o acesso automático (HTTP {exc.code}).", "blocked"
+                limitacoes.add(f"{self._rotulo_fonte_tecnica(url)} indisponível ou limitou acesso (HTTP {exc.code}).")
+                return url, None, f"Fonte indisponível ou acesso limitado (HTTP {exc.code}).", "unavailable"
+            except Exception as exc:
+                logger.info("Fonte técnica indisponível (%s): %s", url, exc)
+                limitacoes.add(f"{self._rotulo_fonte_tecnica(url)} indisponível ({type(exc).__name__}).")
+                return url, None, f"Fonte indisponível ({type(exc).__name__}).", "unavailable"
+
+        def processar_busca_web(future):
+            try:
+                links, limitacao, motor = future.result()
+                estado_motores.setdefault(motor, "ok")
+                if limitacao:
+                    limitacoes.add(limitacao)
+                    resultado_incompleto.append("web")
+                    estado_motores[motor] = "blocked" if motor in motores_bloqueados else "unavailable"
+                for url, titulo in links:
+                    incluir(url, titulo=titulo)
             except Exception:
-                continue
+                resultado_incompleto.append("web")
+                logger.exception("Falha ao processar resultado da busca web.")
 
-            for link in links:
-                link = (link or "").strip()
-                if not link or link in vistos:
-                    continue
-                vistos.add(link)
-                if not self._link_eh_tecnico_valido(link):
-                    continue
-                encontrados.append({
-                    "url": link,
-                    "score": self._pontuar_link_diagrama(link, fabricante, modelo),
-                })
+        fontes_consultadas = []
 
-        encontrados.sort(key=lambda x: x.get("score", 0), reverse=True)
-        encontrados = encontrados[:12]
-
-        # Refino opcional com IA para priorizar links tecnicamente mais úteis.
-        if encontrados:
+        def processar_fonte(future):
             try:
-                lista_urls = [str(x.get("url") or "").strip() for x in encontrados if str(x.get("url") or "").strip()]
-                if lista_urls:
-                    prompt = (
-                        "Priorize links de diagrama técnico (vista explodida) para manutenção. "
-                        f"Modelo: {fabricante} {modelo}. "
-                        "Responda apenas com uma lista de URLs, uma por linha, na ordem de relevância.\n\n"
-                        + "\n".join(lista_urls)
+                pagina = future.result()
+            except Exception:
+                resultado_incompleto.append("fonte")
+                logger.exception("Falha ao consultar uma fonte técnica conhecida.")
+                return
+            if not pagina:
+                return
+            source_url, bruto, status_fonte, estado_fonte = pagina
+            fonte = next((nome for nome, url in fontes_conhecidas if url == source_url), "")
+            fontes_consultadas.append({
+                "source": fonte or self._rotulo_fonte_tecnica(source_url),
+                "url": source_url,
+                "status": status_fonte,
+                "state": estado_fonte,
+            })
+            if bruto is None:
+                return
+            texto = re.sub(r"<(script|style|noscript)\b[^>]*>.*?</\1>", " ", bruto, flags=re.I | re.S)
+            texto = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", texto)))
+            texto_normalizado = norm(texto)
+            correspondencias_pagina = casa_modelo(texto_normalizado)
+            # Só o caminho da URL conta como contexto: páginas de busca repetem o modelo na query.
+            url_normalizada = norm(urlparse(source_url).path)
+            contexto_especifico = casa_modelo(url_normalizada)
+            if correspondencias_pagina:
+                incluir(source_url, snippet=texto[:3000], source_html=bruto, fuente=fonte)
+            for href, anchor_html in re.findall(
+                r"<a\b[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>",
+                bruto,
+                re.I | re.S,
+            ):
+                url = urljoin(source_url, html.unescape(href.strip()))
+                titulo = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", anchor_html))).strip()
+                searchable = norm(f"{url} {titulo}")
+                if casa_modelo(searchable) or (
+                    contexto_especifico and self._link_eh_tecnico_valido(url)
+                ):
+                    incluir(
+                        url,
+                        titulo=titulo,
+                        fuente=fonte,
+                        contexto_modelo=contexto_especifico,
                     )
-                    resposta = self._chamar_google_ai_texto(prompt, timeout=16)
-                    ordem = [ln.strip() for ln in str(resposta or "").splitlines() if ln.strip().startswith(("http://", "https://"))]
-                    if ordem:
-                        rank = {u: i for i, u in enumerate(ordem)}
-                        encontrados.sort(key=lambda item: (rank.get(str(item.get("url") or ""), 9999), -int(item.get("score", 0))))
-            except Exception:
-                pass
 
-            self._registrar_links_descobertos_colaborativo(fabricante, modelo, encontrados)
+        # Cada fonte tem timeout próprio; o prazo total impede que uma fonte lenta atrase as demais.
+        workers = min(12, len(consultas) + len(fontes_conhecidas) + 4)
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+        futuros = {}
+        for nome_fonte, url_fonte in fontes_conhecidas:
+            futuros[pool.submit(ler_fonte, url_fonte)] = ("fonte", (nome_fonte, url_fonte))
+        for motor, consultas_motor in (
+            ("bing", consultas[:4]),
+            ("duckduckgo", consultas),
+        ):
+            for consulta in consultas_motor:
+                futuros[pool.submit(buscar_web, motor, consulta)] = ("web", None)
+        prazo_total = time.monotonic() + PRAZO_TOTAL_BUSCA_VISTA
+        pendentes = set(futuros)
+        try:
+            while pendentes and not cancelado():
+                restante = prazo_total - time.monotonic()
+                if restante <= 0:
+                    break
+                concluidos, pendentes = concurrent.futures.wait(
+                    pendentes,
+                    timeout=min(0.25, restante),
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for future in concluidos:
+                    if futuros[future][0] == "web":
+                        processar_busca_web(future)
+                    else:
+                        processar_fonte(future)
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
+        esgotou_prazo = False
+        if pendentes and not cancelado():
+            esgotou_prazo = True
+            for future in pendentes:
+                tipo, dados = futuros[future]
+                if tipo == "fonte":
+                    nome_fonte, url_fonte = dados
+                    fontes_consultadas.append({
+                        "source": nome_fonte,
+                        "url": url_fonte,
+                        "status": "Tempo esgotado; fonte não respondeu a tempo.",
+                        "state": "timeout",
+                    })
+                    limitacoes.add(f"{nome_fonte} não respondeu dentro do prazo.")
+                else:
+                    limitacoes.add("Uma consulta de busca web não respondeu dentro do prazo.")
+
+        if cancelado():
+            return []
+        for motor, estado in estado_motores.items():
+            fontes_consultadas.append({
+                "source": NOMES_MOTORES_BUSCA_VISTA[motor],
+                "url": MOTORES_BUSCA_VISTA[motor].split("?", 1)[0],
+                "status": {
+                    "ok": "Busca consultada; resultados são apenas candidatos.",
+                    "blocked": "Bloqueada ou exige verificação; não é ausência de resultado.",
+                }.get(estado, "Indisponível; não é ausência de resultado."),
+                "state": estado,
+            })
+        # Threads atrasadas podem ainda alterar o conjunto; list() é atômico.
+        self._ultima_busca_limitacoes = sorted(list(limitacoes))
+        self._ultima_busca_fontes_consultadas = sorted(
+            fontes_consultadas,
+            key=lambda fonte: (fonte["source"].casefold(), fonte["url"]),
+        )
+        encontrados = sorted(resultados.values(), key=lambda item: item["score"], reverse=True)
+        encontrados = encontrados[:20]
+        pdfs = [item for item in encontrados if urlparse(item["url"]).path.lower().endswith(".pdf")][:5]
+        if pdfs and not cancelado():
+            pool_pdf = concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(pdfs)))
+            encerrar_pdfs = threading.Event()
+
+            class CancelamentoPdf:
+                def is_set(self):
+                    return encerrar_pdfs.is_set() or cancelado()
+
+            cancelamento_pdf = CancelamentoPdf()
+            tarefas_pdf = {
+                pool_pdf.submit(
+                    self._baixar_e_extrair_pdf,
+                    item["url"],
+                    fabricante,
+                    modelo,
+                    cancelamento_pdf,
+                ): item
+                for item in pdfs
+            }
+            pendentes_pdf = set(tarefas_pdf)
+
+            def pdfs_concluidos():
+                nonlocal pendentes_pdf
+                prazo_pdf = min(prazo_total, time.monotonic() + PRAZO_TOTAL_PDF_BUSCA_VISTA)
+                try:
+                    while pendentes_pdf and not cancelado() and time.monotonic() < prazo_pdf:
+                        concluidos_pdf, pendentes_pdf = concurrent.futures.wait(
+                            pendentes_pdf,
+                            timeout=0.25,
+                            return_when=concurrent.futures.FIRST_COMPLETED,
+                        )
+                        yield from concluidos_pdf
+                finally:
+                    encerrar_pdfs.set()
+                    pool_pdf.shutdown(wait=False, cancel_futures=True)
+
+            if pendentes_pdf:
+                for future in pdfs_concluidos():
+                    item = tarefas_pdf[future]
+                    try:
+                        pdf = future.result()
+                    except Exception as exc:
+                        logger.exception("Falha ao processar PDF técnico %s.", item["url"])
+                        pdf = {
+                            "status": "error",
+                            "pages": 0,
+                            "text_pages": 0,
+                            "parts": [],
+                            "manufacturer": "",
+                            "model": "",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    if pdf.get("status") in ("error", "unavailable"):
+                        resultado_incompleto.append("pdf")
+                    item["pdf"] = pdf
+                    item["parts"] = pdf.get("parts", [])
+                    if pdf["status"] == "extracted":
+                        item["kind"] = f"PDF técnico — {pdf['pages']} páginas; {len(pdf['parts'])} peças extraídas"
+                    elif pdf["status"] == "scanned":
+                        item["kind"] = "PDF digitalizado — sem texto extraível"
+                    elif pdf["status"] == "text_only":
+                        item["kind"] = "PDF com texto — sem tabela de peças confiável"
+                    elif pdf["status"] == "page_limit":
+                        item["kind"] = f"PDF técnico — leitura parcial ({len(pdf['parts'])} peças)"
+                    elif pdf["status"] == "unavailable":
+                        item["kind"] = "PDF protegido — não foi possível ler"
+                    else:
+                        item["kind"] = "PDF localizado — falha ao ler"
+                    if pdf.get("error"):
+                        item["snippet"] = pdf["error"]
+                    identidade = " ".join(
+                        valor for valor in (pdf.get("manufacturer"), pdf.get("model")) if valor
+                    )
+                    if identidade:
+                        item["pdf_identity"] = identidade
+                    for peca in item["parts"]:
+                        peca.setdefault("origem_url", item["url"])
+
+            if not cancelado():
+                for future in pendentes_pdf:
+                    item = tarefas_pdf[future]
+                    item["pdf"] = {
+                        "status": "error", "pages": 0, "text_pages": 0, "parts": [],
+                        "manufacturer": "", "model": "", "error": "Tempo esgotado ao ler o PDF.",
+                    }
+                    item["kind"] = "PDF localizado — falha ao ler"
+                    item["snippet"] = "Tempo esgotado ao ler o PDF; abra o link para conferir."
+                    esgotou_prazo = True
+                    resultado_incompleto.append("pdf")
+
+        if cancelado():
+            return []
+        if not esgotou_prazo and not resultado_incompleto and not any(
+            fonte.get("state") in ("unavailable", "timeout") for fonte in self._ultima_busca_fontes_consultadas
+        ):
+            _cache_busca_vista_guardar(
+                chave_cache, encontrados, self._ultima_busca_limitacoes, self._ultima_busca_fontes_consultadas
+            )
         return encontrados
 
     def _popup_opcoes_diagrama(self, fabricante: str, modelo: str, opcoes: list[dict]) -> tuple[bool, bool]:
@@ -3342,10 +4318,6 @@ class FrmOS(ctk.CTkToplevel):
                 messagebox.showwarning(t('msg_titulo_diagrama'), t('msg_link_nao_aberto'), parent=win)
                 return
             
-            # Salvamento automático sem perguntar
-            self._salvar_diagrama_silencioso(fabricante, modelo, url_diagrama)
-            self._registrar_sucesso_colaborativo(fabricante, modelo, url_diagrama)
-
         melhores = [str(item.get("url", "")).strip() for item in opcoes[:3] if str(item.get("url", "")).strip()]
 
         bloco_amarelo = ctk.CTkFrame(frame, fg_color="#f1c40f", corner_radius=10)
@@ -3549,8 +4521,10 @@ class FrmOS(ctk.CTkToplevel):
         def _open_and_save():
             try:
                 webbrowser.open(url)
-                self._salvar_diagrama_silencioso(fabricante, modelo, url) # Step 5: Total Synchronization
-                self._atualizar_status_busca_diagrama(f"Diagrama para '{display_name}' aberto e salvo.", cor="#2ecc71")
+                self._atualizar_status_busca_diagrama(
+                    f"Referência aberta: '{display_name}'. Salve-a separadamente se desejar.",
+                    cor="#2ecc71",
+                )
             except Exception as e:
                 self._atualizar_status_busca_diagrama(f"Erro ao abrir diagrama: {e}", cor="#e74c3c")
 
@@ -3585,131 +4559,328 @@ class FrmOS(ctk.CTkToplevel):
         win.focus_force()
         win.lift()
 
-        ctk.CTkLabel(win, text=f"Resultados para: {termo_busca}", font=("Arial", 16, "bold"), text_color="#f8f8f8", fg_color="#000000").pack(pady=(15, 5))
-        
-        if links:
-            ctk.CTkLabel(win, text=t("ui_clique_no_tri_ngulo_para_ver_alertas_t_cnicos"), font=("Arial", 10), text_color="#f1c40f", fg_color="#000000").pack(pady=(0, 10))
+        ctk.CTkLabel(win, text=f"Referências técnicas para: {termo_busca}", font=("Arial", 16, "bold"), text_color="#f8f8f8", fg_color="#000000").pack(pady=(15, 5))
+        ctk.CTkLabel(
+            win,
+            text="Resultados são referências candidatas; confira o modelo e o conteúdo na fonte antes de usar.",
+            text_color="#f1c40f",
+            font=("Arial", 10),
+            wraplength=740,
+        ).pack(pady=(0, 8))
         
         scroll_frame = ctk.CTkScrollableFrame(win, fg_color="#000000") # Black background for scrollable frame
         scroll_frame.pack(fill="both", expand=True, padx=15, pady=10)
 
         if not links:
-            ctk.CTkLabel(scroll_frame, text=t("ui_nenhum_diagrama_encontrado_para_este_equipamento"), text_color="#ff6b6b", font=("Arial", 12)).pack(pady=30)
-            ctk.CTkButton(scroll_frame, text=t("ui_tentar_identifica_o_por_foto"), fg_color="#e67e22", hover_color="#d35400", width=250, height=40,
-                          command=lambda: (win.destroy(), self._executar_busca_por_foto_bg(termo_busca))).pack(pady=10)
-            return
+            ctk.CTkLabel(
+                scroll_frame,
+                text="Nenhum documento técnico correspondente ao modelo pesquisado foi encontrado.",
+                text_color="#f1c40f",
+                font=("Arial", 12),
+                wraplength=740,
+            ).pack(pady=18)
 
-        def on_click_link(url_to_open: str, display_name: str):
-            # Modo teste síncrono: execução direta sem thread.
-            fabricante, modelo = self._extrair_fabricante_modelo(termo_busca)
-            self._run_ai_alert_scan_and_notify(fabricante, modelo, termo_busca)
+        limitacoes = getattr(self, "_ultima_busca_limitacoes", [])
+        if limitacoes:
+            ctk.CTkLabel(
+                scroll_frame,
+                text="Limitações de acesso durante a busca:",
+                text_color="#f1c40f",
+                font=("Arial", 10, "bold"),
+            ).pack(anchor="w", padx=12, pady=(4, 2))
+            for limitacao in limitacoes:
+                ctk.CTkLabel(
+                    scroll_frame,
+                    text=limitacao,
+                    text_color="#f1c40f",
+                    wraplength=720,
+                    justify="left",
+                ).pack(anchor="w", padx=12, pady=2)
 
-            webbrowser.open(url_to_open)
-            self._salvar_diagrama_silencioso(fabricante, modelo, url_to_open) # Step 5: Total Synchronization
-            self._atualizar_status_busca_diagrama(f"Diagrama para '{display_name}' aberto e salvo.", cor="#2ecc71")
+        fabricante, modelo = self._equipamento_seguro_para_consulta(termo_busca) or self._extrair_fabricante_modelo(termo_busca)
 
         for link_info in links:
-            url = link_info["url"]
-            display_name = link_info.get("display_name", url)
-            alert_message = link_info.get("alert_message")
+            url = str(link_info.get("url") or "").strip()
+            if not url:
+                continue
+            display_name = link_info.get("display_name") or url
+            source = link_info.get("source") or self._rotulo_fonte_tecnica(url)
+            kind = link_info.get("kind") or self._tipo_documentacao_tecnica(url, display_name)
 
             item_container = ctk.CTkFrame(scroll_frame, fg_color="transparent")
-            item_container.pack(anchor="w", padx=20, pady=4)
-
-            model_label = ctk.CTkLabel(
+            item_container.pack(fill="x", anchor="w", padx=12, pady=5)
+            ctk.CTkLabel(item_container, text=f"{source} — {kind}", text_color="#f1c40f", font=("Arial", 10, "bold")).pack(anchor="w")
+            ctk.CTkLabel(
                 item_container,
-                text=display_name,  # Display model name, not URL
-                text_color="#cccccc",  # Light gray text
-                fg_color="transparent",
+                text=display_name,
+                text_color="#cccccc",
+                wraplength=740,
+                justify="left",
+            ).pack(anchor="w", pady=(2, 0))
+            endereco = ctk.CTkLabel(
+                item_container,
+                text=url,
+                text_color="#58a6ff",
+                wraplength=740,
+                justify="left",
                 cursor="hand2",
-                font=("Arial", 12, "underline")
+                font=("Arial", 9, "underline"),
             )
-            model_label.pack(side="left")
-            model_label.bind("<Button-1>", lambda e, u=url, dn=display_name: on_click_link(u, dn))
+            endereco.pack(anchor="w", pady=(2, 0))
+            endereco.bind("<Button-1>", lambda _event, u=url: self._abrir_url_busca_vista(u, "documento"))
+            if link_info.get("pdf_identity"):
+                ctk.CTkLabel(item_container, text=f"Identificação no PDF: {link_info['pdf_identity']}", text_color="#95a5a6", wraplength=740, justify="left").pack(anchor="w", pady=(2, 0))
+            if link_info.get("snippet"):
+                ctk.CTkLabel(item_container, text=link_info["snippet"], text_color="#95a5a6", wraplength=740, justify="left").pack(anchor="w", pady=(2, 0))
+            for peca in link_info.get("parts", [])[:5]:
+                origem_pagina = f" — página {peca['pagina']}" if peca.get("pagina") else ""
+                detalhe = f"{peca.get('posicao') + ' — ' if peca.get('posicao') else ''}{peca.get('codigo', '')}: {peca.get('descricao', '')}{origem_pagina}"
+                ctk.CTkLabel(item_container, text=detalhe, text_color="#bdc3c7", wraplength=740, justify="left").pack(anchor="w", padx=(12, 0))
+            for categoria, trechos in link_info.get("knowledge", {}).items():
+                for trecho in trechos[:2]:
+                    ctk.CTkLabel(item_container, text=f"{categoria.replace('_', ' ').capitalize()}: {trecho}", text_color="#bdc3c7", wraplength=740, justify="left").pack(anchor="w", padx=(12, 0))
+            acoes = ctk.CTkFrame(item_container, fg_color="transparent")
+            acoes.pack(anchor="w", pady=(3, 5))
+            ctk.CTkButton(
+                acoes,
+                text="Abrir documento",
+                width=150,
+                command=lambda u=url: self._abrir_url_busca_vista(u, "documento"),
+            ).pack(side="left", padx=(0, 6))
+            ctk.CTkButton(
+                acoes,
+                text="Salvar referência técnica",
+                width=180,
+                command=lambda info=link_info, f=fabricante, m=modelo: self._salvar_diagrama_silencioso(
+                    f,
+                    m,
+                    info["url"],
+                    {
+                        "partes": info.get("parts", []),
+                        "conhecimento": info.get("knowledge", {}),
+                        "pdf": info.get("pdf", {}),
+                        "tipo": info.get("kind", ""),
+                        "modelo": termo_busca,
+                    },
+                    info.get("source", ""),
+                ),
+            ).pack(side="left")
 
-            if alert_message:
-                alert_icon_label = ctk.CTkLabel(
-                    item_container,
-                    text=t("ui_"), # Space for visual separation
-                    text_color="#f1c40f",
-                    fg_color="transparent",
+        fontes = getattr(self, "_ultima_busca_fontes_consultadas", [])
+        if fontes:
+            ctk.CTkLabel(
+                scroll_frame,
+                text="Fontes consultadas — abrir o site não confirma a existência de documento para este modelo.",
+                text_color="#f1c40f",
+                font=("Arial", 10, "bold"),
+                wraplength=740,
+                justify="left",
+            ).pack(anchor="w", padx=12, pady=(10, 4))
+            urls_resultados = {str(item.get("url") or "").strip() for item in links}
+            for fonte in fontes:
+                url = str(fonte.get("url") or "").strip()
+                nome = str(fonte.get("source") or self._rotulo_fonte_tecnica(url)).strip()
+                motivo = str(fonte.get("status") or "Documento correspondente não confirmado.")
+                if not url:
+                    ctk.CTkLabel(
+                        scroll_frame,
+                        text=f"{nome} — {motivo}",
+                        text_color="#f1c40f",
+                        wraplength=720,
+                        justify="left",
+                    ).pack(anchor="w", padx=12, pady=3)
+                    continue
+                if url in urls_resultados:
+                    continue
+                item_fonte = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+                item_fonte.pack(fill="x", anchor="w", padx=12, pady=4)
+                ctk.CTkLabel(
+                    item_fonte,
+                    text=nome,
+                    text_color="#cccccc",
+                    font=("Arial", 10, "bold"),
+                ).pack(anchor="w")
+                ctk.CTkLabel(
+                    item_fonte,
+                    text=motivo,
+                    text_color="#f1c40f" if fonte.get("state") in ("blocked", "timeout") or "verificação" in motivo.lower() or "login" in motivo.lower() else "#95a5a6",
+                    wraplength=720,
+                    justify="left",
+                ).pack(anchor="w", pady=(2, 0))
+                endereco_fonte = ctk.CTkLabel(
+                    item_fonte,
+                    text=url,
+                    text_color="#58a6ff",
+                    wraplength=720,
+                    justify="left",
                     cursor="hand2",
-                    font=("Arial", 12, "bold")
+                    font=("Arial", 9, "underline"),
                 )
-                alert_icon_label.pack(side="left", padx=(5, 0))
-                alert_icon_label.bind("<Enter>", lambda e, msg=alert_message: self._show_alert_tooltip(e, msg))
-                alert_icon_label.bind("<Leave>", self._hide_alert_tooltip)
-                alert_icon_label.bind("<Button-1>", lambda e, msg=alert_message: self._show_alert_tooltip(e, msg))
+                endereco_fonte.pack(anchor="w", pady=(2, 0))
+                endereco_fonte.bind(
+                    "<Button-1>",
+                    lambda _event, u=url: self._abrir_url_busca_vista(u, "site"),
+                )
+                ctk.CTkButton(
+                    item_fonte,
+                    text="Abrir site",
+                    width=110,
+                    command=lambda u=url: self._abrir_url_busca_vista(u, "site"),
+                ).pack(anchor="w", pady=(3, 0))
 
-        ctk.CTkButton(win, text=t("ui_nenhum_funcionou_fechar"), fg_color="#c0392b", command=win.destroy).pack(pady=10)
+        ctk.CTkButton(win, text="Fechar", fg_color="#c0392b", command=win.destroy).pack(pady=10)
 
     def buscar_vista_equipamento(self, equipamento_digitado=None):
-        """Inicia motor de inteligência compartilhada: Busca, Filtro e Upload Automático para o Drive."""
+        """Inicia ou cancela explicitamente uma busca técnica em segundo plano."""
+        if self._busca_vista_em_andamento:
+            if self._busca_vista_cancelamento is not None:
+                self._busca_vista_cancelamento.set()
+                self.btn_buscar_vista.configure(text="CANCELANDO...")
+                self._atualizar_status_busca_diagrama("Cancelando a busca...", cor="#f1c40f")
+            return
+
         termo = (equipamento_digitado or self.txt_equip.get()).strip()
-        if not termo: return
+        if not termo:
+            self._atualizar_status_busca_diagrama("Informe fabricante e modelo para pesquisar.", cor="#e67e22")
+            return
 
+        cancelamento = threading.Event()
+        self._busca_vista_cancelamento = cancelamento
+        self._busca_vista_em_andamento = True
+        self._ultima_busca_limitacoes = []
+        self._ultima_busca_fontes_consultadas = []
+        self.btn_buscar_vista.configure(text="CANCELAR BUSCA")
         self._atualizar_status_busca_diagrama("Buscando diagramas técnicos...", cor="#f1c40f")
+        threading.Thread(
+            target=self._executar_busca_filtrada_bg,
+            args=(termo, cancelamento),
+            daemon=True,
+        ).start()
 
-        # Modo teste síncrono: execução direta sem thread.
-        self._executar_busca_filtrada_bg(termo)
+    def _executar_busca_filtrada_bg(self, termo, cancelamento):
+        """Consulta fontes técnicas sem acessar widgets fora da thread principal."""
+        try:
+            limitacao_marine = ""
+            fabricante_informado, modelo_informado = self._extrair_fabricante_modelo(termo)
+            if fabricante_informado == "MARINE SPORTS":
+                if cancelamento.is_set():
+                    self._callbacks_busca_vista.put(
+                        lambda: self._concluir_busca_vista(termo, [], True)
+                    )
+                    return
+                try:
+                    pagina, _ = self._buscar_pagina_tecnica(
+                        busca_vista_catalogo.MANUAIS_MARINE_URL, timeout=PRAZO_FONTE_BUSCA_VISTA + 2
+                    )
+                    documentos = busca_vista_catalogo.parse_manuais_marine(pagina)
+                    if not documentos:
+                        raise ValueError("Página sem documentos técnicos identificáveis")
+                except Exception as exc:
+                    logger.warning("Catálogo oficial Marine Fishing indisponível: %s", exc)
+                    limitacao_marine = "Catálogo oficial Marine Fishing indisponível."
+                else:
+                    categoria = str(termo).strip().upper().split()[0]
+                    categoria = categoria if categoria in {"CARRETILHA", "MOLINETE"} else ""
+                    modelo = "" if modelo_informado == fabricante_informado else modelo_informado
+                    candidatos = busca_vista_catalogo.filtrar_manuais_marine(documentos, modelo, categoria)
+                    if cancelamento.is_set():
+                        self._callbacks_busca_vista.put(
+                            lambda: self._concluir_busca_vista(termo, [], True)
+                        )
+                        return
+                    elif candidatos:
+                        catalogo_marine = (candidatos, "ok", "")
+                        self._callbacks_busca_vista.put(
+                            lambda: self._concluir_busca_vista(
+                                termo, [], cancelamento.is_set(), catalogo=catalogo_marine
+                            )
+                        )
+                        return
+                    elif self._equipamento_seguro_para_consulta(termo) is None:
+                        self._callbacks_busca_vista.put(
+                            lambda: self._concluir_busca_vista(
+                                termo, [], cancelamento.is_set(), mensagem="" if cancelamento.is_set() else (
+                                    "Modelo não encontrado no catálogo oficial ou identificação inválida. "
+                                    "Informe somente fabricante e modelo; nenhum texto da OS foi enviado."
+                                )
+                            )
+                        )
+                        return
+                if cancelamento.is_set():
+                    self._callbacks_busca_vista.put(
+                        lambda: self._concluir_busca_vista(termo, [], True)
+                    )
+                    return
+            seguro = self._equipamento_seguro_para_consulta(termo)
+            if (seguro is None and fabricante_informado in busca_vista_fontes.FONTES_INICIAIS
+                    and modelo_informado and modelo_informado != fabricante_informado):
+                modelo_catalogo = re.split(
+                    r"\s[-–—]\s|[,;:()\[\]|/\\\n\r@]", modelo_informado, maxsplit=1
+                )[0].strip()
+                def buscar_indice(url):
+                    pagina, content_type = self._buscar_pagina_tecnica(url, timeout=PRAZO_FONTE_BUSCA_VISTA + 2)
+                    if not any(tipo in content_type for tipo in ("text/html", "application/xhtml", "application/xml", "text/xml")):
+                        raise ValueError("Fonte não retornou página HTML ou mapa XML.")
+                    return pagina
 
-    def _executar_busca_filtrada_bg(self, termo):
-        """Lógica de raspagem, aplicação de filtros rigorosos por marca e upload para o cérebro compartilhado."""
-        fabricante, modelo = self._extrair_fabricante_modelo(termo)
-        links_coletados = []
-        lock = threading.Lock()
-        fab_upper = fabricante.upper()
-        
-        alvos = [
-            "https://reelschematic.com/reelschematics/", "https://www.marinefishing.com.br/manuais",
-            "https://marurifishing.com.py/categoria/pecas-carretilha", "https://marurifishing.com.py/categoria/manutencao",
-            "https://joga.com.br/manuais/",
-        ]
-
-        def scraper(url):
+                candidatos, estado, mensagem_catalogo = busca_vista_fontes.descobrir(
+                    fabricante_informado, modelo_catalogo, buscar_indice, cancelamento
+                )
+                if cancelamento.is_set():
+                    self._callbacks_busca_vista.put(lambda: self._concluir_busca_vista(termo, [], True))
+                elif candidatos:
+                    for candidato in candidatos:
+                        candidato["validado_no_catalogo"] = True
+                    catalogo_local = (candidatos, estado, mensagem_catalogo)
+                    self._callbacks_busca_vista.put(
+                        lambda: self._concluir_busca_vista(
+                            termo, [], cancelamento.is_set(), catalogo=catalogo_local
+                        )
+                    )
+                else:
+                    self._callbacks_busca_vista.put(
+                        lambda: self._concluir_busca_vista(
+                            termo, [], cancelamento.is_set(), mensagem="" if cancelamento.is_set() else (
+                                (mensagem_catalogo + " " if mensagem_catalogo else "")
+                                + "Modelo não identificado no catálogo público; nenhum texto da OS foi enviado."
+                            )
+                        )
+                    )
+                return
+            if seguro is None:
+                self._callbacks_busca_vista.put(
+                    lambda: self._concluir_busca_vista(
+                        termo, [], False, mensagem=(
+                            (limitacao_marine + " " if limitacao_marine else "")
+                            + "Não foi possível identificar fabricante e modelo com segurança. "
+                            "Ajuste o campo Equipamento (ex.: SUMAX AKITA 2); nenhum dado do equipamento foi enviado."
+                        ),
+                    )
+                )
+                return
+            fabricante, modelo = seguro
+            # Catálogo de variações (Reel Schematics) e busca ampla rodam em paralelo; cada um com prazo próprio.
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            prazo_catalogo = time.monotonic() + PRAZO_TOTAL_BUSCA_VISTA
+            futuro_catalogo = pool.submit(self._descobrir_catalogo_busca_vista, fabricante, modelo, cancelamento)
+            resultados = self._buscar_links_web_diagrama(fabricante, modelo, cancelamento)
+            if limitacao_marine:
+                self._ultima_busca_limitacoes.append(limitacao_marine)
             try:
-                req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urlopen(req, timeout=4) as resp:
-                    html = resp.read().decode('utf-8', errors='ignore') #
-                    urls = re.findall(r'href=["\'](https?://[^"\']+\.(?:pdf|jpg|png|jpeg))["\']', html, re.I) #
-                    for link_url in urls:
-                        l_low = link_url.lower()
-                        # FILTROS RÍGIDOS DE NEGÓCIO
-                        if "MARURI" in fab_upper: #
-                            # Maruri: Apenas Imagens
-                            if not any(ext in l_low for ext in (".jpg", ".jpeg", ".png")): continue #
-                        elif any(m in fab_upper for m in ("MARINE", "SHIMANO", "DAIWA")): #
-                            # Shimano/Marine/Daiwa: Apenas PDFs
-                            if not l_low.endswith(".pdf"): continue #
-                        
-                        if modelo.lower() in l_low or fabricante.lower() in l_low: #
-                            with lock: #
-                                if link_url not in [lc["url"] for lc in links_coletados]: # Avoid duplicates
-                                    links_coletados.append({"url": link_url, "display_name": self._obter_nome_modelo_do_link(link_url, fabricante, modelo)})
-            except: pass
-
-        # Modo teste síncrono: varredura sequencial sem ThreadPoolExecutor.
-        for alvo in alvos:
-            scraper(alvo)
-
-        # Incluir links do Drive colaborativo (Etapa 5)
-        drive_links = self._buscar_links_colaborativos_drive(fabricante, modelo)
-        for d_link in drive_links:
-            if d_link not in [lc["url"] for lc in links_coletados]:
-                links_coletados.append({"url": d_link, "display_name": self._obter_nome_modelo_do_link(d_link, fabricante, modelo)})
-
-        # Add alert messages to links_coletados
-        for link_info in links_coletados:
-            alert_msg = self._check_for_preexisting_alert(fabricante, modelo)
-            link_info["alert_message"] = alert_msg
-
-        # Incluir links da busca geral na web (menos precisa, menor prioridade)
-        web_links_raw = self._buscar_links_web_diagrama(fabricante, modelo)
-        for w_link_info in web_links_raw:
-            if w_link_info["url"] not in [lc["url"] for lc in links_coletados]:
-                links_coletados.append({"url": w_link_info["url"], "display_name": self._obter_nome_modelo_do_link(w_link_info["url"], fabricante, modelo)})
-
-        self.after(0, lambda: self._processar_conclusao_busca(termo, links_coletados))
+                catalogo = futuro_catalogo.result(timeout=max(0, prazo_catalogo - time.monotonic()))
+            except concurrent.futures.TimeoutError:
+                catalogo = ([], "incompleto", "A descoberta de catálogos não respondeu a tempo.")
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
+            # O estado de cancelamento é reavaliado na thread principal, no momento de exibir.
+            self._callbacks_busca_vista.put(
+                lambda: self._concluir_busca_vista(termo, resultados, cancelamento.is_set(), catalogo=catalogo)
+            )
+        except Exception:
+            logger.exception("Falha na Busca Vista para o modelo informado.")
+            self._callbacks_busca_vista.put(
+                lambda: self._concluir_busca_vista(termo, [], False, erro=True)
+            )
 
     def _obter_nome_modelo_do_link(self, url: str, fabricante: str, modelo: str) -> str:
         """Tenta extrair um nome de modelo mais limpo do URL ou usa o termo de busca."""
@@ -3730,22 +4901,41 @@ class FrmOS(ctk.CTkToplevel):
         # Fallback para o URL completo se nada mais funcionar
         return url
 
-    def _processar_conclusao_busca(self, termo_busca: str, links_encontrados: list[dict]):
-        """Finaliza a busca técnica e exibe a interface de resultados, seguindo o fluxo de inteligência."""
+    def _processar_conclusao_busca(self, termo_busca: str, links_encontrados: list[dict], catalogo=None):
+        """Exibe referências candidatas sem apresentá-las como diagramas confirmados."""
         
         try:
-            # Etapa 1: Precisão Exata
-            if len(links_encontrados) == 1:
-                self._abrir_diagrama_direto(links_encontrados[0], termo_busca)
-                self._atualizar_status_busca_diagrama("Diagrama localizado e aberto.", cor="#2ecc71")
-            else:
-                # Etapa 2: Múltiplas Escolhas ou Caso Vazio
-            # A janela agora trata o caso de lista vazia exibindo a mensagem 'Nenhum diagrama encontrado' #
-                self._exibir_janela_diagramas_multiplas_escolhas(termo_busca, links_encontrados)
-                if links_encontrados:
-                    self._atualizar_status_busca_diagrama("Resultados localizados.", cor="#2ecc71")
+            if catalogo is not None and self._apresentar_catalogo_busca_vista(termo_busca, links_encontrados, catalogo):
+                return
+            if catalogo is not None and catalogo[1] == "incompleto" and catalogo[2]:
+                self._ultima_busca_limitacoes = list(getattr(self, "_ultima_busca_limitacoes", [])) + [catalogo[2]]
+            self._exibir_janela_diagramas_multiplas_escolhas(termo_busca, links_encontrados)
+            if links_encontrados:
+                limitacoes = getattr(self, "_ultima_busca_limitacoes", [])
+                if limitacoes:
+                    texto_status = (
+                        f"{len(links_encontrados)} referência(s) candidata(s); "
+                        f"{len(limitacoes)} limitação(ões) de acesso."
+                    )
+                    cor_status = "#e67e22"
                 else:
-                    self._atualizar_status_busca_diagrama("Busca concluída: sem resultados.", cor="#e67e22")
+                    texto_status = f"{len(links_encontrados)} referência(s) candidata(s); confirme na fonte."
+                    cor_status = "#2ecc71"
+                self._atualizar_status_busca_diagrama(texto_status, cor=cor_status)
+            elif getattr(self, "_ultima_busca_limitacoes", []):
+                self._atualizar_status_busca_diagrama(
+                    "Sem correspondências; " + (
+                        "catálogo oficial Marine Fishing indisponível."
+                        if "Catálogo oficial Marine Fishing indisponível." in self._ultima_busca_limitacoes
+                        else "uma ou mais fontes limitaram o acesso."
+                    ),
+                    cor="#e67e22",
+                )
+            else:
+                self._atualizar_status_busca_diagrama(
+                    "Busca concluída: documentação correspondente não encontrada.",
+                    cor="#e67e22",
+                )
                     
         except Exception as e:
             logger.exception(f"Erro ao processar resultados da busca para {termo_busca}: {e}")
@@ -3842,6 +5032,9 @@ class FrmOS(ctk.CTkToplevel):
         return None
     def _monitorar_clipboard_escuta(self, termo):
         """Etapa 4: Monitora o clipboard de forma totalmente automática e silenciosa (Modo Escuta)."""
+        if rede_validacao.ativo():
+            self._atualizar_status_busca_diagrama("Escuta automática desativada na validação isolada.", cor="#e67e22")
+            return
         fab, mod = self._extrair_fabricante_modelo(termo)
         ultimo_clip = ""
         start = time.time()
@@ -3851,9 +5044,15 @@ class FrmOS(ctk.CTkToplevel):
                 if conteudo and conteudo != ultimo_clip:
                     ultimo_clip = conteudo
                     if self._link_eh_tecnico_valido(conteudo):
-                        # Etapa 4 e 5: Salvamento automático e Sincronização Total (Local + Drive) #
                         if self.winfo_exists():
-                            self.after(0, lambda c=conteudo: self.winfo_exists() and self._salvar_diagrama_silencioso(fab, mod, c))
+                            self.after(
+                                0,
+                                lambda: self.winfo_exists()
+                                and self._atualizar_status_busca_diagrama(
+                                    "Link técnico detectado na área de transferência; confirme e salve pela janela de resultados.",
+                                    cor="#e67e22",
+                                ),
+                            )
                         break
             except Exception:
                 pass

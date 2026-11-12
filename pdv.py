@@ -1,16 +1,22 @@
 ﻿# -*- coding: utf-8 -*-
 import os
 import json
+import math
+import queue
+import tempfile
 import threading
 import unicodedata
 import tkinter as tk
+from copy import deepcopy
 from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from xml.dom import minidom
 from xml.etree import ElementTree as ET
 
 import customtkinter as ctk
+import rede_validacao
 
 from config import CAMINHO_BANCO, get_db_connection
 from configuracao_fiscal import tentar_enviar_venda, consultar_nota_fiscal, imprimir_danfe_fiscal, verificar_status_motor_fiscal
@@ -25,6 +31,7 @@ from validador_fiscal import (
 
 try:
     from reportlab.lib.pagesizes import A4
+    from reportlab.lib.utils import simpleSplit
     from reportlab.pdfgen import canvas
 
     _REPORTLAB_OK = True
@@ -66,13 +73,17 @@ def _to_float(valor):
     try:
         txt = str(valor).strip()
         txt = txt.replace(".", "").replace(",", ".") if "," in txt else txt
-        return float(txt)
+        numero = float(txt)
+        return numero if math.isfinite(numero) else 0.0
     except Exception:
         return 0.0
 
 
 def _fmt_moeda(valor):
     return f"R$ {float(valor or 0):.2f}".replace(".", ",")
+
+def _valor_monetario(valor):
+    return Decimal(str(valor or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _normalizar_texto_pagamento(valor):
@@ -145,6 +156,11 @@ class FrmPDV(ctk.CTkToplevel):
         self._metodo_pagamento = "DINHEIRO"
         self._produto_cols = set()
         self._produto_preselecionado = None
+        self._busca_direta_pendente = None
+        self._buscas_diretas_ativas = set()
+        self._busca_direta_polling = False
+        self._fila_busca_direta = queue.Queue()
+        self._pdv_timers = set()
         self._auto_impressao = ctk.BooleanVar(value=True)
         self._finalizando_venda = False
 
@@ -155,16 +171,25 @@ class FrmPDV(ctk.CTkToplevel):
         self._configurar_atalhos()
         self.protocol("WM_DELETE_WINDOW", self._safe_destroy_window)
 
-        self.after(80, self._aplicar_maximizacao)
-        self.after(120, self._focar_busca)
+        self._agendar_pdv(80, self._aplicar_maximizacao)
+        self._agendar_pdv(120, self._focar_busca)
+
+    def _agendar_pdv(self, atraso, callback):
+        def executar():
+            self._pdv_timers.discard(identificador)
+            callback()
+        identificador = self.after(atraso, executar)
+        self._pdv_timers.add(identificador)
+        return identificador
 
     def _safe_destroy_window(self):
         try:
             if not bool(self.winfo_exists()):
                 return
             try:
-                for after_id in self.tk.call("after", "info"):
+                for after_id in tuple(self._pdv_timers):
                     self.after_cancel(after_id)
+                self._pdv_timers.clear()
             except Exception:
                 pass
             self.withdraw()
@@ -418,6 +443,7 @@ class FrmPDV(ctk.CTkToplevel):
         self.ent_busca.grid(row=0, column=2, padx=(0, 8), pady=8, sticky="ew")
         self.ent_busca.bind("<Return>", self._enter_na_busca)
         self.ent_busca.bind("<Tab>", self._tab_na_busca)
+        self.ent_busca.bind("<KeyRelease>", self._invalidar_busca_direta)
 
         acoes_topo = ctk.CTkFrame(topo, fg_color="transparent")
         acoes_topo.grid(row=0, column=3, padx=(8, 12), pady=6, sticky="e")
@@ -612,6 +638,24 @@ class FrmPDV(ctk.CTkToplevel):
             command=self._fechamento_de_caixa,
         ).grid(row=1, column=2, padx=(4, 0), sticky="ew")
 
+        ctk.CTkButton(
+            acoes_venda,
+            text=t("pdv_orcamento_comercial").upper(),
+            width=156,
+            height=32,
+            font=("Arial", 11, "bold"),
+            fg_color="#0e7490",
+            command=self._gerar_orcamento_comercial,
+        ).grid(row=2, column=0, columnspan=3, pady=(4, 0), sticky="ew")
+        ctk.CTkButton(
+            acoes_venda, text=t("pdv_recuperar_venda"), height=30,
+            command=lambda: self._recuperar_documento_pdv("venda"),
+        ).grid(row=3, column=0, pady=(4, 0), padx=(0, 4), sticky="ew")
+        ctk.CTkButton(
+            acoes_venda, text=t("pdv_recuperar_orcamento"), height=30,
+            command=lambda: self._recuperar_documento_pdv("orcamento"),
+        ).grid(row=3, column=1, columnspan=2, pady=(4, 0), padx=(4, 0), sticky="ew")
+
         self.tree_pagamentos = ttk.Treeview(
             painel_pagamento,
             columns=("metodo", "valor"),
@@ -797,17 +841,36 @@ class FrmPDV(ctk.CTkToplevel):
 
     def _total_desconto(self):
         try:
-            desconto = max(_to_float(self.ent_desconto.get() or 0), 0.0)
+            desconto = max(float(_valor_monetario(_to_float(self.ent_desconto.get() or 0))), 0.0)
         except Exception:
             desconto = 0.0
         return min(desconto, self._total_itens())
 
     def _total_liquido(self):
-        return max(self._total_itens() - self._total_desconto(), 0.0)
+        return float(max(_valor_monetario(self._total_itens()) - _valor_monetario(self._total_desconto()), Decimal("0")))
+
+    def _validar_desconto(self):
+        texto = (self.ent_desconto.get() or "").strip()
+        if not texto:
+            return
+        texto = texto.replace(".", "").replace(",", ".") if "," in texto else texto
+        try:
+            valor = Decimal(texto)
+        except InvalidOperation as exc:
+            raise ValueError("Informe um desconto numérico válido.") from exc
+        if not valor.is_finite() or valor < 0 or valor > _valor_monetario(self._total_itens()):
+            raise ValueError("O desconto deve estar entre zero e o subtotal.")
 
     def _tab_na_busca(self, _event=None):
+        self._invalidar_busca_direta()
         self._abrir_busca_estoque()
         return "break"
+
+    def _invalidar_busca_direta(self, _event=None):
+        if _event is not None and self._busca_direta_pendente is not None:
+            if (self.ent_busca.get() or "").strip() == self._busca_direta_pendente[0]:
+                return
+        self._busca_direta_pendente = None
 
     def _enter_na_busca(self, _event=None):
         termo = (self.ent_busca.get() or "").strip()
@@ -816,9 +879,51 @@ class FrmPDV(ctk.CTkToplevel):
         qtd = int(_to_float(self.ent_qtd.get() or 1) or 1)
         if qtd <= 0:
             qtd = 1
-        if self._adicionar_produto_por_termo(termo=termo, qtd=qtd):
-            self._preparar_proximo_item()
+        if self._busca_direta_pendente == (termo, qtd):
+            return "break"
+        self._busca_direta_pendente = (termo, qtd)
+
+        def consultar():
+            try:
+                row = self._buscar_produto_por_termo(termo)
+                self._fila_busca_direta.put((termo, row, None))
+            except Exception as exc:
+                self._fila_busca_direta.put((termo, None, exc))
+
+        if termo not in self._buscas_diretas_ativas:
+            self._buscas_diretas_ativas.add(termo)
+            threading.Thread(target=consultar, daemon=True).start()
+        if not self._busca_direta_polling:
+            self._busca_direta_polling = True
+            self._agendar_pdv(40, self._processar_busca_direta)
         return "break"
+
+    def _processar_busca_direta(self):
+        if not self.winfo_exists():
+            return
+        try:
+            while True:
+                termo, row, erro = self._fila_busca_direta.get_nowait()
+                self._buscas_diretas_ativas.discard(termo)
+                pendente = self._busca_direta_pendente
+                if pendente is None or pendente[0] != termo:
+                    continue
+                qtd = pendente[1]
+                self._busca_direta_pendente = None
+                if termo != (self.ent_busca.get() or "").strip() or qtd != int(_to_float(self.ent_qtd.get() or 1) or 1):
+                    continue
+                if erro:
+                    messagebox.showerror("PDV", f"Falha ao pesquisar produto: {erro}", parent=self)
+                elif not row:
+                    messagebox.showwarning("PDV", f"Produto nao encontrado: {termo}", parent=self)
+                elif self._adicionar_item_no_carrinho(row=row, qtd=qtd):
+                    self._preparar_proximo_item()
+        except queue.Empty:
+            pass
+        if self._buscas_diretas_ativas:
+            self._agendar_pdv(40, self._processar_busca_direta)
+        else:
+            self._busca_direta_polling = False
 
     def _buscar_produto_por_termo(self, termo):
         termo = (termo or "").strip()
@@ -907,13 +1012,13 @@ class FrmPDV(ctk.CTkToplevel):
 
         item_existente = next((i for i in self._carrinho if i["produto_id"] == produto_id), None)
         qtd_total = qtd + (item_existente["quantidade"] if item_existente else 0)
-        if estoque > 0 and qtd_total > estoque:
+        if qtd_total > estoque:
             messagebox.showwarning("PDV", f"Estoque insuficiente para {nome}. Disponivel: {estoque}", parent=self)
             return False
 
         if item_existente:
             item_existente["quantidade"] += qtd
-            item_existente["total_item"] = item_existente["quantidade"] * item_existente["preco_unitario"]
+            item_existente["total_item"] = float(_valor_monetario(item_existente["quantidade"] * item_existente["preco_unitario"]))
         else:
             self._carrinho.append(
                 {
@@ -921,7 +1026,7 @@ class FrmPDV(ctk.CTkToplevel):
                     "nome_produto": nome,
                     "quantidade": qtd,
                     "preco_unitario": preco,
-                    "total_item": qtd * preco,
+                    "total_item": float(_valor_monetario(Decimal(qtd) * Decimal(str(preco)))),
                 }
             )
         self._renderizar_carrinho()
@@ -963,32 +1068,108 @@ class FrmPDV(ctk.CTkToplevel):
         tree.column("estoque", width=100, anchor="center")
         tree.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-        def carregar_lista():
+        estado = {"geracao": 0, "texto": None, "timer": None, "ativo": False, "pedido": None, "exibida": -1}
+        resultados = queue.Queue()
+        timers = set()
+
+        def agendar(atraso, callback):
+            def executar():
+                timers.discard(identificador)
+                callback()
+            identificador = win.after(atraso, executar)
+            timers.add(identificador)
+            return identificador
+
+        def cancelar_timers(evento):
+            if evento.widget is win:
+                for identificador in tuple(timers):
+                    win.after_cancel(identificador)
+                timers.clear()
+
+        win.bind("<Destroy>", cancelar_timers, add="+")
+        aviso = ctk.CTkLabel(win, text="Pesquisando...", text_color="#cbd5e1")
+        aviso.pack(anchor="w", padx=12)
+
+        def iniciar_consulta():
+            estado["timer"] = None
+            if estado["ativo"] or estado["pedido"] is None:
+                return
+            geracao, termo = estado["pedido"]
+            estado["pedido"] = None
+            estado["ativo"] = True
+            tem_barras = "codigo_barras" in self._produto_cols
+
+            def consultar():
+                try:
+                    with get_db_connection() as conn:
+                        cur = conn.cursor()
+                        filtros = "UPPER(COALESCE(nome,'')) LIKE UPPER(?) OR CAST(id AS TEXT) LIKE ?"
+                        params = [f"%{termo}%", f"{termo}%"]
+                        if tem_barras:
+                            filtros += " OR COALESCE(codigo_barras,'') LIKE ?"
+                            params.append(f"%{termo}%")
+                        cur.execute(
+                            "SELECT id, COALESCE(nome,''), COALESCE(preco_venda,0), COALESCE(estoque,0) "
+                            f"FROM produtos WHERE {filtros} ORDER BY nome ASC LIMIT 400", params,
+                        )
+                        linhas = cur.fetchall()
+                    resultados.put((geracao, linhas, None))
+                except Exception as exc:
+                    resultados.put((geracao, None, exc))
+
+            threading.Thread(target=consultar, daemon=True).start()
+
+        def exibir_lote(geracao, linhas, inicio=0):
+            if geracao != estado["geracao"]:
+                return
+            for row in linhas[inicio:inicio + 40]:
+                tree.insert("", "end", values=(row[0], row[1], f"{float(row[2]):.2f}", int(row[3] or 0)))
+            if inicio + 40 < len(linhas):
+                agendar(1, lambda: exibir_lote(geracao, linhas, inicio + 40))
+            else:
+                estado["exibida"] = geracao
+                aviso.configure(text=f"{len(linhas)} produto(s) encontrado(s).")
+                itens = tree.get_children()
+                if itens:
+                    tree.selection_set(itens[0])
+                    tree.focus(itens[0])
+
+        def processar_resultados():
+            if not win.winfo_exists():
+                return
+            try:
+                while True:
+                    geracao, linhas, erro = resultados.get_nowait()
+                    estado["ativo"] = False
+                    if geracao == estado["geracao"]:
+                        if erro:
+                            aviso.configure(text=f"Falha ao pesquisar produtos: {erro}")
+                        else:
+                            exibir_lote(geracao, linhas)
+                    if estado["pedido"] is not None and estado["timer"] is None:
+                        iniciar_consulta()
+            except queue.Empty:
+                pass
+            agendar(40, processar_resultados)
+
+        def agendar_consulta(_event=None, imediato=False):
             termo = (ent_filtro.get() or "").strip()
-            for iid in tree.get_children():
-                tree.delete(iid)
-
-            with get_db_connection() as conn:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT id, COALESCE(nome,''), COALESCE(preco_venda,0), COALESCE(estoque,0)
-                    FROM produtos
-                    WHERE UPPER(COALESCE(nome,'')) LIKE UPPER(?)
-                    ORDER BY nome ASC
-                    LIMIT 400
-                    """,
-                    (f"%{termo}%",),
-                )
-                for row in cur.fetchall():
-                    tree.insert("", "end", values=(row[0], row[1], f"{float(row[2]):.2f}", int(row[3] or 0)))
-
-            itens = tree.get_children()
-            if itens:
-                tree.selection_set(itens[0])
-                tree.focus(itens[0])
+            if termo == estado["texto"]:
+                return
+            estado["texto"] = termo
+            estado["geracao"] += 1
+            estado["exibida"] = -1
+            estado["pedido"] = (estado["geracao"], termo)
+            if estado["timer"] is not None:
+                win.after_cancel(estado["timer"])
+                timers.discard(estado["timer"])
+            tree.delete(*tree.get_children())
+            aviso.configure(text="Pesquisando...")
+            estado["timer"] = agendar(0 if imediato else 250, iniciar_consulta)
 
         def confirmar_selecao(_event=None):
+            if estado["exibida"] != estado["geracao"]:
+                return "break"
             sel = tree.selection()
             if not sel:
                 return "break"
@@ -1008,7 +1189,7 @@ class FrmPDV(ctk.CTkToplevel):
                 self._preparar_proximo_item()
             return "break"
 
-        ent_filtro.bind("<KeyRelease>", lambda _e: carregar_lista())
+        ent_filtro.bind("<KeyRelease>", agendar_consulta)
         ent_filtro.bind("<Return>", confirmar_selecao)
         tree.bind("<Double-1>", confirmar_selecao)
         tree.bind("<Return>", confirmar_selecao)
@@ -1041,7 +1222,11 @@ class FrmPDV(ctk.CTkToplevel):
             command=lambda: confirmar_selecao(),
         ).pack(side="right")
 
-        carregar_lista()
+        termo_inicial = (self.ent_busca.get() or "").strip()
+        if termo_inicial:
+            ent_filtro.insert(0, termo_inicial)
+        agendar_consulta(imediato=True)
+        agendar(40, processar_resultados)
         ent_filtro.focus_force()
 
     def _coletar_orcamentos_para_pdv(self, termo=""):
@@ -1827,15 +2012,15 @@ class FrmPDV(ctk.CTkToplevel):
             self.tree_pagamentos.insert("", "end", iid=str(i), values=(pag["metodo"], f"{pag['valor']:.2f}"))
 
     def _total_itens(self):
-        return float(sum(i["total_item"] for i in self._carrinho))
+        return float(sum((_valor_monetario(i["total_item"]) for i in self._carrinho), Decimal("0")))
 
     def _total_pago(self):
-        return float(sum(p["valor"] for p in self._pagamentos))
+        return float(sum((_valor_monetario(p["valor"]) for p in self._pagamentos), Decimal("0")))
 
     def _atualizar_resumo(self):
         subtotal = self._total_itens()
         desconto = self._total_desconto()
-        total_liquido = max(subtotal - desconto, 0.0)
+        total_liquido = self._total_liquido()
         pago = self._total_pago()
         restante = max(total_liquido - pago, 0.0)
         troco = max(pago - total_liquido, 0.0)
@@ -1855,7 +2040,7 @@ class FrmPDV(ctk.CTkToplevel):
 
         restante = max(total - self._total_pago(), 0.0)
         valor_txt = (self.ent_valor_pagamento.get() or "").strip()
-        valor = _to_float(valor_txt) if valor_txt else restante
+        valor = float(_valor_monetario(_to_float(valor_txt))) if valor_txt else restante
         if valor <= 0:
             messagebox.showwarning("PDV", "Informe um valor de pagamento valido.", parent=self)
             return
@@ -1878,6 +2063,7 @@ class FrmPDV(ctk.CTkToplevel):
     def _limpar_venda(self):
         self._carrinho = []
         self._pagamentos = []
+        self._orcamento_vinculado = None
         self._metodo_pagamento = "DINHEIRO"
         self._limpar_item_preselecionado()
         self.seg_pagamento.set("DINHEIRO")
@@ -1906,7 +2092,7 @@ class FrmPDV(ctk.CTkToplevel):
                 """
                 SELECT COUNT(*)
                 FROM pdv_vendas
-                WHERE substr(COALESCE(data_hora, ''), 1, 10) = ?
+                WHERE COALESCE(data, '') = ?
                 """,
                 (data_base,),
             )
@@ -1922,13 +2108,11 @@ class FrmPDV(ctk.CTkToplevel):
         subtotal = self._total_itens()
         desconto = self._total_desconto()
         total_liquido = self._total_liquido()
-        venda_id = self._proximo_numero_venda()
-        seq_dia = self._proximo_numero_venda_diario()
         formas = sorted({_normalizar_texto_pagamento(p.get("metodo") or "") for p in self._pagamentos if p.get("metodo")})
         forma_pagamento = "MISTO" if len(formas) > 1 else (formas[0] if formas else _normalizar_texto_pagamento(self._metodo_pagamento))
         return {
-            "sale_id": venda_id,
-            "daily_seq": seq_dia,
+            "sale_id": None,
+            "daily_seq": None,
             "date": datetime.now().strftime("%d/%m/%Y %H:%M"),
             "date_only": datetime.now().strftime("%d/%m/%Y"),
             "forma_pagamento": forma_pagamento or "DINHEIRO",
@@ -1937,17 +2121,18 @@ class FrmPDV(ctk.CTkToplevel):
             "desconto": desconto,
             "total": total_liquido,
             "total_pago": self._total_pago(),
-            "troco": max(self._total_pago() - total_liquido, 0.0),
+            "troco": float(max(_valor_monetario(self._total_pago()) - _valor_monetario(total_liquido), Decimal("0"))),
             "items": [dict(i) for i in self._carrinho],
             "payments": [dict(p) for p in self._pagamentos],
             "orcamento_vinculado": dict(self._orcamento_vinculado or {}),
+            "cliente": str((self._orcamento_vinculado or {}).get("cliente") or ""),
         }
 
     def _base_venda_para_saida(self):
-        if self._ultima_venda:
-            return dict(self._ultima_venda)
         if self._carrinho:
             return self._snapshot_venda()
+        if self._ultima_venda:
+            return deepcopy(self._ultima_venda)
         return None
 
     def _montar_ticket_nao_fiscal(self, venda):
@@ -1955,7 +2140,8 @@ class FrmPDV(ctk.CTkToplevel):
         linhas = [
             (dados.get("nome_oficina") or "OFICINA DE PESCA").upper(),
             "COMPROVANTE NAO FISCAL",
-            f"Venda: {venda['sale_id']}  Dia: {int(venda.get('daily_seq') or 0):03d}",
+            (f"Venda: {venda['sale_id']}  Dia: {int(venda.get('daily_seq') or 0):03d}"
+             if venda.get("sale_id") is not None else "VENDA EM ANDAMENTO"),
             f"Data: {venda['date']}",
             "-" * 42,
         ]
@@ -2197,85 +2383,291 @@ class FrmPDV(ctk.CTkToplevel):
         return str(arquivo)
 
     def _gerar_pdf_venda(self, venda):
-        if not _REPORTLAB_OK:
-            raise RuntimeError("Biblioteca reportlab nao disponivel no ambiente.")
-
-        dados = obter_dados_oficina()
+        identificador = str(int(venda["sale_id"])).zfill(5) if venda.get("sale_id") is not None else "em_andamento"
         pasta = Path(os.path.dirname(CAMINHO_BANCO)) / "pdv_comprovantes"
         pasta.mkdir(parents=True, exist_ok=True)
-        arquivo = pasta / f"venda_{int(venda['sale_id']):05d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        arquivo = pasta / f"venda_{identificador}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.pdf"
+        self._salvar_pdf_documento(venda, arquivo, orcamento=False)
+        return str(arquivo)
 
+    def _salvar_pdf_documento(self, documento, arquivo, orcamento):
+        destino = Path(arquivo)
+        fd, temporario = tempfile.mkstemp(prefix=".pdv_", suffix=".pdf", dir=str(destino.parent))
+        os.close(fd)
+        try:
+            self._gerar_pdf_documento(documento, temporario, orcamento)
+            os.replace(temporario, destino)
+        finally:
+            if os.path.exists(temporario):
+                os.remove(temporario)
+
+    def _gerar_pdf_documento(self, documento, arquivo, orcamento):
+        if not _REPORTLAB_OK:
+            raise RuntimeError("Biblioteca reportlab nao disponivel no ambiente.")
+        dados = obter_dados_oficina()
         c = canvas.Canvas(str(arquivo), pagesize=A4)
         y = 800
 
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(40, y, "Venda (Nao Fiscal)")
-        y -= 20
+        def linha(texto, negrito=False):
+            nonlocal y
+            fonte = "Helvetica-Bold" if negrito else "Helvetica"
+            partes = []
+            for trecho in str(texto).split("\n"):
+                for parte in simpleSplit(trecho, fonte, 10, 510) or [""]:
+                    while c.stringWidth(parte, fonte, 10) > 510:
+                        limite = len(parte)
+                        while limite > 1 and c.stringWidth(parte[:limite], fonte, 10) > 510:
+                            limite -= 1
+                        partes.append(parte[:limite])
+                        parte = parte[limite:]
+                    partes.append(parte)
+            for parte in partes:
+                if y < 55:
+                    c.showPage()
+                    y = 800
+                c.setFont(fonte, 10)
+                c.drawString(40, y, parte)
+                y -= 15
 
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(40, y, f"Venda #{venda['sale_id']} - Seq Dia {int(venda.get('daily_seq') or 0):03d}")
-        y -= 18
-
-        c.setFont("Helvetica", 10)
-        c.drawString(40, y, f"Loja: {dados.get('nome_oficina') or 'OFICINA DE PESCA'}")
-        y -= 15
-        c.drawString(40, y, f"Data: {venda['date']}")
-        y -= 15
-        c.drawString(40, y, f"Pagamento: {venda['payment_method']}")
-        y -= 16
-
-        c.line(40, y, 550, y)
-        y -= 18
-
-        c.setFont("Helvetica-Bold", 10)
-        c.drawString(40, y, "Item")
-        c.drawString(360, y, "Qtd")
-        c.drawString(410, y, "Unit")
-        c.drawString(500, y, "Total")
-        y -= 14
-
-        c.setFont("Helvetica", 10)
-        for item in venda["items"]:
-            c.drawString(40, y, str(item.get("nome_produto") or "Item")[:48])
-            c.drawRightString(390, y, str(int(item.get("quantidade") or 1)))
-            c.drawRightString(470, y, f"{float(item.get('preco_unitario') or 0):.2f}")
-            c.drawRightString(550, y, f"{float(item.get('total_item') or 0):.2f}")
-            y -= 15
-            if y < 85:
-                c.showPage()
-                y = 800
-                c.setFont("Helvetica", 10)
-
-        y -= 5
-        c.line(40, y, 550, y)
-        y -= 20
-        c.setFont("Helvetica-Bold", 12)
-        c.drawRightString(550, y, f"TOTAL: R$ {float(venda['total']):.2f}")
-        y -= 18
-        c.drawRightString(550, y, f"PAGO: R$ {float(venda.get('total_pago') or 0):.2f}")
-        y -= 18
-        c.drawRightString(550, y, f"TROCO: R$ {float(venda.get('troco') or 0):.2f}")
-
+        linha("ORCAMENTO COMERCIAL" if orcamento else "VENDA - COMPROVANTE NAO FISCAL", True)
+        if orcamento:
+            linha(f"Orcamento #{documento['numero']}", True)
+        elif documento.get("sale_id") is None:
+            linha("Venda em andamento - nao finalizada", True)
+        else:
+            linha(f"Venda #{documento['sale_id']} - Seq Dia {int(documento.get('daily_seq') or 0):03d}", True)
+        linha(f"Loja: {dados.get('nome_oficina') or 'OFICINA DE PESCA'}")
+        linha(f"Cliente: {documento.get('cliente') or 'Nao informado'}")
+        linha(f"Data: {documento['date']}")
+        linha("Itens:", True)
+        for item in documento["items"]:
+            linha(str(item.get("nome_produto") or "Item"))
+            linha(f"  Qtd: {int(item['quantidade'])}  Unit: {_fmt_moeda(item['preco_unitario'])}  Total: {_fmt_moeda(item['total_item'])}")
+        linha(f"Subtotal: {_fmt_moeda(documento['total_bruto'])}")
+        linha(f"Desconto: {_fmt_moeda(documento['desconto'])}")
+        linha(f"TOTAL: {_fmt_moeda(documento['total'])}", True)
+        if not orcamento:
+            for pagamento in documento.get("payments", []):
+                linha(f"Pagamento {pagamento['metodo']}: {_fmt_moeda(pagamento['valor'])}")
+            if not documento.get("payments"):
+                linha(f"Pagamento: {documento['payment_method']}")
+            linha(f"PAGO: {_fmt_moeda(documento.get('total_pago', 0))}")
+            linha(f"TROCO: {_fmt_moeda(documento.get('troco', 0))}")
         c.save()
-        return str(arquivo)
+
+    def _registrar_orcamento_comercial(self, documento):
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS pdv_sequencia_orcamento "
+                "(id INTEGER PRIMARY KEY CHECK(id = 1), ultimo INTEGER NOT NULL)"
+            )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS pdv_orcamentos_comerciais "
+                "(numero INTEGER PRIMARY KEY CHECK(numero >= 0), data TEXT NOT NULL, "
+                "cliente TEXT NOT NULL, dados_json TEXT NOT NULL)"
+            )
+            cur.execute("INSERT OR IGNORE INTO pdv_sequencia_orcamento (id, ultimo) VALUES (1, -1)")
+            cur.execute("UPDATE pdv_sequencia_orcamento SET ultimo = ultimo + 1 WHERE id = 1")
+            numero = int(cur.execute("SELECT ultimo FROM pdv_sequencia_orcamento WHERE id = 1").fetchone()[0])
+            documento = {**documento, "numero": numero}
+            cur.execute(
+                "INSERT INTO pdv_orcamentos_comerciais (numero, data, cliente, dados_json) VALUES (?, ?, ?, ?)",
+                (numero, documento["date"], documento["cliente"], json.dumps(documento, ensure_ascii=False)),
+            )
+            conn.commit()
+        return documento
+
+    def _gerar_orcamento_comercial(self):
+        if not self._carrinho:
+            messagebox.showwarning("PDV", "Adicione produtos para gerar o orçamento comercial.", parent=self)
+            return
+        try:
+            self._validar_desconto()
+        except ValueError as exc:
+            messagebox.showwarning("PDV", str(exc), parent=self)
+            return
+        cliente = simpledialog.askstring(
+            "Orçamento comercial", "Nome do cliente:", parent=self,
+            initialvalue=str((self._orcamento_vinculado or {}).get("cliente") or ""),
+        )
+        if cliente is None:
+            return
+        cliente = cliente.strip()
+        if not cliente:
+            messagebox.showwarning("PDV", "Informe o cliente para gerar o orçamento.", parent=self)
+            return
+        arquivo = filedialog.asksaveasfilename(
+            parent=self, title="Salvar orçamento comercial", defaultextension=".pdf",
+            filetypes=[("PDF", "*.pdf")], initialfile="orcamento_comercial.pdf",
+        )
+        if not arquivo:
+            return
+        snapshot = self._snapshot_venda()
+        documento = {
+            "date": snapshot["date"], "cliente": cliente, "items": snapshot["items"],
+            "total_bruto": snapshot["total_bruto"], "desconto": snapshot["desconto"], "total": snapshot["total"],
+        }
+        try:
+            documento = self._registrar_orcamento_comercial(documento)
+            self._salvar_pdf_documento(documento, arquivo, orcamento=True)
+        except Exception as exc:
+            numero = documento.get("numero")
+            detalhe = f" O orçamento #{numero} ficou registrado; o PDF não foi gerado." if numero is not None else ""
+            messagebox.showerror("PDV", f"Falha ao gerar orçamento: {exc}.{detalhe}", parent=self)
+            return
+        messagebox.showinfo("PDV", f"Orçamento #{documento['numero']} salvo em:\n{arquivo}", parent=self)
+        self._abrir_pdf_salvo(arquivo)
+
+    def _recuperar_documento_pdv(self, tipo):
+        orcamento = tipo == "orcamento"
+        numero = simpledialog.askinteger(
+            "Recuperar documento", "Número do orçamento:" if orcamento else "Número da venda:",
+            parent=self, minvalue=0 if orcamento else 1,
+        )
+        if numero is None:
+            return
+        tabela = "pdv_orcamentos_comerciais" if orcamento else "pdv_documentos_venda"
+        chave = "numero" if orcamento else "venda_id"
+        try:
+            with get_db_connection() as conn:
+                existe = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (tabela,)).fetchone()
+                row = conn.execute(f"SELECT dados_json FROM {tabela} WHERE {chave} = ?", (numero,)).fetchone() if existe else None
+            if not row:
+                messagebox.showwarning("PDV", "Documento não encontrado ou sem dados completos para recuperação.", parent=self)
+                return
+            documento = json.loads(row[0])
+            arquivo = filedialog.asksaveasfilename(
+                parent=self, title="Salvar documento", defaultextension=".pdf",
+                filetypes=[("PDF", "*.pdf")], initialfile=f"{tipo}_{numero}.pdf",
+            )
+            if not arquivo:
+                return
+            self._salvar_pdf_documento(documento, arquivo, orcamento=orcamento)
+        except Exception as exc:
+            messagebox.showerror("PDV", f"Falha ao recuperar documento: {exc}", parent=self)
+            return
+        messagebox.showinfo("PDV", f"Documento salvo em:\n{arquivo}", parent=self)
+        self._abrir_pdf_salvo(arquivo)
+
+    def _abrir_pdf_salvo(self, caminho):
+        if not rede_validacao.ativo() and hasattr(os, "startfile"):
+            try:
+                os.startfile(caminho)  # type: ignore[attr-defined]
+            except OSError as exc:
+                messagebox.showwarning("PDV", f"PDF salvo, mas não foi possível abri-lo: {exc}", parent=self)
+            return
+        self._visualizar_pdf_local(caminho)
+
+    def _visualizar_pdf_local(self, caminho):
+        from busca_vista_visualizador import _LOCK_PDFIUM
+        from PIL import ImageTk
+        import pypdfium2 as pdfium
+
+        janela = ctk.CTkToplevel(self)
+        janela.title("Visualização do documento")
+        janela.geometry("850x700")
+        barra = ctk.CTkFrame(janela)
+        barra.pack(fill="x")
+        anterior = ctk.CTkButton(barra, text="◀", width=45, command=lambda: solicitar(-1))
+        anterior.pack(side="left", padx=5, pady=5)
+        status = ctk.CTkLabel(barra, text="Abrindo PDF...")
+        status.pack(side="left", padx=8)
+        proximo = ctk.CTkButton(barra, text="▶", width=45, command=lambda: solicitar(1))
+        proximo.pack(side="left", padx=5)
+        area = tk.Canvas(janela, background="#777777", highlightthickness=0)
+        rolagem_y = ttk.Scrollbar(janela, orient="vertical", command=area.yview)
+        rolagem_x = ttk.Scrollbar(janela, orient="horizontal", command=area.xview)
+        area.configure(yscrollcommand=rolagem_y.set, xscrollcommand=rolagem_x.set)
+        rolagem_y.pack(side="right", fill="y")
+        rolagem_x.pack(side="bottom", fill="x")
+        area.pack(fill="both", expand=True)
+        fila = queue.Queue()
+        estado = {"pagina": 0, "total": 0, "geracao": 0, "timer": None, "fechada": False}
+
+        def renderizar(pagina, geracao):
+            try:
+                with _LOCK_PDFIUM:
+                    documento = pdfium.PdfDocument(caminho)
+                    try:
+                        total = len(documento)
+                        imagem = documento[pagina].render(scale=1.2).to_pil().copy()
+                    finally:
+                        documento.close()
+                fila.put((geracao, total, imagem, None))
+            except Exception as exc:
+                fila.put((geracao, 0, None, exc))
+
+        def solicitar(delta):
+            pagina = estado["pagina"] + delta
+            if pagina < 0 or (estado["total"] and pagina >= estado["total"]):
+                return
+            estado["pagina"] = pagina
+            estado["geracao"] += 1
+            status.configure(text="Renderizando PDF...")
+            threading.Thread(target=renderizar, args=(pagina, estado["geracao"]), daemon=True).start()
+
+        def processar():
+            if estado["fechada"]:
+                return
+            try:
+                while True:
+                    geracao, total, imagem, erro = fila.get_nowait()
+                    if geracao != estado["geracao"]:
+                        continue
+                    if erro:
+                        status.configure(text="Não foi possível visualizar o PDF.")
+                        messagebox.showerror("PDV", f"PDF salvo, mas a visualização falhou: {erro}", parent=janela)
+                        continue
+                    estado["total"] = total
+                    janela._imagem_pdf = ImageTk.PhotoImage(imagem)
+                    area.delete("all")
+                    area.create_image(0, 0, anchor="nw", image=janela._imagem_pdf)
+                    area.configure(scrollregion=(0, 0, imagem.width, imagem.height))
+                    area.xview_moveto(0)
+                    area.yview_moveto(0)
+                    status.configure(text=f"Página {estado['pagina'] + 1} de {total}")
+            except queue.Empty:
+                pass
+            estado["timer"] = janela.after(50, processar)
+
+        def fechar(evento):
+            if evento.widget is janela:
+                estado["fechada"] = True
+                if estado["timer"] is not None:
+                    janela.after_cancel(estado["timer"])
+
+        janela.bind("<Destroy>", fechar, add="+")
+        solicitar(0)
+        processar()
 
     def _gerar_pdf_da_tela(self):
-        venda = self._base_venda_para_saida()
+        try:
+            if self._carrinho:
+                self._validar_desconto()
+            venda = self._base_venda_para_saida()
+        except ValueError as exc:
+            messagebox.showwarning("PDV", str(exc), parent=self)
+            return
         if not venda:
             messagebox.showwarning("PDV", "Nenhuma venda disponivel para gerar PDF.", parent=self)
             return
         try:
             caminho = self._gerar_pdf_venda(venda)
             messagebox.showinfo("PDV", f"PDF gerado com sucesso:\n{caminho}", parent=self)
-            if hasattr(os, "startfile"):
-                os.startfile(caminho)  # type: ignore[attr-defined]
         except Exception as e:
             messagebox.showerror("PDV", f"Erro ao gerar PDF: {e}", parent=self)
+            return
+        self._abrir_pdf_salvo(caminho)
 
     def _gerar_xml_fiscal_da_tela(self):
         venda = self._base_venda_para_saida()
         if not venda:
             messagebox.showwarning("PDV", "Nenhuma venda disponivel para emitir nota fiscal.", parent=self)
+            return
+        if venda.get("sale_id") is None:
+            messagebox.showwarning("PDV", "Finalize a venda antes de emitir nota fiscal.", parent=self)
             return
 
         faltantes = self._validar_pre_emissao_fiscal(venda)
@@ -2319,6 +2711,9 @@ class FrmPDV(ctk.CTkToplevel):
         if not venda:
             messagebox.showwarning("PDV", "Nenhuma venda disponível para consulta fiscal.", parent=self)
             return
+        if venda.get("sale_id") is None:
+            messagebox.showwarning("PDV", "Finalize a venda antes de consultar nota fiscal.", parent=self)
+            return
         referencia = str(venda.get("sale_id") or "").strip()
         retorno = consultar_nota_fiscal(referencia)
         if bool(retorno.get("ok")):
@@ -2331,6 +2726,9 @@ class FrmPDV(ctk.CTkToplevel):
         venda = self._base_venda_para_saida()
         if not venda:
             messagebox.showwarning("PDV", "Nenhuma venda disponível para imprimir DANFE.", parent=self)
+            return
+        if venda.get("sale_id") is None:
+            messagebox.showwarning("PDV", "Finalize a venda antes de imprimir DANFE.", parent=self)
             return
         venda["fiscal_tipo"] = "nfe"
         retorno = imprimir_danfe_fiscal(venda)
@@ -2362,10 +2760,8 @@ class FrmPDV(ctk.CTkToplevel):
         self._imprimir_cupom_background(venda)
 
     def _resumo_fechamento_dia(self, data_base):
-        total_vendas = 0.0
-        total_dinheiro = 0.0
-        total_pix = 0.0
-        total_cartao = 0.0
+        total_vendas = Decimal("0")
+        totais = {"DINHEIRO": Decimal("0"), "PIX": Decimal("0"), "CARTAO": Decimal("0")}
         ids_vendas = []
 
         with get_db_connection() as conn:
@@ -2380,33 +2776,52 @@ class FrmPDV(ctk.CTkToplevel):
                 (data_base,),
             )
             for venda_id, total, forma in cur.fetchall():
-                v = float(total or 0)
+                v = _valor_monetario(total)
                 total_vendas += v
                 ids_vendas.append(int(venda_id))
-
-                m = _normalizar_texto_pagamento(forma)
-                if "PIX" in m:
-                    total_pix += v
-                elif "CARTAO" in m or "CREDITO" in m or "DEBITO" in m:
-                    total_cartao += v
-                elif "DINHEIRO" in m:
-                    total_dinheiro += v
-                else:
-                    # fallback de mercado: formas não mapeadas entram em dinheiro.
-                    total_dinheiro += v
+                pagamentos = conn.execute(
+                    "SELECT metodo_pagamento, valor FROM fluxo_caixa "
+                    "WHERE categoria = 'PDV' AND descricao = ? AND tipo = 'ENTRADA'",
+                    (f"VENDA BALCAO #{venda_id}",),
+                ).fetchall()
+                if not pagamentos:
+                    pagamentos = [(forma, v)]
+                valores = {"DINHEIRO": Decimal("0"), "PIX": Decimal("0"), "CARTAO": Decimal("0")}
+                for metodo, valor in pagamentos:
+                    m = _normalizar_texto_pagamento(metodo)
+                    if "PIX" in m:
+                        chave = "PIX"
+                    elif "CARTAO" in m or "CREDITO" in m or "DEBITO" in m:
+                        chave = "CARTAO"
+                    elif "DINHEIRO" in m:
+                        chave = "DINHEIRO"
+                    else:
+                        raise ValueError(f"Pagamento não identificável para a venda #{venda_id}.")
+                    valores[chave] += _valor_monetario(valor)
+                excesso = sum(valores.values()) - v
+                if excesso > 0 and valores["DINHEIRO"] >= excesso:
+                    valores["DINHEIRO"] -= excesso
+                if sum(valores.values()) != v:
+                    raise ValueError(f"Pagamentos divergentes para a venda #{venda_id}.")
+                for chave in totais:
+                    totais[chave] += valores[chave]
 
         return {
             "data": data_base,
-            "total_vendas": total_vendas,
-            "dinheiro": total_dinheiro,
-            "pix": total_pix,
-            "cartao": total_cartao,
+            "total_vendas": float(total_vendas),
+            "dinheiro": float(totais["DINHEIRO"]),
+            "pix": float(totais["PIX"]),
+            "cartao": float(totais["CARTAO"]),
             "ids_vendas": ids_vendas,
         }
 
     def _fechamento_de_caixa(self):
         data_base = datetime.now().strftime("%d/%m/%Y")
-        resumo = self._resumo_fechamento_dia(data_base)
+        try:
+            resumo = self._resumo_fechamento_dia(data_base)
+        except Exception as exc:
+            messagebox.showerror("PDV", f"Falha ao apurar fechamento: {exc}", parent=self)
+            return
 
         if resumo["total_vendas"] <= 0:
             messagebox.showwarning("PDV", "Nao ha vendas do dia para fechamento.", parent=self)
@@ -2426,6 +2841,15 @@ class FrmPDV(ctk.CTkToplevel):
         try:
             with get_db_connection() as conn:
                 cur = conn.cursor()
+                cur.execute("BEGIN IMMEDIATE")
+                marcadores = ",".join("?" for _ in resumo["ids_vendas"])
+                ativos = cur.execute(
+                    f"SELECT COUNT(*) FROM pdv_vendas WHERE id IN ({marcadores}) "
+                    "AND UPPER(COALESCE(status, 'ABERTO')) = 'ABERTO'",
+                    resumo["ids_vendas"],
+                ).fetchone()[0]
+                if ativos != len(resumo["ids_vendas"]):
+                    raise ValueError("As vendas do fechamento foram alteradas. Refaça a apuração.")
                 descricao = (
                     "FECHAMENTO PDV | "
                     f"Dinheiro: {_fmt_moeda(resumo['dinheiro'])} | "
@@ -2457,14 +2881,13 @@ class FrmPDV(ctk.CTkToplevel):
                     """
                     UPDATE pdv_vendas
                     SET status = 'fechado'
-                    WHERE COALESCE(data, '') = ?
+                    WHERE id IN ({marcadores})
                       AND UPPER(COALESCE(status, 'ABERTO')) = 'ABERTO'
-                    """,
-                    (resumo["data"],),
+                    """.format(marcadores=marcadores),
+                    resumo["ids_vendas"],
                 )
                 conn.commit()
 
-            self._limpar_venda()
             messagebox.showinfo(
                 "Fechamento de Caixa",
                 f"Fechamento realizado com sucesso. Total: {_fmt_moeda(resumo['total_vendas'])}",
@@ -2479,6 +2902,11 @@ class FrmPDV(ctk.CTkToplevel):
         if not self._carrinho:
             messagebox.showwarning("PDV", "Adicione ao menos um item para finalizar a venda.", parent=self)
             return
+        try:
+            self._validar_desconto()
+        except ValueError as exc:
+            messagebox.showwarning("PDV", str(exc), parent=self)
+            return
 
         total = self._total_liquido()
         if total <= 0:
@@ -2492,13 +2920,22 @@ class FrmPDV(ctk.CTkToplevel):
         if total_pago + 1e-6 < total:
             messagebox.showwarning("PDV", f"Pagamento insuficiente. Falta {_fmt_moeda(total - total_pago)}.", parent=self)
             return
+        troco = max(_valor_monetario(total_pago) - _valor_monetario(total), Decimal("0"))
+        dinheiro = sum(
+            (_valor_monetario(p["valor"]) for p in self._pagamentos
+             if _normalizar_texto_pagamento(p.get("metodo")) == "DINHEIRO"),
+            Decimal("0"),
+        )
+        if troco > dinheiro:
+            messagebox.showwarning("PDV", "O troco não pode exceder o pagamento em dinheiro.", parent=self)
+            return
 
         self._alternar_estado_finalizacao(True)
-        venda = self._snapshot_venda()
-
         try:
+            venda = self._snapshot_venda()
             with get_db_connection() as conn:
                 cur = conn.cursor()
+                cur.execute("BEGIN IMMEDIATE")
                 cur.execute(
                     """
                     INSERT INTO pdv_vendas (data, total, forma_pagamento, status)
@@ -2509,6 +2946,10 @@ class FrmPDV(ctk.CTkToplevel):
                 venda_id = int(cur.lastrowid or 0)
                 if venda_id <= 0:
                     raise RuntimeError("Falha ao gerar identificador da venda.")
+                venda["sale_id"] = venda_id
+                venda["daily_seq"] = int(cur.execute(
+                    "SELECT COUNT(*) FROM pdv_vendas WHERE COALESCE(data, '') = ?", (venda["date_only"],)
+                ).fetchone()[0])
 
                 for item in self._carrinho:
                     cur.execute(
@@ -2526,19 +2967,24 @@ class FrmPDV(ctk.CTkToplevel):
                         ),
                     )
 
-                    cur.execute(
-                        """
-                        UPDATE produtos
-                        SET estoque = CASE
-                            WHEN COALESCE(estoque, 0) - ? < 0 THEN 0
-                            ELSE COALESCE(estoque, 0) - ?
-                        END
-                        WHERE id = ?
-                        """,
-                        (item["quantidade"], item["quantidade"], item["produto_id"]),
-                    )
+                    if item["produto_id"] > 0:
+                        cur.execute(
+                            "UPDATE produtos SET estoque = COALESCE(estoque, 0) - ? "
+                            "WHERE id = ? AND COALESCE(estoque, 0) >= ?",
+                            (item["quantidade"], item["produto_id"], item["quantidade"]),
+                        )
+                        if cur.rowcount != 1:
+                            raise ValueError(f"Estoque insuficiente ou produto indisponível: {item['nome_produto']}")
 
+                troco_restante = troco
                 for pag in self._pagamentos:
+                    valor_fluxo = _valor_monetario(pag.get("valor"))
+                    if _normalizar_texto_pagamento(pag.get("metodo")) == "DINHEIRO":
+                        abatimento = min(valor_fluxo, troco_restante)
+                        valor_fluxo -= abatimento
+                        troco_restante -= abatimento
+                    if valor_fluxo == 0:
+                        continue
                     descricao_fluxo = f"VENDA BALCAO #{venda_id}"
                     cur.execute(
                         """
@@ -2548,32 +2994,40 @@ class FrmPDV(ctk.CTkToplevel):
                         (
                             datetime.now().strftime("%d/%m/%Y"),
                             descricao_fluxo,
-                            float(pag.get("valor") or 0),
+                            float(valor_fluxo),
                             "PDV",
                             str(pag.get("metodo") or "DINHEIRO"),
                         ),
                     )
 
+                cur.execute(
+                    "CREATE TABLE IF NOT EXISTS pdv_documentos_venda "
+                    "(venda_id INTEGER PRIMARY KEY, dados_json TEXT NOT NULL)"
+                )
+                cur.execute(
+                    "INSERT INTO pdv_documentos_venda (venda_id, dados_json) VALUES (?, ?)",
+                    (venda_id, json.dumps(venda, ensure_ascii=False)),
+                )
                 conn.commit()
-
-            venda["sale_id"] = venda_id
-            self._ultima_venda = venda
-
-            if bool(self._auto_impressao.get()):
-                self._imprimir_cupom_automatico(venda)
-            self._limpar_venda()
-
-            messagebox.showinfo(
-                "PDV",
-                f"Venda #{venda_id} finalizada com sucesso.\n"
-                f"Sequencia do dia: {int(venda.get('daily_seq') or 0):03d}\n"
-                f"Total: {_fmt_moeda(venda['total'])}\n"
-                f"Pago: {_fmt_moeda(venda.get('total_pago') or 0)}\n"
-                f"Troco: {_fmt_moeda(venda.get('troco') or 0)}",
-                parent=self,
-            )
-            self._focar_qtd()
         except Exception as e:
             messagebox.showerror("PDV", f"Erro ao finalizar venda: {e}", parent=self)
+            return
         finally:
             self._alternar_estado_finalizacao(False)
+        self._ultima_venda = venda
+        self._limpar_venda()
+        if bool(self._auto_impressao.get()):
+            try:
+                self._imprimir_cupom_automatico(venda)
+            except Exception as exc:
+                messagebox.showwarning("PDV", f"Venda registrada, mas a impressão falhou: {exc}", parent=self)
+        messagebox.showinfo(
+            "PDV",
+            f"Venda #{venda_id} finalizada com sucesso.\n"
+            f"Sequencia do dia: {int(venda.get('daily_seq') or 0):03d}\n"
+            f"Total: {_fmt_moeda(venda['total'])}\n"
+            f"Pago: {_fmt_moeda(venda.get('total_pago') or 0)}\n"
+            f"Troco: {_fmt_moeda(venda.get('troco') or 0)}",
+            parent=self,
+        )
+        self._focar_qtd()

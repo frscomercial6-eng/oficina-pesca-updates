@@ -30,7 +30,9 @@ def ler_links_alertas_conhecimento(fabricante, modelo, aba="dados"):
             return linha, "OK"
     return None, "Não encontrado"
 
-def salvar_link_alerta_conhecimento(fabricante, modelo, url, origem="web_scraping", alerta="", aba="dados"):
+def salvar_link_alerta_conhecimento(
+    fabricante, modelo, url, origem="web_scraping", alerta="", aba="dados", dados_tecnicos=""
+):
     """Salva ou atualiza link/alerta na planilha de conhecimento técnico."""
     from datetime import datetime
     planilha_id, sheets_service, msg = get_or_create_knowledge_sheet()
@@ -39,7 +41,10 @@ def salvar_link_alerta_conhecimento(fabricante, modelo, url, origem="web_scrapin
     # Remove linha antiga (Sheets não tem update direto, mas append é seguro)
     # Apenas adiciona nova linha
     nova_linha = [fabricante, modelo, url, origem, alerta, datetime.now().isoformat()]
-    adicionar_linha_planilha(planilha_id, nova_linha, aba)
+    if dados_tecnicos:
+        nova_linha.append(str(dados_tecnicos))
+    if not adicionar_linha_planilha(planilha_id, nova_linha, aba):
+        return False, "Falha ao adicionar referência à planilha."
     return True, "OK"
 def _obter_servico_google_sheets_drive():
     """Retorna serviços autenticados do Google Sheets e Drive."""
@@ -2109,12 +2114,13 @@ def _verificar_arquivo_credenciais_google_drive() -> tuple[bool, str]:
         return True, caminho
     return (
         False,
-        "Arquivo de credenciais Google OAuth2 não encontrado. "
-        "Use a opção 'Conectar Google Drive' para solicitar autenticação e concluir a configuração.",
+        "Arquivo de credenciais Google OAuth2 não encontrado. Configure seu caminho fora do pacote "
+        "pela variável OFP_GOOGLE_OAUTH_CLIENT_SECRET.",
     )
 
 
-def _obter_credenciais_google_drive_usuario(interativo: bool = False, login_hint: str = ""):
+def _obter_credenciais_google_drive_usuario(interativo: bool = False, login_hint: str = "",
+                                            timeout: int | None = None, cancelar=None):
     if GoogleCredentials is None:
         return None, "Dependências OAuth2 ausentes. Instale google-auth, google-auth-oauthlib e google-api-python-client."
 
@@ -2126,16 +2132,36 @@ def _obter_credenciais_google_drive_usuario(interativo: bool = False, login_hint
                 continue
             creds = GoogleCredentials.from_authorized_user_file(candidato_token, GOOGLE_DRIVE_USER_SCOPES)
             break
-    except Exception:
+    except Exception as exc:
+        if timeout is not None:
+            return None, f"Não foi possível ler a autorização Google existente: {type(exc).__name__}."
         creds = None
 
     try:
         if creds and creds.expired and creds.refresh_token and GoogleAuthRequest is not None:
-            creds.refresh(GoogleAuthRequest())
+            request = GoogleAuthRequest()
+            if timeout is not None:
+                from functools import partial
+                request = partial(request, timeout=timeout)
+            creds.refresh(request)
+            if cancelar is not None and cancelar.is_set():
+                return None, "Operação cancelada."
             _salvar_token_google_drive_usuario(creds)
-    except Exception:
+    except Exception as exc:
+        if timeout is not None and not interativo:
+            if "invalid_grant" in str(exc).lower():
+                return None, "A autorização Google foi revogada ou expirou. É necessário autorizar novamente."
+            return None, f"Falha ao renovar autorização do Google Drive: {exc}"
         creds = None
 
+    if cancelar is not None and cancelar.is_set():
+        return None, "Operação cancelada."
+    escopos_concedidos = getattr(creds, "granted_scopes", None) if creds else None
+    escopos_drive = {GOOGLE_DRIVE_USER_SCOPES[0], "https://www.googleapis.com/auth/drive"}
+    if timeout is not None and creds and escopos_concedidos is not None and not escopos_drive.intersection(escopos_concedidos):
+        if not interativo:
+            return None, "Escopos insuficientes para o Google Drive. É necessário autorizar novamente."
+        creds = None
     if creds and getattr(creds, "valid", False):
         return creds, "OK"
 
@@ -2150,35 +2176,62 @@ def _obter_credenciais_google_drive_usuario(interativo: bool = False, login_hint
 
     existe_client_secret, detalhe = _verificar_arquivo_credenciais_google_drive()
     if not existe_client_secret:
-        return None, (
-            "Arquivo client_secret_desktop.json não encontrado no bundle interno do executável. "
-            "Refaça o build incluindo esse arquivo como recurso."
-        )
+        return None, detalhe
     client_secret = detalhe
 
     try:
-        flow = InstalledAppFlow.from_client_secrets_file(client_secret, GOOGLE_DRIVE_USER_SCOPES)
+        if timeout is None:
+            classe_fluxo = InstalledAppFlow
+        else:
+            class FluxoComTimeout(InstalledAppFlow):
+                def fetch_token(self, **kwargs):
+                    kwargs.setdefault("timeout", timeout)
+                    return super().fetch_token(**kwargs)
+            classe_fluxo = FluxoComTimeout
+        flow = classe_fluxo.from_client_secrets_file(client_secret, GOOGLE_DRIVE_USER_SCOPES)
         extra_kwargs: dict = {"open_browser": True}
+        if timeout is not None:
+            extra_kwargs["timeout_seconds"] = 60
+            extra_kwargs["authorization_prompt_message"] = None
         if login_hint:
             extra_kwargs["login_hint"] = login_hint
         creds = flow.run_local_server(port=0, **extra_kwargs)
+        if cancelar is not None and cancelar.is_set():
+            return None, "Operação cancelada."
         _salvar_token_google_drive_usuario(creds)
         return creds, "OK"
     except Exception as e:
+        if timeout is not None:
+            if getattr(e, "error", None) == "access_denied":
+                return None, (
+                    "Autorização Google recusada (access_denied). Se o aplicativo estiver em modo de testes, "
+                    "solicite ao responsável pelo projeto Google que autorize sua conta como testadora."
+                )
+            if isinstance(e, getattr(google_auth_oauthlib.flow, "WSGITimeoutError", ())):
+                return None, (
+                    "A autorização Google não foi concluída no prazo. Se o navegador mostrar access_denied "
+                    "e o aplicativo estiver em modo de testes, solicite ao responsável pelo projeto Google "
+                    "a autorização da conta como testadora."
+                )
+            return None, _mensagem_erro_backup_drive(e)
         return None, f"Falha no login OAuth2 (Debug Google Code: {getattr(e, 'status_code', 'N/A')}) - Detalhes: {e}"
 
 
-def conectar_google_drive_usuario(login_hint: str = "") -> tuple[bool, str, str]:
+def conectar_google_drive_usuario(login_hint: str = "", timeout: int | None = None, cancelar=None) -> tuple[bool, str, str]:
     """Autentica o usuário via OAuth2 e retorna (ok, mensagem, email)."""
-    creds, msg = _obter_credenciais_google_drive_usuario(interativo=True, login_hint=login_hint)
+    creds, msg = _obter_credenciais_google_drive_usuario(
+        interativo=True, login_hint=login_hint, timeout=timeout, cancelar=cancelar
+    )
     if not creds:
         return False, msg, ""
+    if cancelar is not None and cancelar.is_set():
+        return False, "Operação cancelada.", ""
 
     if google_build is None:
         return False, "Dependência google-api-python-client não encontrada.", ""
 
     try:
-        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        service = _servico_drive_com_timeout(creds, timeout)
         about = service.about().get(fields="user(emailAddress,displayName)").execute()
         user = about.get("user", {}) if isinstance(about, dict) else {}
         email = str(user.get("emailAddress") or "").strip().lower()
@@ -2193,6 +2246,8 @@ def conectar_google_drive_usuario(login_hint: str = "") -> tuple[bool, str, str]
         elif "12500" in str(e):
             err_code = "12500 (SIGN_IN_FAILED)"
             
+        if timeout is not None:
+            return False, _mensagem_erro_backup_drive(e), ""
         return False, f"Erro de Configuração Google (Código: {err_code}) - {e}", ""
 
 
@@ -2254,7 +2309,7 @@ def garantir_banco_no_drive_usuario() -> tuple[bool, str]:
         return False, f"Falha ao sincronizar banco no Google Drive do usuário: {e}"
 
 
-def _obter_ou_criar_pasta_backup_drive_usuario(service, nome_pasta: str = "Oficina_Backup") -> str:
+def _obter_ou_criar_pasta_backup_drive_usuario(service, nome_pasta: str = "Oficina_Backup", cancelar=None) -> str:
     nome = str(nome_pasta or "Oficina_Backup").strip() or "Oficina_Backup"
     nome_esc = nome.replace("'", "\\'")
     q = (
@@ -2262,6 +2317,8 @@ def _obter_ou_criar_pasta_backup_drive_usuario(service, nome_pasta: str = "Ofici
         f"name='{nome_esc}' and trashed=false"
     )
     pastas = service.files().list(q=q, fields="files(id,name)", pageSize=1).execute().get("files", [])
+    if cancelar is not None and cancelar.is_set():
+        raise InterruptedError("Operação cancelada.")
     if pastas:
         return str(pastas[0]["id"])
 
@@ -2272,38 +2329,146 @@ def _obter_ou_criar_pasta_backup_drive_usuario(service, nome_pasta: str = "Ofici
     return str(pasta["id"])
 
 
-def enviar_backup_banco_para_drive_usuario() -> tuple[bool, str]:
+def _servico_drive_com_timeout(creds, timeout):
+    if timeout is None:
+        return google_build("drive", "v3", credentials=creds, cache_discovery=False)
+    import httplib2
+    import google_auth_httplib2
+    http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=timeout))
+    return google_build("drive", "v3", http=http, cache_discovery=False, num_retries=0)
+
+
+def _mensagem_erro_backup_drive(exc):
+    status = getattr(getattr(exc, "resp", None), "status", None) or getattr(exc, "status_code", None)
+    conteudo = getattr(exc, "content", None)
+    motivo = ""
+    mensagem = ""
+    if conteudo:
+        try:
+            dados = json.loads(conteudo.decode("utf-8") if isinstance(conteudo, bytes) else conteudo)
+            erro = dados.get("error", {})
+            if isinstance(erro, dict):
+                mensagem = str(erro.get("message") or "")
+                detalhes = erro.get("errors") or []
+                if detalhes and isinstance(detalhes[0], dict):
+                    motivo = str(detalhes[0].get("reason") or "")
+                if not motivo:
+                    motivo = str(erro.get("status") or "")
+        except (ValueError, TypeError, UnicodeDecodeError, AttributeError):
+            pass
+    orientacoes = {
+        "insufficientPermissions": "Confira os escopos concedidos e, se necessário, autorize novamente.",
+        "insufficientFilePermissions": "Confira a permissão de gravação na pasta do Drive.",
+        "accessNotConfigured": "Confira se a Google Drive API está habilitada no projeto OAuth.",
+        "serviceDisabled": "Confira se a Google Drive API está habilitada no projeto OAuth.",
+        "storageQuotaExceeded": "Confira o espaço disponível na conta Google.",
+        "rateLimitExceeded": "Limite de requisições atingido; tente novamente mais tarde.",
+        "userRateLimitExceeded": "Limite de requisições atingido; tente novamente mais tarde.",
+    }
+    if status:
+        partes = [f"Google Drive HTTP {status}."]
+        if motivo:
+            partes.append(f"Motivo: {motivo}.")
+        if mensagem:
+            partes.append(f"Mensagem do Google: {mensagem}")
+        if status == 401:
+            partes.append("Verifique a autorização e conecte novamente a conta Google.")
+        elif motivo in orientacoes:
+            partes.append(orientacoes[motivo])
+        elif status == 403:
+            partes.append("Verifique a permissão da conta, a pasta e a configuração da API.")
+        return " ".join(partes)
+    if isinstance(exc, TimeoutError) or "timed out" in str(exc).lower():
+        return "Tempo de conexão com o Google Drive excedido. Verifique a internet e tente novamente."
+    if isinstance(exc, (ConnectionError, OSError)):
+        return f"Não foi possível conectar ao Google Drive. Verifique a internet: {exc}"
+    return f"Falha na comunicação com o Google Drive: {exc}"
+
+
+def enviar_backup_banco_para_drive_usuario(timeout: int | None = None, cancelar=None, credenciais=None) -> tuple[bool, str]:
     """Cria um backup versionado do banco local na pasta Oficina_Backup do Drive do usuário."""
     if not os.path.exists(CAMINHO_BANCO):
         return False, "Banco local não encontrado para backup."
 
-    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
+    creds, msg = (credenciais, "OK") if credenciais is not None else _obter_credenciais_google_drive_usuario(
+        interativo=False, timeout=timeout, cancelar=cancelar
+    )
     if not creds:
         return False, msg
 
     if google_build is None or MediaFileUpload is None:
         return False, "Dependências Google Drive ausentes para upload do backup."
 
+    arquivo_temporario = None
+    media = None
     try:
-        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
-        folder_id = _obter_ou_criar_pasta_backup_drive_usuario(service)
+        if cancelar is not None and cancelar.is_set():
+            return False, "Operação cancelada."
+        service = _servico_drive_com_timeout(creds, timeout)
+        folder_id = _obter_ou_criar_pasta_backup_drive_usuario(service, cancelar=cancelar)
 
         carimbo = datetime.now().strftime("%Y%m%d_%H%M%S")
         nome_backup = f"oficina_backup_{carimbo}.db"
-        media = MediaFileUpload(CAMINHO_BANCO, mimetype="application/octet-stream", resumable=False)
-        service.files().create(
+        fd, arquivo_temporario = tempfile.mkstemp(
+            prefix="oficina_backup_temporario_", suffix=".db", dir=os.path.dirname(os.path.abspath(CAMINHO_BANCO))
+        )
+        os.close(fd)
+        from pathlib import Path
+        origem = sqlite3.connect(Path(CAMINHO_BANCO).resolve().as_uri() + "?mode=ro", uri=True, timeout=timeout or 10)
+        limite_copia = time.monotonic() + (timeout or 60)
+
+        def verificar_copia(_status, _restantes, _total):
+            if cancelar is not None and cancelar.is_set():
+                raise InterruptedError("Operação cancelada.")
+            if time.monotonic() >= limite_copia:
+                raise TimeoutError("Tempo excedido ao preparar cópia do banco.")
+
+        try:
+            destino = sqlite3.connect(arquivo_temporario, timeout=timeout or 10)
+            try:
+                origem.backup(destino, pages=64, progress=verificar_copia, sleep=0.05)
+            finally:
+                destino.close()
+        finally:
+            origem.close()
+        media = MediaFileUpload(
+            arquivo_temporario, mimetype="application/octet-stream",
+            chunksize=256 * 1024, resumable=True,
+        )
+        if cancelar is not None and cancelar.is_set():
+            return False, "Operação cancelada."
+        requisicao = service.files().create(
             body={"name": nome_backup, "parents": [folder_id]},
             media_body=media,
             fields="id",
-        ).execute()
+        )
+        resposta = None
+        while resposta is None:
+            if cancelar is not None and cancelar.is_set():
+                return False, "Operação cancelada. Uma transferência iniciada pode ter sido concluída."
+            _status, resposta = requisicao.next_chunk(num_retries=0)
         return True, f"Backup enviado para o Drive: {nome_backup}"
+    except InterruptedError:
+        return False, "Operação cancelada."
     except Exception as e:
-        return False, f"Falha ao enviar backup para o Drive do usuário: {e}"
+        return False, _mensagem_erro_backup_drive(e)
+    finally:
+        try:
+            if media is not None:
+                media.stream().close()
+        finally:
+            if arquivo_temporario:
+                try:
+                    os.remove(arquivo_temporario)
+                except OSError as exc:
+                    raise OSError(
+                        f"O backup pode ter sido enviado, mas a cópia temporária não pôde ser removida: {arquivo_temporario}"
+                    ) from exc
 
 
-def listar_backups_banco_drive_usuario(limit: int = 50) -> tuple[bool, list[dict], str]:
+def listar_backups_banco_drive_usuario(limit: int = 50, timeout: int | None = None, cancelar=None) -> tuple[bool, list[dict], str]:
     """Lista backups .db da pasta Oficina_Backup no Drive pessoal autenticado."""
-    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
+    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False, timeout=timeout, cancelar=cancelar)
     if not creds:
         return False, [], msg
 
@@ -2311,8 +2476,10 @@ def listar_backups_banco_drive_usuario(limit: int = 50) -> tuple[bool, list[dict
         return False, [], "Dependência google-api-python-client não encontrada."
 
     try:
-        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
-        folder_id = _obter_ou_criar_pasta_backup_drive_usuario(service)
+        if cancelar is not None and cancelar.is_set():
+            return False, [], "Operação cancelada."
+        service = _servico_drive_com_timeout(creds, timeout)
+        folder_id = _obter_ou_criar_pasta_backup_drive_usuario(service, cancelar=cancelar)
         limite = max(1, min(int(limit or 50), 200))
         q = f"name contains '.db' and trashed=false and '{folder_id}' in parents"
         arquivos = (
@@ -2327,6 +2494,8 @@ def listar_backups_banco_drive_usuario(limit: int = 50) -> tuple[bool, list[dict
             .get("files", [])
         )
 
+        if cancelar is not None and cancelar.is_set():
+            return False, [], "Operação cancelada."
         saida: list[dict] = []
         for item in arquivos:
             nome = str(item.get("name") or "")
@@ -2349,55 +2518,74 @@ def listar_backups_banco_drive_usuario(limit: int = 50) -> tuple[bool, list[dict
             )
 
         return True, saida, "OK"
+    except InterruptedError:
+        return False, [], "Operação cancelada."
     except Exception as e:
-        return False, [], f"Falha ao listar backups no Drive do usuário: {e}"
+        return False, [], _mensagem_erro_backup_drive(e)
 
 
-def restaurar_backup_banco_drive_usuario(file_id: str, file_name: str = "") -> tuple[bool, str]:
-    """Baixa um backup .db selecionado do Drive e substitui o banco local com segurança."""
+def restaurar_backup_banco_drive_usuario(file_id: str, file_name: str = "",
+                                         timeout: int | None = None, cancelar=None) -> tuple[bool, str]:
+    """Baixa, valida e aplica o backup apenas quando o banco está livre."""
     fid = str(file_id or "").strip()
     if not fid:
         return False, "Backup inválido: arquivo não selecionado."
 
-    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
+    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False, timeout=timeout, cancelar=cancelar)
     if not creds:
         return False, msg
 
     if google_build is None or MediaIoBaseDownload is None:
         return False, "Dependências Google Drive ausentes para restauração."
 
+    arquivo_temporario = None
     try:
-        import io
+        from drive_restauracao import aplicar_backup
 
-        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
+        prazo = time.monotonic() + (timeout or 60)
+        if cancelar is not None and cancelar.is_set():
+            return False, "Operação cancelada."
+        service = _servico_drive_com_timeout(creds, timeout)
         req = service.files().get_media(fileId=fid)
-
-        buffer = io.BytesIO()
-        downloader = MediaIoBaseDownload(buffer, req)
-        done = False
-        while not done:
-            _status, done = downloader.next_chunk()
-
-        conteudo = buffer.getvalue()
-        if not conteudo:
-            return False, "Arquivo baixado do Drive está vazio."
-
-        pasta_backup = os.path.join(os.path.dirname(CAMINHO_BANCO), "backup_db")
-        os.makedirs(pasta_backup, exist_ok=True)
-        carimbo = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        if os.path.exists(CAMINHO_BANCO):
-            copia_previa = os.path.join(pasta_backup, f"pre_drive_restore_{carimbo}.db")
-            shutil.copy2(CAMINHO_BANCO, copia_previa)
-
-        with open(CAMINHO_BANCO, "wb") as f:
-            f.write(conteudo)
-
-        inicializar_banco()
+        fd, arquivo_temporario = tempfile.mkstemp(
+            prefix="oficina_restore_temporario_", suffix=".db",
+            dir=os.path.dirname(os.path.abspath(CAMINHO_BANCO)),
+        )
+        with os.fdopen(fd, "wb") as arquivo:
+            downloader = MediaIoBaseDownload(arquivo, req, chunksize=256 * 1024)
+            done = False
+            while not done:
+                if cancelar is not None and cancelar.is_set():
+                    raise InterruptedError("Operação cancelada.")
+                if time.monotonic() >= prazo:
+                    raise TimeoutError("Tempo de restauração excedido.")
+                _status, done = downloader.next_chunk(num_retries=0)
+            arquivo.flush()
+            os.fsync(arquivo.fileno())
+        restante = prazo - time.monotonic()
+        if restante <= 0:
+            raise TimeoutError("Tempo de restauração excedido.")
+        try:
+            copia = aplicar_backup(
+                arquivo_temporario, CAMINHO_BANCO, cancelar=cancelar,
+                timeout=restante,
+            )
+        except (InterruptedError, TimeoutError):
+            raise
+        except Exception as e:
+            return False, f"Falha ao validar ou aplicar o backup: {e}"
         nome = str(file_name or "backup.db").strip() or "backup.db"
-        return True, f"Backup restaurado com sucesso: {nome}"
+        return True, f"Backup restaurado: {nome}. Cópia anterior: {copia}. Reinicie a aplicação."
+    except InterruptedError:
+        return False, "Operação cancelada."
     except Exception as e:
-        return False, f"Falha ao restaurar backup do Drive: {e}"
+        return False, _mensagem_erro_backup_drive(e)
+    finally:
+        if arquivo_temporario and os.path.exists(arquivo_temporario):
+            try:
+                os.remove(arquivo_temporario)
+            except OSError as exc:
+                raise OSError(f"Não foi possível remover o arquivo temporário de restauração: {arquivo_temporario}") from exc
 
 
 def enviar_arquivo_para_drive_usuario(caminho_local: str, pasta_remota: str = "Oficina de Pesca - Arquivos") -> tuple[bool, str]:
@@ -2674,109 +2862,11 @@ def enviar_backup_nuvem(email_cliente: str, usuario_admin: str, senha_admin: str
         return False, f"Falha ao enviar backup para nuvem: {e}"
 
 def sincronizar_dados_da_nuvem(usuario_admin: str, senha_admin: str) -> tuple[bool, str]:
-    """Baixa o banco mais recente do Google Drive (via OAuth2) e atualiza o arquivo local."""
-    import io
-    import shutil as _shutil
-
-    # ── Verifica bibliotecas ──────────────────────────────────────────────────
-    if google_build is None or MediaIoBaseDownload is None:
-        return False, (
-            "Biblioteca google-api-python-client não instalada.\n"
-            "Execute: pip install google-api-python-client"
-        )
-
-    # ── Obtém credenciais salvas (não-interativo) ─────────────────────────────
-    creds, msg_creds = _obter_credenciais_google_drive_usuario(interativo=False)
-    if creds is None:
-        return False, (
-            msg_creds
-            or "Você ainda não está conectado ao Google Drive.\n"
-               "Use o botão 'Entrar no Google Drive' em Dados da Oficina para autenticar."
-        )
-
-    try:
-        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
-
-        # Localiza pasta "Oficina de Pesca - Dados"
-        folder_query = (
-            "mimeType='application/vnd.google-apps.folder' "
-            "and name='Oficina de Pesca - Dados' "
-            "and trashed=false"
-        )
-        folders = (
-            service.files()
-            .list(q=folder_query, fields="files(id,name)", pageSize=1)
-            .execute()
-            .get("files", [])
-        )
-        if not folders:
-            return False, (
-                "Pasta 'Oficina de Pesca - Dados' não encontrada no Google Drive.\n"
-                "Faça um backup primeiro usando 'Entrar no Google Drive'."
-            )
-
-        folder_id = str(folders[0]["id"])
-
-        # Busca arquivos .db na pasta, ordenados pelo mais recente
-        file_query = (
-            f"(name='oficina.db' or name contains '.db') "
-            f"and trashed=false "
-            f"and '{folder_id}' in parents"
-        )
-        files = (
-            service.files()
-            .list(
-                q=file_query,
-                fields="files(id,name,modifiedTime)",
-                orderBy="modifiedTime desc",
-                pageSize=10,
-            )
-            .execute()
-            .get("files", [])
-        )
-        if not files:
-            return False, (
-                "Nenhum arquivo de banco de dados (.db) encontrado na pasta "
-                "'Oficina de Pesca - Dados' do Google Drive."
-            )
-
-        file_meta = files[0]
-        file_id = str(file_meta["id"])
-        file_name = str(file_meta.get("name", "oficina.db"))
-
-        # Faz o download
-        req = service.files().get_media(fileId=file_id)
-        buffer = io.BytesIO()
-        downloader = MediaIoBaseDownload(buffer, req)
-        done = False
-        while not done:
-            _status, done = downloader.next_chunk()
-
-        conteudo = buffer.getvalue()
-        if not conteudo:
-            return False, "Arquivo baixado do Drive está vazio."
-
-        # Salva backup do banco atual antes de substituir
-        carimbo = datetime.now().strftime("%Y%m%d_%H%M%S")
-        pasta_backup = os.path.join(os.path.dirname(CAMINHO_BANCO), "backup_db")
-        os.makedirs(pasta_backup, exist_ok=True)
-        backup_local_pre = os.path.join(pasta_backup, f"pre_sync_{carimbo}.db")
-        if os.path.exists(CAMINHO_BANCO):
-            _shutil.copy2(CAMINHO_BANCO, backup_local_pre)
-
-        with open(CAMINHO_BANCO, "wb") as f:
-            f.write(conteudo)
-
-        return True, (
-            f"Sincronização concluída!\n"
-            f"Arquivo '{file_name}' baixado do Google Drive.\n"
-            f"Backup anterior salvo em backup_db/pre_sync_{carimbo}.db"
-        )
-
-    except Exception as e:
-        _log = get_logger("cloud-sync")
-        _log.warning("Falha ao sincronizar via Google Drive API: %s", e)
-        return False, f"Falha ao sincronizar com o Google Drive: {e}"
+    """Bloqueia a restauração antiga enquanto a troca não for segura."""
+    return False, (
+        "Restauração do banco bloqueada por segurança: não há exclusividade "
+        "comprovada durante a substituição. Nenhum banco foi alterado."
+    )
 
 
 def enviar_backup_nuvem_api_key(email_cliente: str, api_key: str, origem: str = "desktop_auto") -> tuple[bool, str]:
@@ -2888,136 +2978,16 @@ def _verificar_versao_banco_drive(service, folder_id: str) -> tuple[float, bool]
 
 
 def sincronizar_hibrido_banco_drive() -> tuple[bool, str]:
-    """
-    Sincronizacao híbrida com verificação de versão:
-    - Se local é mais novo: faz upload
-    - Se nuvem é mais nova: faz download  
-    - Mantém ID do arquivo Drive persistente para o APK Android
-    """
-    if not os.path.exists(CAMINHO_BANCO):
-        return False, "Banco local não encontrado."
-
-    creds, msg = _obter_credenciais_google_drive_usuario(interativo=False)
-    if not creds:
-        return False, "Usuário não autenticado no Google Drive."
-
-    if google_build is None or MediaFileUpload is None:
-        return False, "Dependências Google Drive ausentes."
-
-    try:
-        service = google_build("drive", "v3", credentials=creds, cache_discovery=False)
-
-        # Garante pasta Oficina_Backup (nao a anterior 'Oficina de Pesca - Dados')
-        folder_query = "mimeType='application/vnd.google-apps.folder' and name='Oficina_Backup' and trashed=false"
-        folders = service.files().list(q=folder_query, fields="files(id,name)", pageSize=1).execute().get("files", [])
-        if folders:
-            folder_id = str(folders[0]["id"])
-        else:
-            pasta = service.files().create(
-                body={"name": "Oficina_Backup", "mimeType": "application/vnd.google-apps.folder"},
-                fields="id",
-            ).execute()
-            folder_id = str(pasta["id"])
-
-        # Recupera ou cria arquivo e salva ID
-        file_id = _obter_ou_salvar_id_arquivo_drive(service, folder_id, "oficina.db")
-        if not file_id:
-            # Arquivo nao existe ainda, faz criacao inicial
-            media = MediaFileUpload(CAMINHO_BANCO, mimetype="application/octet-stream", resumable=False)
-            arquivo = service.files().create(
-                body={"name": "oficina.db", "parents": [folder_id]},
-                media_body=media,
-                fields="id,webViewLink",
-            ).execute()
-            file_id = str(arquivo["id"])
-            cfg = obter_config_backup_nuvem()
-            cfg["drive_banco_file_id"] = file_id
-            cfg["drive_banco_link"] = str(arquivo.get("webViewLink", ""))
-            return True, "Banco criado no Google Drive (Oficina_Backup)."
-
-        # Verifica versoes
-        timestamp_nuvem, existe_na_nuvem = _verificar_versao_banco_drive(service, folder_id)
-        timestamp_local = os.path.getmtime(CAMINHO_BANCO)
-
-        if timestamp_local > timestamp_nuvem:
-            # Local é mais recente: upload
-            media = MediaFileUpload(CAMINHO_BANCO, mimetype="application/octet-stream", resumable=False)
-            service.files().update(fileId=file_id, media_body=media).execute()
-            try:
-                publicar_evento_ponte_firebase_para_apk(
-                    "desktop_drive_synced",
-                    {
-                        "db_mtime": int(timestamp_local),
-                        "flow": "pc_to_apk",
-                    },
-                )
-            except Exception:
-                pass
-            return True, "Banco sincronizado (upload para nuvem)."
-        elif timestamp_nuvem > timestamp_local and existe_na_nuvem:
-            # Nuvem é mais recente: download
-            request = service.files().get_media(fileId=file_id)
-            with open(CAMINHO_BANCO, "wb") as f:
-                f.write(request.execute())
-            try:
-                # Após receber mudança (ex.: vinda do APK pela ponte), atualiza observabilidade no Firebase.
-                publicar_evento_ponte_firebase_para_apk(
-                    "desktop_applied_remote",
-                    {
-                        "db_mtime": int(os.path.getmtime(CAMINHO_BANCO)) if os.path.exists(CAMINHO_BANCO) else 0,
-                        "flow": "apk_to_pc",
-                    },
-                )
-            except Exception:
-                pass
-            return True, "Banco sincronizado (download da nuvem)."
-        else:
-            # Versoes iguais
-            return True, "Banco já está sincronizado."
-    except Exception as e:
-        return False, f"Erro na sincronizacao híbrida: {e}"
+    """Bloqueia a sincronização antiga até que a troca do banco seja segura."""
+    return False, (
+        "Sincronização híbrida bloqueada por segurança: a exclusividade durante "
+        "a substituição do banco ainda não foi comprovada."
+    )
 
 
 def iniciar_sincronizacao_hibrida_nuvem() -> tuple[bool, str]:
-    """
-    Inicia background thread de sincronizacao híbrida com verificacao de versao.
-    Só executada apos autenticacao manual do usuario via botao.
-    """
-    global _CLOUD_SYNC_THREAD, _CLOUD_SYNC_STARTED
-    if _CLOUD_SYNC_STARTED and _CLOUD_SYNC_THREAD and _CLOUD_SYNC_THREAD.is_alive():
-        return True, "Sincronizacao híbrida já está ativa."
-
-    cfg = obter_config_backup_nuvem()
-    if not cfg["habilitado"]:
-        return False, "Backup em nuvem desabilitado no config.cfg."
-    if not cfg["auto_sync"]:
-        return False, "Sincronizacao automática desabilitada no config.cfg."
-
-    creds, _msg = _obter_credenciais_google_drive_usuario(interativo=False)
-    if not creds:
-        return False, "Usuário não autenticado no Google Drive."
-
-    intervalo = int(cfg["sync_interval_seg"])
-    logger = get_logger("cloud-sync-hybrid")
-
-    def _worker():
-        while True:
-            try:
-                if os.path.exists(CAMINHO_BANCO):
-                    ok, msg = sincronizar_hibrido_banco_drive()
-                    if ok:
-                        logger.info(msg)
-                    else:
-                        logger.warning(msg)
-                time.sleep(intervalo)
-            except Exception as e:
-                logger.exception("Falha no loop de sincronizacao híbrida: %s", e)
-                time.sleep(max(intervalo, 30))
-
-    _CLOUD_SYNC_THREAD = threading.Thread(target=_worker, daemon=True, name="ofp-cloud-sync-hybrid")
-    _CLOUD_SYNC_THREAD.start()
-    _CLOUD_SYNC_STARTED = True
-    return True, "Sincronizacao híbrida em background iniciada."
+    """Não inicia a sincronização antiga enquanto ela não for segura."""
+    return sincronizar_hibrido_banco_drive()
 
 
 def iniciar_sincronizacao_automatica_nuvem() -> tuple[bool, str]:

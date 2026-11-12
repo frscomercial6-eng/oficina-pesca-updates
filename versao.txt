@@ -1,2 +1,2 @@
-versao=1.0.66
-novidades=v1.0.66: pagamentos mistos idempotentes, entrega sem depender do PDF, arquivamento rastreável de O.S. e atualização validada por SHA-256.
+versao=1.0.67
+novidades=v1.0.67: melhorias no PDV e Busca Vista. Restauração e sincronização automática temporariamente bloqueadas por segurança.

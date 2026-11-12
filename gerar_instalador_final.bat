@@ -16,6 +16,12 @@ if not exist "%VENV_PY%" (
   echo [ERRO] Python da venv nao encontrado: %VENV_PY%
   exit /b 1
 )
+"%VENV_PY%" -c "import pypdf" >nul 2>nul
+if errorlevel 1 (
+  echo [ERRO] Dependencia de leitura PDF ausente na venv.
+  echo        Rode: .venv\Scripts\python.exe -m pip install -r requirements.txt
+  exit /b 1
+)
 powershell -NoProfile -Command "if (Test-Path '%ISCC_EXE%') { exit 0 } else { exit 1 }"
 if errorlevel 1 (
   echo [ERRO] Inno Setup nao encontrado.
@@ -60,6 +66,7 @@ if exist "static" set "PYI_OPTIONAL=!PYI_OPTIONAL! --add-data ""static;static"""
   --collect-all customtkinter ^
   --collect-all reportlab ^
   --collect-all fpdf ^
+  --collect-all pypdf ^
   --hidden-import menu ^
   --hidden-import config ^
   --hidden-import tela_planos ^

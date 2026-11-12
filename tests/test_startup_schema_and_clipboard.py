@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +12,43 @@ from unittest.mock import patch
 import config
 import mestre_build
 import tela_os
+
+
+def test_build_windows_rejeita_credenciais_em_assets(tmp_path):
+    assets = tmp_path / "assets"
+    nested = assets / "nested"
+    nested.mkdir(parents=True)
+    (nested / "client_secret_desktop.json").write_text("sintetico", encoding="utf-8")
+    (nested / "token.json").write_text("sintetico", encoding="utf-8")
+    (nested / "logo.png").write_bytes(b"imagem de teste")
+    encontrados = mestre_build._arquivos_sensiveis_assets(str(assets))
+    assert {Path(item).name for item in encontrados} == {"client_secret_desktop.json", "token.json"}
+    assert all("client_secret" not in source for source, _ in mestre_build.RESOURCE_SPECS)
+
+
+def test_build_rejeita_segredos_em_recursos_com_nomes_disfarcados(tmp_path):
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "settings.json").write_text('{"refresh_token": "teste-sintetico"}', encoding="utf-8")
+    (static / "settings.cfg").write_text("[teste]\nsenha=teste-sintetico\n", encoding="utf-8")
+    (static / "chave.pem").write_text(
+        "-----BEGIN PRIVATE KEY-----\n" + ("A" * 64 + "\n") * 3 + "-----END PRIVATE KEY-----",
+        encoding="utf-8",
+    )
+    (static / "certificado.pem").write_text("-----BEGIN CERTIFICATE-----", encoding="utf-8")
+    encontrados = mestre_build._arquivos_sensiveis_assets(str(static))
+    assert {Path(item).name for item in encontrados} == {"settings.json", "settings.cfg", "chave.pem"}
+
+
+def test_build_windows_nao_anuncia_apk_nao_gerado(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["mestre_build.py", "--target", "windows"])
+    Path("versao.json").write_text(json.dumps({"apk": {"versao": "1.0.66", "canal": "nativo"}}), encoding="utf-8")
+    mestre_build.atualizar_versao_json("1.0.67")
+    for path in ("versao.json", "version.json"):
+        dados = json.loads(Path(path).read_text(encoding="utf-8"))
+        assert dados["versao"] == "1.0.67"
+        assert dados["apk"]["versao"] == "1.0.66"
 
 
 class FakeClipboardWindow:
@@ -138,6 +177,14 @@ class TestStartupDatabaseSchema(unittest.TestCase):
 
 
 class TestEscutaClipboard(unittest.TestCase):
+    def test_initialization_does_not_schedule_clipboard_or_save_links(self):
+        window = FakeClipboardWindow("https://example.test/receipt.pdf")
+
+        tela_os.FrmOS.setup_campos(window)
+
+        self.assertEqual(window.callbacks, [])
+        self.assertEqual(window.saved_links, [])
+
     def test_uses_native_clipboard_and_does_not_repeat_same_pdf(self):
         window = FakeClipboardWindow("https://example.test/receipt.pdf")
 

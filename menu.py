@@ -9,6 +9,7 @@ APK_DOWNLOAD_URL = "https://github.com/frs-oficinadepesca/oficinadepesca/release
 #         ...
 #         ctk.CTkButton(self, text="📱 Baixar App Celular (APK)", fg_color="#27ae60", font=("Arial", 13, "bold"), command=lambda: webbrowser.open(APK_DOWNLOAD_URL)).pack(pady=(0, 10))
 import tela_os
+import rede_validacao
 import firebase_admin
 from firebase_admin import credentials
 import customtkinter as ctk
@@ -22,9 +23,12 @@ import webbrowser
 import socket
 import json
 import threading
+import queue
+import time
 import configparser
 import traceback
 
+import config
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
 from datetime import datetime, timedelta
@@ -108,7 +112,6 @@ from config import (
     garantir_banco_no_drive_usuario,
     enviar_backup_banco_para_drive_usuario,
     listar_backups_banco_drive_usuario,
-    restaurar_backup_banco_drive_usuario,
     iniciar_sincronizacao_hibrida_nuvem,
     renovar_token_acesso_drive_se_necessario,
     eh_versao_mais_nova,
@@ -940,8 +943,18 @@ class FrmDadosOficina(ctk.CTkToplevel):
             # Não interrompe o fluxo caso falhe
 
     def __init__(self, master):
+        self._timers_dados = set()
         super().__init__(master)
         self._encerrando_aplicacao = False
+        self._backup_cancelamento = None
+        self._backup_thread = None
+        self._backup_fila = queue.Queue()
+        self._backup_prazo = 0.0
+        self._backup_expirou = False
+        self._backup_somente_conectar = False
+        self._restauro_cancelamento = None
+        self._restauro_thread = None
+        self._restauro_fechar = False
         self._status_motor_fiscal_ativo = None
         self.title("Dados da Oficina")
         self.geometry("980x760")
@@ -1070,22 +1083,37 @@ class FrmDadosOficina(ctk.CTkToplevel):
 
         f_drive_actions = ctk.CTkFrame(form, fg_color="transparent")
         f_drive_actions.grid(row=linha, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
-        ctk.CTkButton(
+        self.btn_backup_drive = ctk.CTkButton(
             f_drive_actions,
             text=t("ui_backup_para_o_drive"),
             width=200,
             fg_color="#27ae60",
             hover_color="#1f8d4d",
             command=self.backup_para_drive_manual,
-        ).grid(row=0, column=0, padx=(0, 8))
-        ctk.CTkButton(
+        )
+        self.btn_backup_drive.grid(row=0, column=0, padx=(0, 8))
+        self.btn_restaurar_drive = ctk.CTkButton(
             f_drive_actions,
             text=t("ui_restaurar_do_drive"),
             width=200,
             fg_color="#d68910",
             hover_color="#b9770e",
             command=self.restaurar_do_drive_manual,
-        ).grid(row=0, column=1)
+        )
+        self.btn_restaurar_drive.grid(row=0, column=1)
+        self.btn_cancelar_backup = ctk.CTkButton(
+            f_drive_actions, text="Cancelar backup", width=140,
+            command=self._cancelar_backup_drive, state="disabled",
+        )
+        self.btn_cancelar_backup.grid(row=0, column=2, padx=(8, 0))
+        self.btn_autorizar_backup = ctk.CTkButton(
+            f_drive_actions, text="Autorizar Google", width=140,
+            command=self._autorizar_backup_drive, state="disabled",
+        )
+        self.btn_autorizar_backup.grid(row=0, column=3, padx=(8, 0))
+        linha += 1
+        self.lbl_status_backup = ctk.CTkLabel(form, text="", anchor="w", text_color="#cbd5e1")
+        self.lbl_status_backup.grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10)
         linha += 1
 
         ctk.CTkFrame(form, height=2, fg_color="#2e4a6a").grid(row=linha, column=0, columnspan=2, sticky="ew", padx=10, pady=(8, 6))
@@ -1339,10 +1367,33 @@ class FrmDadosOficina(ctk.CTkToplevel):
 
         threading.Thread(target=_worker_fiscal, daemon=True, name="ofp-dados-oficina-fiscal").start()
 
+    def after(self, ms, func=None, *args):
+        if func is None:
+            return super().after(ms)
+
+        def executar():
+            self._timers_dados.discard(identificador)
+            func(*args)
+
+        identificador = super().after(ms, executar)
+        self._timers_dados.add(identificador)
+        return identificador
+
+    def after_cancel(self, identificador):
+        self._timers_dados.discard(identificador)
+        return super().after_cancel(identificador)
+
     def destroy(self):
+        if self._restauro_cancelamento is not None:
+            self._restauro_fechar = True
+            self._restauro_cancelamento.set()
+            self.lbl_status_backup.configure(text="Cancelando restauração; aguardando término seguro...")
+            return
         self._encerrando_aplicacao = True
+        if self._backup_cancelamento is not None:
+            self._backup_cancelamento.set()
         try:
-            for after_id in self.tk.call("after", "info"):
+            for after_id in tuple(self._timers_dados):
                 try:
                     self.after_cancel(after_id)
                 except Exception:
@@ -1792,126 +1843,144 @@ class FrmDadosOficina(ctk.CTkToplevel):
 
 
     def conectar_google_drive_oficial(self):
-        """Dispara autenticação OAuth2 e upload para o Google Drive e Firebase."""
-        email_digitado = self.ent_email.get().strip().lower()
-
-        messagebox.showinfo(
-            "Google Drive",
-            "Você será redirecionado para o Google para autorizar a sincronização",
-            parent=self,
-        )
-
-        ok_auth, msg_auth, email_autenticado = conectar_google_drive_usuario(
-            login_hint=email_digitado
-        )
-        if not ok_auth:
-            logger.warning("Falha na autenticacao Google Drive: %s", msg_auth)
-            messagebox.showwarning(
-                "Google Drive",
-                msg_auth or "Nao foi possivel autenticar com o Google Drive.",
-                parent=self,
-            )
-            return
-
-        logger.info("Autenticacao Google Drive concluida: %s", email_autenticado)
-
-        # Primeiro upload do banco de dados apos autenticacao
-        ok_sync, msg_sync = garantir_banco_no_drive_usuario()
-        if ok_sync:
-            logger.info("Banco de dados sincronizado: %s", msg_sync)
-            messagebox.showinfo(
-                "Google Drive",
-                "Sincronização configurada com sucesso!",
-                parent=self,
-            )
-            # Inicia o background sync apenas apos autenticacao manual
-            iniciar_sincronizacao_hibrida_nuvem()
-
-            # --- Sincronização com Firebase ---
-            def atualizar_firebase_rtdb():
-                import firebase_admin
-                from firebase_admin import db
-                import logging
-                try:
-                    # Sanitização do e-mail
-                    email_sanitizado = email_digitado.replace('.', '_at_').replace('@', '_at_')
-                    self.inicializar_firebase()
-                    # Buscar dados da oficina
-                    with get_db_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT nome_oficina, endereco_oficina, telefone_oficina, chave_pix, logo_path, logo_patrocinador_path FROM dados_oficina WHERE id = 1")
-                        dados_oficina = cursor.fetchone()
-                        oficina_dict = {}
-                        if dados_oficina:
-                            oficina_dict = {
-                                "nome_oficina": dados_oficina[0],
-                                "endereco_oficina": dados_oficina[1],
-                                "telefone_oficina": dados_oficina[2],
-                                "chave_pix": dados_oficina[3],
-                                "logo_path": dados_oficina[4],
-                                "logo_patrocinador_path": dados_oficina[5],
-                            }
-                        # Buscar últimas ordens de serviço
-                        cursor.execute("SELECT id_os, cliente_nome, equipamento, data_abertura, status FROM ordens_servico ORDER BY id_os DESC LIMIT 10")
-                        ordens = cursor.fetchall()
-                        ordens_list = []
-                        for row in ordens:
-                            ordens_list.append({
-                                "id": row[0], # id_os
-                                "cliente": row[1],
-                                "equipamento": row[2],
-                                "data": row[3], # data_abertura
-                                "status": row[4],
-                            })
-                    # Enviar para o Firebase
-                    ref = db.reference(f"usuarios/{email_sanitizado}/")
-                    ref.update({
-                        "dados_oficina": oficina_dict,
-                        "os": ordens_list # Nome da chave alterado para 'os' para coincidir com login.py
-                    })
-                    logger.info("Dados enviados ao Firebase Realtime Database com sucesso!")
-                except Exception as e:
-                    logger.warning(f"Falha ao sincronizar com Firebase: {e}")
-
-            atualizar_firebase_rtdb()
-            return
-
-        logger.warning("Falha no primeiro sync: %s", msg_sync)
-        messagebox.showwarning(
-            "Google Drive",
-            f"Autenticacao bem-sucedida, mas falha no sync: {msg_sync}",
-            parent=self,
-        )
-
-    def _garantir_drive_autenticado(self) -> bool:
-        if google_drive_usuario_conectado():
-            return True
-
-        autenticar = messagebox.askyesno(
-            "Google Drive",
-            "Você ainda não está autenticado no Google Drive.\n\nDeseja autenticar agora?",
-            parent=self,
-        )
-        if not autenticar:
-            return False
-
-        self.conectar_google_drive_oficial()
-        return google_drive_usuario_conectado()
+        self._iniciar_operacao_drive(somente_conectar=True)
 
     def backup_para_drive_manual(self):
-        if not self._garantir_drive_autenticado():
-            return
+        self._iniciar_operacao_drive(somente_conectar=False)
 
-        ok, msg = enviar_backup_banco_para_drive_usuario()
-        if ok:
-            messagebox.showinfo(
-                "Backup no Drive",
-                f"Backup concluído com sucesso.\n\n{msg}",
-                parent=self,
+    def _iniciar_operacao_drive(self, somente_conectar):
+        if self._restauro_cancelamento is not None:
+            return
+        if self._backup_cancelamento is not None:
+            return
+        self._backup_cancelamento = threading.Event()
+        self._backup_fila = queue.Queue()
+        self._backup_prazo = time.monotonic() + 120
+        self._backup_expirou = False
+        self._backup_somente_conectar = somente_conectar
+        self.btn_backup_drive.configure(state="disabled")
+        self.btn_restaurar_drive.configure(state="disabled")
+        self.btn_google.configure(state="disabled")
+        self.btn_cancelar_backup.configure(state="normal")
+        self.btn_autorizar_backup.configure(state="disabled")
+        texto = "Aguardando autorização Google..." if somente_conectar else "Verificando autorização e preparando backup..."
+        self.lbl_status_backup.configure(text=texto)
+        self._iniciar_worker_backup(autenticar=somente_conectar, somente_conectar=somente_conectar)
+        self.after(100, self._acompanhar_backup_drive)
+
+    def _iniciar_worker_backup(self, autenticar, somente_conectar=False):
+        cancelar = self._backup_cancelamento
+        resultados = self._backup_fila
+        email = self.ent_email.get().strip() if autenticar else ""
+
+        def executar():
+            try:
+                if autenticar:
+                    ok, msg, _email = conectar_google_drive_usuario(
+                        login_hint=email, timeout=15, cancelar=cancelar
+                    )
+                    if not ok:
+                        resultados.put(("conexao" if somente_conectar else "fim", False, msg))
+                        return
+                    if somente_conectar:
+                        resultados.put(("conexao", True, msg))
+                        return
+                creds, msg = config._obter_credenciais_google_drive_usuario(
+                    interativo=False, timeout=15, cancelar=cancelar
+                )
+                if not creds:
+                    requer_auth = "não autenticado no Google Drive" in msg or "É necessário autorizar novamente" in msg
+                    resultados.put(("autorizacao" if requer_auth else "fim", False, msg))
+                    return
+                ok, msg = enviar_backup_banco_para_drive_usuario(
+                    timeout=15, cancelar=cancelar, credenciais=creds
+                )
+                resultados.put(("fim", ok, msg))
+            except Exception as exc:
+                logger.exception("Falha na operação de backup do Google Drive")
+                resultados.put(("fim", False, config._mensagem_erro_backup_drive(exc)))
+
+        self._backup_thread = threading.Thread(target=executar, daemon=True, name="ofp-backup-drive")
+        self._backup_thread.start()
+
+    def _cancelar_backup_drive(self):
+        if self._restauro_cancelamento is not None:
+            self._restauro_cancelamento.set()
+            self.btn_cancelar_backup.configure(state="disabled")
+            self.lbl_status_backup.configure(text="Cancelamento solicitado; aguardando término seguro...")
+            return
+        if self._backup_cancelamento is not None:
+            self._backup_cancelamento.set()
+            self.btn_cancelar_backup.configure(state="disabled")
+            self.btn_autorizar_backup.configure(state="disabled")
+            self.lbl_status_backup.configure(
+                text=("Cancelamento solicitado; aguardando término da conexão."
+                      if self._backup_somente_conectar else
+                      "Cancelamento solicitado. Uma transferência já iniciada pode concluir no Drive.")
             )
-            return
 
-        messagebox.showwarning("Backup no Drive", msg or "Falha ao enviar backup para o Drive.", parent=self)
+    def _autorizar_backup_drive(self):
+        if self._backup_cancelamento is None or self._backup_cancelamento.is_set():
+            return
+        self.btn_autorizar_backup.configure(state="disabled")
+        self.lbl_status_backup.configure(text="Aguardando autorização Google (até 60 segundos)...")
+        self._iniciar_worker_backup(autenticar=True)
+
+    def _acompanhar_backup_drive(self):
+        if self._encerrando_aplicacao:
+            return
+        if time.monotonic() >= self._backup_prazo and not self._backup_cancelamento.is_set():
+            self._backup_expirou = True
+            self._cancelar_backup_drive()
+            self.lbl_status_backup.configure(text="Tempo total excedido; aguardando término da conexão.")
+        try:
+            etapa, ok, msg = self._backup_fila.get_nowait()
+        except queue.Empty:
+            if self._backup_cancelamento.is_set() and not self._backup_thread.is_alive():
+                texto = "Tempo total excedido." if self._backup_expirou else "Cancelado."
+                if not self._backup_somente_conectar:
+                    texto += " Confira no Drive se uma transferência já iniciada foi concluída."
+                self._finalizar_backup_drive(texto)
+                return
+            self.after(100, self._acompanhar_backup_drive)
+            return
+        if self._backup_cancelamento.is_set():
+            texto = "Tempo total excedido." if self._backup_expirou else "Cancelado."
+            if not self._backup_somente_conectar:
+                texto += " Confira no Drive se uma transferência já iniciada foi concluída."
+            self._finalizar_backup_drive(texto)
+            return
+        if etapa == "autorizacao":
+            self.lbl_status_backup.configure(text=f"{msg} Clique em Autorizar Google ou cancele.")
+            self.btn_autorizar_backup.configure(state="normal")
+            self.after(100, self._acompanhar_backup_drive)
+            return
+        if etapa == "conexao":
+            self._finalizar_backup_drive("Google Drive conectado." if ok else "Falha na conexão Google Drive.")
+            if ok:
+                messagebox.showinfo(
+                    "Google Drive",
+                    f"{msg}\n\nA sincronização automática permanece desativada por segurança; use o backup manual.",
+                    parent=self,
+                )
+            else:
+                messagebox.showwarning("Google Drive", msg or "Falha na conexão.", parent=self)
+            return
+        self._finalizar_backup_drive("Backup concluído." if ok else "Falha ao executar backup.")
+        if ok:
+            messagebox.showinfo("Backup no Drive", f"Backup concluído com sucesso.\n\n{msg}", parent=self)
+        else:
+            messagebox.showwarning("Backup no Drive", msg or "Falha ao enviar backup para o Drive.", parent=self)
+
+    def _finalizar_backup_drive(self, texto):
+        self._backup_cancelamento = None
+        self._backup_thread = None
+        self.btn_backup_drive.configure(state="normal")
+        self.btn_restaurar_drive.configure(state="normal")
+        self.btn_google.configure(state="normal")
+        self.btn_cancelar_backup.configure(state="disabled")
+        self.btn_autorizar_backup.configure(state="disabled")
+        self.lbl_status_backup.configure(text=texto)
 
     def _selecionar_backup_drive(self, backups: list[dict]) -> dict | None:
         if not backups:
@@ -1980,49 +2049,111 @@ class FrmDadosOficina(ctk.CTkToplevel):
         return retorno["value"]
 
     def restaurar_do_drive_manual(self):
-        if not self._garantir_drive_autenticado():
+        if self._restauro_cancelamento is not None or self._backup_cancelamento is not None:
             return
+        self._restauro_cancelamento = threading.Event()
+        self._restauro_fila = queue.Queue()
+        self._restauro_prazo = time.monotonic() + 120
+        self._restauro_expirou = False
+        self.btn_backup_drive.configure(state="disabled")
+        self.btn_restaurar_drive.configure(state="disabled")
+        self.btn_google.configure(state="disabled")
+        self.btn_cancelar_backup.configure(state="normal", text="Cancelar")
+        self.lbl_status_backup.configure(text="Consultando backups; restauração bloqueada por segurança.")
+        self._iniciar_worker_restauro("listar")
+        self.after(100, self._acompanhar_restauro)
 
-        ok_list, backups, msg_list = listar_backups_banco_drive_usuario(limit=80)
-        if not ok_list:
-            messagebox.showwarning("Restaurar do Drive", msg_list or "Falha ao listar backups no Drive.", parent=self)
+    def _iniciar_worker_restauro(self, etapa):
+        cancelar = self._restauro_cancelamento
+        resultados = self._restauro_fila
+        email = self.ent_email.get().strip()
+
+        def executar():
+            try:
+                if etapa == "listar":
+                    ok, dados, msg = listar_backups_banco_drive_usuario(
+                        limit=80, timeout=15, cancelar=cancelar
+                    )
+                elif etapa == "autorizar":
+                    ok, msg, _ = conectar_google_drive_usuario(
+                        login_hint=email, timeout=15, cancelar=cancelar
+                    )
+                    dados = None
+                resultados.put((etapa, ok, dados, msg))
+            except Exception as exc:
+                logger.exception("Falha na restauração do Google Drive")
+                resultados.put((etapa, False, None, f"Falha na restauração: {exc}"))
+
+        self._restauro_thread = threading.Thread(target=executar, daemon=True, name="ofp-restauro-drive")
+        self._restauro_thread.start()
+
+    def _acompanhar_restauro(self):
+        if self._encerrando_aplicacao:
             return
-
-        if not backups:
+        if time.monotonic() >= self._restauro_prazo and not self._restauro_cancelamento.is_set():
+            self._restauro_expirou = True
+            self._cancelar_backup_drive()
+        try:
+            etapa, ok, dados, msg = self._restauro_fila.get_nowait()
+        except queue.Empty:
+            self.after(100, self._acompanhar_restauro)
+            return
+        if self._restauro_cancelamento.is_set():
+            texto = "Tempo total excedido." if self._restauro_expirou else "Restauração cancelada."
+            fechar = self._restauro_fechar
+            self._finalizar_restauro(texto)
+            if not ok and msg and "cancelad" not in msg.lower():
+                messagebox.showwarning("Restaurar do Drive", msg, parent=self)
+            if fechar:
+                self.destroy()
+            return
+        if not ok:
+            requer_auth = etapa == "listar" and (
+                "não autenticado no Google Drive" in msg or "É necessário autorizar novamente" in msg
+            )
+            if requer_auth and messagebox.askyesno("Google Drive", f"{msg}\n\nAutorizar agora?", parent=self):
+                self.lbl_status_backup.configure(text="Aguardando autorização Google...")
+                self._iniciar_worker_restauro("autorizar")
+                self.after(100, self._acompanhar_restauro)
+                return
+            self._finalizar_restauro("Falha na restauração.")
+            messagebox.showwarning("Restaurar do Drive", msg, parent=self)
+            return
+        if etapa == "autorizar":
+            self._iniciar_worker_restauro("listar")
+            self.after(100, self._acompanhar_restauro)
+            return
+        if not dados:
+            self._finalizar_restauro("Nenhum backup encontrado.")
             messagebox.showinfo("Restaurar do Drive", "Nenhum arquivo .db encontrado na pasta Oficina_Backup.", parent=self)
             return
-
-        escolhido = self._selecionar_backup_drive(backups)
+        escolhido = self._selecionar_backup_drive(dados)
+        if self._restauro_cancelamento.is_set():
+            fechar = self._restauro_fechar
+            self._finalizar_restauro("Restauração cancelada.")
+            if fechar:
+                self.destroy()
+            return
         if not escolhido:
+            self._finalizar_restauro("Restauração cancelada.")
             return
-
-        confirmar = messagebox.askyesno(
-            "Confirmar restauracao",
-            "Isso vai substituir o banco atual pelos dados do backup selecionado no Drive.\n\nDeseja continuar?",
+        self._finalizar_restauro("Restauração indisponível por segurança.")
+        messagebox.showwarning(
+            "Restaurar do Drive",
+            "A restauração está temporariamente bloqueada: ainda não foi comprovado que "
+            "outros processos e tarefas da aplicação permaneçam inativos durante a troca. "
+            "Nenhum banco foi alterado.",
             parent=self,
         )
-        if not confirmar:
-            return
 
-        ok_restore, msg_restore = restaurar_backup_banco_drive_usuario(
-            str(escolhido.get("id") or ""),
-            str(escolhido.get("name") or ""),
-        )
-        if not ok_restore:
-            messagebox.showerror("Restaurar do Drive", msg_restore or "Falha ao restaurar backup do Drive.", parent=self)
-            return
-
-        reiniciar = messagebox.askyesno(
-            "Backup restaurado",
-            f"{msg_restore}\n\nDeseja fechar o sistema agora para reabrir com os dados restaurados?",
-            parent=self,
-        )
-        if reiniciar:
-            encerrar = getattr(self.master, "_encerrar_aplicacao", None)
-            if callable(encerrar):
-                encerrar()
-                return
-            messagebox.showwarning("Encerramento", "Não foi possível acionar o encerramento centralizado.", parent=self)
+    def _finalizar_restauro(self, texto):
+        self._restauro_cancelamento = None
+        self._restauro_thread = None
+        self.btn_backup_drive.configure(state="normal")
+        self.btn_restaurar_drive.configure(state="normal")
+        self.btn_google.configure(state="normal")
+        self.btn_cancelar_backup.configure(state="disabled", text="Cancelar backup")
+        self.lbl_status_backup.configure(text=texto)
 
     def salvar(self):
         nome = self.ent_nome.get().strip()
@@ -2959,6 +3090,9 @@ class FrmMenu(ctk.CTk):
         self._atualizar_status_nuvem()
 
     def _atualizar_status_nuvem(self):
+        if rede_validacao.ativo():
+            self.lbl_status_nuvem.configure(text="Validação isolada: nuvem bloqueada", text_color="#f1c40f")
+            return
         def _worker_nuvem():
             try:
                 online = checar_status_firebase()
@@ -4919,43 +5053,12 @@ class FrmMenu(ctk.CTk):
         return ""
 
     def executar_sincronizacao_nuvem(self):
-        """Baixa o banco mais recente do Google Drive e substitui o arquivo local."""
-        import threading
-
-        if not messagebox.askyesno(
-            "Sincronizar com Google Drive",
-            "Baixar o banco de dados mais recente do Google Drive?\n\n"
-            "⚠  O banco local atual será substituído.\n"
-            "Um backup automático será salvo antes.",
+        messagebox.showwarning(
+            "Sincronização com Google Drive",
+            "A substituição do banco pela nuvem está bloqueada por segurança. "
+            "Nenhum banco foi alterado.",
             parent=self,
-        ):
-            return
-
-        def _executar():
-            ok, msg = sincronizar_dados_da_nuvem(self.usuario, self._senha_login)
-            self.after(0, lambda: _finalizar(ok, msg))
-
-        def _finalizar(ok, msg):
-            if ok:
-                messagebox.showinfo("Sincronização Concluída", msg, parent=self)
-            else:
-                nao_autenticado = any(
-                    t in (msg or "").lower()
-                    for t in ("não autenticado", "nao autenticado", "não está conectado", "nao esta conectado")
-                )
-                if nao_autenticado:
-                    if messagebox.askyesno(
-                        "Google Drive",
-                        "Você ainda não está conectado ao Google Drive.\n\n"
-                        "Deseja conectar agora?\n"
-                        "(O navegador será aberto para autenticação)",
-                        parent=self,
-                    ):
-                        self.conectar_google_drive_oficial()
-                else:
-                    messagebox.showerror("Erro na Sincronização", msg, parent=self)
-
-        threading.Thread(target=_executar, daemon=True).start()
+        )
 
     def backup_nuvem_automatico_admin(self):
         if self.role != "ADMIN" or self._backup_nuvem_executado:
