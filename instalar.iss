@@ -114,8 +114,8 @@ var
 	T: string;
 begin
 	T := S;
-	StringChangeEx(T, '\\', '\\\\', True);
-	StringChangeEx(T, '"', '\\"', True);
+	StringChangeEx(T, '\', '\\', True);
+	StringChangeEx(T, '"', '\"', True);
 	Result := T;
 end;
 
