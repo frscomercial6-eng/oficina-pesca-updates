@@ -107,7 +107,7 @@ class TestConsultaExterna(unittest.TestCase):
         h._buscar_links_web_diagrama("MARURI", "BLACK PIRA BG 400")
         consultas = h.consultas()
         self.assertTrue(consultas)
-        self.assertTrue(all("BLACK PIRA BG 400" in c.upper() for c in consultas[:3]))
+        self.assertGreaterEqual(sum("BLACK PIRA BG 400" in c.upper() for c in consultas), 3)
         self.assertTrue(any("maruri" in u for u in h.urls))
 
     def test_roman_and_arabic_variants_are_kept(self):

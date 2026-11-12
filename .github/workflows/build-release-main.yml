@@ -81,9 +81,15 @@ jobs:
           $env:LOCALAPPDATA = Join-Path $testRoot "user_data"
           $env:APPDATA = $env:LOCALAPPDATA
           $env:PYTHONDONTWRITEBYTECODE = "1"
-          python -m pytest -q --ignore=tests/test_api_auth.py
+          python -m pytest -q --ignore=tests/test_api_auth.py --ignore=tests/test_menu_inicializacao.py --ignore=tests/test_rede_validacao.py
           if ($LASTEXITCODE -ne 0) {
             throw "Testes locais/regressões falharam; build e publicação bloqueados."
+          }
+          python -m pytest -q tests/test_rede_validacao.py
+          if ($LASTEXITCODE -ne 0) { throw "Testes de isolamento de rede falharam." }
+          foreach ($perfil in @("ADMIN", "OFICINA", "VENDEDOR")) {
+            python -m pytest -q tests/test_menu_inicializacao.py -k $perfil
+            if ($LASTEXITCODE -ne 0) { throw "Teste de inicialização do perfil $perfil falhou." }
           }
           Write-Host "Testes do Desktop executados. O teste API/Supabase é independente e não foi considerado aprovado."
 
