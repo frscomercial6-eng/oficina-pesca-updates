@@ -16,11 +16,12 @@ def _executar(codigo, **alteracoes):
         "LOCALAPPDATA": str(DATA / "user_data"),
         "APPDATA": str(DATA / "user_data"),
         "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONIOENCODING": "utf-8",
     })
     env.update(alteracoes)
     return subprocess.run(
         [sys.executable, "-c", codigo], cwd=ROOT, env=env,
-        capture_output=True, text=True, timeout=15,
+        capture_output=True, text=True, encoding="utf-8", timeout=15,
     )
 
 
